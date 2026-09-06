@@ -98,7 +98,8 @@ if ($terrainValue -ne 1) {
 $requiredNativeTypes = @(
     'Vintagestory.ServerMods.GenTerra',
     'Vintagestory.ServerMods.GenRockStrataNew',
-    'Vintagestory.ServerMods.GenCaves'
+    'Vintagestory.ServerMods.GenCaves',
+    'Vintagestory.ServerMods.GenBlockLayers'
 )
 
 $nativeTypeStatus = [ordered]@{}

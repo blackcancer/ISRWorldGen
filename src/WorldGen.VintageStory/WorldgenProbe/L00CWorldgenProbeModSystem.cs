@@ -23,7 +23,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     [
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenTerra"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenRockStrataNew"),
-        new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenCaves")
+        new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenCaves"),
+        new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenBlockLayers")
     ];
 
     private readonly string instanceId = Guid.NewGuid().ToString("N");
