@@ -594,6 +594,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 {
                     IServerChunk chunk = serverApi.WorldManager.GetChunk(config.FixtureChunkX, y / chunkSize, config.FixtureChunkZ)
                         ?? throw new InvalidOperationException($"L00-C fixture chunk y={y / chunkSize} is not loaded.");
+                    chunk.Unpack_ReadOnly();
                     int index3d = MapUtil.Index3d(x, y % chunkSize, z, chunkSize, chunkSize);
                     int solid = chunk.Data.GetBlockId(index3d, BlockLayersAccess.Solid);
                     int fluid = chunk.Data.GetBlockId(index3d, BlockLayersAccess.Fluid);

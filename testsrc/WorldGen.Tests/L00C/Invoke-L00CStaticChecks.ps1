@@ -38,6 +38,7 @@ $required = @(
     'EnumWorldGenPass.PreDone',
     'preDoneHandlers.Add(metadataFinalizerHandler)',
     'for (int y = 0; y < worldHeight; y++)',
+    'chunk.Unpack_ReadOnly()',
     "canonical.Append(solid).Append(',').Append(fluid)",
     'StoreData',
     'ShutDown',
