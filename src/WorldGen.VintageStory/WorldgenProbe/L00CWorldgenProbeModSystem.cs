@@ -46,6 +46,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private readonly object runGate = new();
     private readonly object ownedColumnsGate = new();
     private readonly Dictionary<ChunkCoordinate, ColumnOwnershipState> ownedLoadedColumns = [];
+    private readonly MarkerPublicationGate markerPublication = new();
 
     private ICoreServerAPI? api;
     private IWorldManagerAPI? ownedColumnWorldManager;
@@ -68,7 +69,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private int disposalStarted;
     private bool active;
     private bool columnOwnershipClosing;
-    private bool markerCommitted;
     private long worldRunId;
 
     /// <inheritdoc />
@@ -128,7 +128,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         shutdownIssued = 0;
         stableTickCount = 0;
         haloPreparedCount = 0;
-        markerCommitted = false;
+        markerPublication.Reset();
         marker = null;
         preLightingSnapshot = null;
         initialSnapshot = null;
@@ -152,13 +152,13 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 return;
             }
 
-            marker = new ProbeMarker
+            marker = markerPublication.Begin(new ProbeMarker
             {
                 MarkerId = Guid.NewGuid().ToString("N"),
                 SavegameIdentifier = saveGame.SavegameIdentifier,
                 Version = MarkerVersion,
                 OpenCount = 1
-            };
+            });
         }
         else if (persistedMarker is null)
         {
@@ -177,7 +177,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         else
         {
             ValidateMarker(persistedMarker, saveGame);
-            marker = CopyMarker(persistedMarker);
+            marker = markerPublication.Begin(persistedMarker);
         }
 
         if (!saveGame.IsNew)
@@ -185,8 +185,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             ResolveMaterials();
             PersistedFootprintSnapshot persistedSnapshot = InspectPersistedFootprintBlocking();
             marker!.OpenCount++;
-            StoreMarker(saveGame, marker!);
-            markerCommitted = true;
+            markerPublication.Commit(payload => saveGame.StoreData(MarkerKey, payload));
             active = true;
 
             LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
@@ -198,8 +197,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ValidateReplacementPreconditions(handlers);
         ResolveMaterials();
         ApplyTargetedReplacement(handlers);
-        StoreMarker(saveGame, marker!);
-        markerCommitted = true;
+        markerPublication.Commit(payload => saveGame.StoreData(MarkerKey, payload));
         active = true;
 
         LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
@@ -1526,9 +1524,9 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void OnGameWorldSaveCore()
     {
-        if (Volatile.Read(ref disposalStarted) == 0 && markerCommitted && marker is not null)
+        if (Volatile.Read(ref disposalStarted) == 0 && marker is not null &&
+            markerPublication.SaveIfCommitted(payload => RequireApi().WorldManager.SaveGame.StoreData(MarkerKey, payload)))
         {
-            StoreMarker(RequireApi().WorldManager.SaveGame, marker);
             Log($"L00C_MARKER_SAVED instance={instanceId} marker={marker.MarkerId} open={marker.OpenCount}");
         }
     }
@@ -1558,22 +1556,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         {
             throw new InvalidOperationException("L00-C persistent marker is incompatible with this save; loading is stopped explicitly.");
         }
-    }
-
-    private static ProbeMarker CopyMarker(ProbeMarker marker)
-    {
-        return new ProbeMarker
-        {
-            MarkerId = marker.MarkerId,
-            SavegameIdentifier = marker.SavegameIdentifier,
-            Version = marker.Version,
-            OpenCount = marker.OpenCount
-        };
-    }
-
-    private static void StoreMarker(ISaveGame saveGame, ProbeMarker marker)
-    {
-        saveGame.StoreData(MarkerKey, JsonSerializer.SerializeToUtf8Bytes(marker));
     }
 
     private void LogInventory(string phase, IWorldGenHandler handlers, ISaveGame saveGame, int staleProbeHandlers, bool sameHandlerSet)
@@ -1729,7 +1711,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
 
         marker = null;
-        markerCommitted = false;
+        markerPublication.Reset();
         preLightingSnapshot = null;
         initialSnapshot = null;
         initialHaloSnapshot = null;
@@ -1817,14 +1799,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         private void Invoke(IChunkColumnGenerateRequest request) => owner.InvokeOwnedHandler(this, request);
     }
 
-    private sealed class ProbeMarker
-    {
-        public string MarkerId { get; set; } = string.Empty;
-        public string SavegameIdentifier { get; set; } = string.Empty;
-        public string Version { get; set; } = string.Empty;
-        public int OpenCount { get; set; }
-    }
-
     private readonly record struct FixtureGeometry(int ChunkSize, int RockSurface, int WaterSurface, int DividerX)
     {
         public static FixtureGeometry Create(int chunkSize, int worldHeight)
@@ -1836,6 +1810,72 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         public bool IsWall(int x, int z) => x == 0 || z == 0 || x == ChunkSize - 1 || z == ChunkSize - 1 || x == DividerX;
     }
+}
+
+internal sealed class MarkerPublicationGate
+{
+    private ProbeMarker? candidate;
+    private byte[]? committedPayload;
+
+    public bool IsCommitted => committedPayload is not null;
+
+    public ProbeMarker Begin(ProbeMarker source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        Reset();
+        candidate = new ProbeMarker
+        {
+            MarkerId = source.MarkerId,
+            SavegameIdentifier = source.SavegameIdentifier,
+            Version = source.Version,
+            OpenCount = source.OpenCount
+        };
+        return candidate;
+    }
+
+    public void Commit(Action<byte[]> store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        if (candidate is null)
+        {
+            throw new InvalidOperationException("L00-C cannot commit a marker before creating its isolated candidate.");
+        }
+        if (IsCommitted)
+        {
+            throw new InvalidOperationException("L00-C marker candidate was already committed.");
+        }
+
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(candidate);
+        store((byte[])payload.Clone());
+        committedPayload = payload;
+    }
+
+    public bool SaveIfCommitted(Action<byte[]> store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        byte[]? payload = committedPayload;
+        if (payload is null)
+        {
+            return false;
+        }
+
+        store((byte[])payload.Clone());
+        return true;
+    }
+
+    public void Reset()
+    {
+        candidate = null;
+        committedPayload = null;
+    }
+}
+
+internal sealed class ProbeMarker
+{
+    public string MarkerId { get; set; } = string.Empty;
+    public string SavegameIdentifier { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public int OpenCount { get; set; }
 }
 
 internal sealed class L00CProbeConfig

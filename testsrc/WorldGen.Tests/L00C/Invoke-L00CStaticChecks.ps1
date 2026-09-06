@@ -5,6 +5,7 @@ param(
     [string]$Configuration,
 
     [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
+    [string]$GamePath = 'D:\Jeux\Vintagestory',
     [string]$OutputPath
 )
 
@@ -86,8 +87,10 @@ $required = @(
     'BlockingTestMapChunkExists',
     'BlockingLoadChunkColumn',
     'L00C_PERSISTED_REOPEN_STABLE',
-    'markerCommitted',
-    'CopyMarker(persistedMarker)',
+    'MarkerPublicationGate',
+    'markerPublication.Begin(persistedMarker)',
+    'markerPublication.Commit(',
+    'markerPublication.SaveIfCommitted(',
     'chunk.MarkModified()',
     'mapChunk.MarkDirty()',
     'for (int y = 0; y < worldHeight; y++)',
@@ -149,12 +152,24 @@ finally {
 }
 
 $probeType = 'ISRWorldGen.WorldgenProbe.L00CWorldgenProbeModSystem'
+$markerGateType = 'ISRWorldGen.WorldgenProbe.MarkerPublicationGate'
 $probePresent = @($typeNames | Where-Object { $_ -eq $probeType }).Count -eq 1
-if ($Configuration -eq 'Debug' -and -not $probePresent) {
-    throw 'Debug assembly does not contain the L00-C probe type.'
+$markerGatePresent = @($typeNames | Where-Object { $_ -eq $markerGateType }).Count -eq 1
+if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent)) {
+    throw 'Debug assembly does not contain the L00-C probe and marker publication types.'
 }
-if ($Configuration -eq 'Release' -and $probePresent) {
-    throw 'Release assembly must not contain the L00-C probe type.'
+if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent)) {
+    throw 'Release assembly must not contain any L00-C probe or marker publication type.'
+}
+
+$markerOracleStatus = 'NOT_APPLICABLE'
+if ($Configuration -eq 'Debug') {
+    $markerOraclePath = Join-Path $PSScriptRoot 'Test-L00CMarkerPublication.ps1'
+    $markerOracle = (& $markerOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($markerOracle.Status -ne 'PASS') {
+        throw 'The production marker publication oracle did not pass against the freshly built Debug assembly.'
+    }
+    $markerOracleStatus = $markerOracle.Status
 }
 
 $result = [ordered]@{
@@ -163,6 +178,8 @@ $result = [ordered]@{
     Utc = [DateTime]::UtcNow.ToString('o')
     Configuration = $Configuration
     ProbeTypePresent = $probePresent
+    MarkerGateTypePresent = $markerGatePresent
+    MarkerPublicationOracle = $markerOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }

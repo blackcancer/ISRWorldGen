@@ -16,8 +16,9 @@ foreach ($fragment in @(
     'loadpriority={priorityLoads}',
     'fixturewrites={fixtureWrites}',
     'callbacks={fixtureCallbackCount}',
-    'markerCommitted',
-    'CopyMarker(persistedMarker)'
+    'MarkerPublicationGate',
+    'markerPublication.Begin(persistedMarker)',
+    'markerPublication.SaveIfCommitted('
 )) {
     if (-not $source.Contains($fragment)) {
         throw "Persisted-footprint replay guard is missing from production: $fragment"
@@ -29,18 +30,16 @@ $initializeMethod = $source.Substring($initializeStart, $initializeEnd - $initia
 $reopenStart = $initializeMethod.IndexOf('if (!saveGame.IsNew)', [StringComparison]::Ordinal)
 $reopenInspect = $initializeMethod.IndexOf('InspectPersistedFootprintBlocking()', $reopenStart, [StringComparison]::Ordinal)
 $reopenIncrement = $initializeMethod.IndexOf('marker!.OpenCount++', $reopenInspect, [StringComparison]::Ordinal)
-$reopenStore = $initializeMethod.IndexOf('StoreMarker(saveGame, marker!)', $reopenIncrement, [StringComparison]::Ordinal)
-$reopenCommit = $initializeMethod.IndexOf('markerCommitted = true', $reopenStore, [StringComparison]::Ordinal)
+$reopenCommit = $initializeMethod.IndexOf('markerPublication.Commit(', $reopenIncrement, [StringComparison]::Ordinal)
 $reopenSchedule = $initializeMethod.IndexOf('SchedulePersistedReopen(', $reopenStart, [StringComparison]::Ordinal)
 $reopenReturn = $initializeMethod.IndexOf('return;', $reopenSchedule, [StringComparison]::Ordinal)
 $handlerValidation = $initializeMethod.IndexOf('ValidateReplacementPreconditions(handlers)', [StringComparison]::Ordinal)
 $newApply = $initializeMethod.IndexOf('ApplyTargetedReplacement(handlers)', $handlerValidation, [StringComparison]::Ordinal)
-$newStore = $initializeMethod.IndexOf('StoreMarker(saveGame, marker!)', $newApply, [StringComparison]::Ordinal)
-$newCommit = $initializeMethod.IndexOf('markerCommitted = true', $newStore, [StringComparison]::Ordinal)
+$newCommit = $initializeMethod.IndexOf('markerPublication.Commit(', $newApply, [StringComparison]::Ordinal)
 if ($reopenStart -lt 0 -or $reopenInspect -le $reopenStart -or $reopenIncrement -le $reopenInspect -or
-    $reopenStore -le $reopenIncrement -or $reopenCommit -le $reopenStore -or $reopenSchedule -le $reopenCommit -or
+    $reopenCommit -le $reopenIncrement -or $reopenSchedule -le $reopenCommit -or
     $reopenReturn -le $reopenSchedule -or $handlerValidation -le $reopenReturn -or $newApply -le $handlerValidation -or
-    $newStore -le $newApply -or $newCommit -le $newStore) {
+    $newCommit -le $newApply) {
     throw 'Persisted reopen must inspect fully before incrementing and committing OpenCount, then return before any worldgen handler replacement.'
 }
 $reopenBranch = $initializeMethod.Substring($reopenStart, $reopenReturn - $reopenStart)
@@ -50,41 +49,8 @@ if ($reopenBranch -match 'ApplyTargetedReplacement|ScheduleProbeColumn|LoadChunk
 $saveStart = $source.IndexOf('private void OnGameWorldSaveCore()', [StringComparison]::Ordinal)
 $saveEnd = $source.IndexOf('private static ProbeMarker? ReadMarker(', $saveStart, [StringComparison]::Ordinal)
 $saveMethod = $source.Substring($saveStart, $saveEnd - $saveStart)
-if ($saveMethod -notmatch 'markerCommitted\s*&&\s*marker is not null') {
+if ($saveMethod -notmatch 'marker is not null\s*&&\s*markerPublication\.SaveIfCommitted\(') {
     throw 'GameWorldSave can still publish an unvalidated marker candidate.'
-}
-
-function Invoke-MarkerPublicationModel {
-    param(
-        [AllowNull()]
-        [object]$PersistedOpenCount,
-        [ValidateSet('success', 'missing-handler', 'persisted-map-missing', 'corrupt-marker', 'store-data-failure')]
-        [string]$Outcome
-    )
-
-    $hasPersistedMarker = $null -ne $PersistedOpenCount
-    $storedOpenCount = $PersistedOpenCount
-    $candidateOpenCount = if ($hasPersistedMarker) { [int]$PersistedOpenCount } else { 1 }
-    $committed = $false
-    if ($Outcome -eq 'success') {
-        if ($hasPersistedMarker) { $candidateOpenCount++ }
-        $storedOpenCount = $candidateOpenCount
-        $committed = $true
-    }
-    return [pscustomobject]@{ StoredOpenCount = $storedOpenCount; MarkerCommitted = $committed; MarkerSavedLogCount = [int]$committed }
-}
-
-$missingHandlerMarker = Invoke-MarkerPublicationModel -PersistedOpenCount $null -Outcome missing-handler
-$missingMapMarker = Invoke-MarkerPublicationModel -PersistedOpenCount 4 -Outcome persisted-map-missing
-$corruptMarker = Invoke-MarkerPublicationModel -PersistedOpenCount 4 -Outcome corrupt-marker
-$storeFailureMarker = Invoke-MarkerPublicationModel -PersistedOpenCount 4 -Outcome store-data-failure
-$successfulReopenMarker = Invoke-MarkerPublicationModel -PersistedOpenCount 4 -Outcome success
-if ($missingHandlerMarker.MarkerCommitted -or $missingHandlerMarker.MarkerSavedLogCount -ne 0 -or $null -ne $missingHandlerMarker.StoredOpenCount -or
-    $missingMapMarker.MarkerCommitted -or $missingMapMarker.MarkerSavedLogCount -ne 0 -or $missingMapMarker.StoredOpenCount -ne 4 -or
-    $corruptMarker.MarkerCommitted -or $corruptMarker.MarkerSavedLogCount -ne 0 -or $corruptMarker.StoredOpenCount -ne 4 -or
-    $storeFailureMarker.MarkerCommitted -or $storeFailureMarker.MarkerSavedLogCount -ne 0 -or $storeFailureMarker.StoredOpenCount -ne 4 -or
-    -not $successfulReopenMarker.MarkerCommitted -or $successfulReopenMarker.MarkerSavedLogCount -ne 1 -or $successfulReopenMarker.StoredOpenCount -ne 5) {
-    throw 'Marker publication model mutated or logged an unvalidated marker candidate.'
 }
 
 function New-Handler {
@@ -333,9 +299,4 @@ foreach ($pass in @($state.Original.Keys)) {
     ReopenFinalizerInstallCount = $reopenFinalizerInstallCount
     ReopenFixtureWriteCount = $reopenFixtureWriteCount
     ReopenFixtureCallbackCount = $reopenFixtureCallbackCount
-    MissingHandlerMarkerSavedLogCount = $missingHandlerMarker.MarkerSavedLogCount
-    PersistedMapMissingStoredOpenCount = $missingMapMarker.StoredOpenCount
-    CorruptMarkerStoredOpenCount = $corruptMarker.StoredOpenCount
-    StoreFailureStoredOpenCount = $storeFailureMarker.StoredOpenCount
-    SuccessfulReopenStoredOpenCount = $successfulReopenMarker.StoredOpenCount
 } | ConvertTo-Json -Depth 5
