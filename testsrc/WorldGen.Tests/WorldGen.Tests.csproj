@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\WorldGen.Core\WorldGen.Core.csproj" />
+    <ProjectReference Include="..\..\src\WorldGen.Runtime\WorldGen.Runtime.csproj" />
   </ItemGroup>
 
   <ItemGroup>
