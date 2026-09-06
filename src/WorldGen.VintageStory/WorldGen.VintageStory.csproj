@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ISRWorldGen</AssemblyName>
+    <RootNamespace>ISRWorldGen</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\Mods\isrworldgen</OutputPath>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI">
+      <HintPath>$(VintageStoryPath)\VintagestoryAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="ValidateVintageStoryInstallation" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(VintageStoryPath)' == ''"
+           Text="VintageStoryPath is not configured. Copy Directory.Build.local.props.example to Directory.Build.local.props or set VINTAGE_STORY." />
+    <Error Condition="!Exists('$(VintageStoryPath)\VintagestoryAPI.dll')"
+           Text="VintagestoryAPI.dll was not found under VintageStoryPath '$(VintageStoryPath)'." />
+  </Target>
+</Project>

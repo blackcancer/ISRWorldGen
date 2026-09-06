@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <VintageStoryPath>D:\Path\To\Vintagestory</VintageStoryPath>
+    <ISRWorldGenDataPath>$(MSBuildThisFileDirectory).local\VintagestoryData</ISRWorldGenDataPath>
+  </PropertyGroup>
+</Project>

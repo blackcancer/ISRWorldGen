@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "ISRWorldGen Client (isolated data)": {
+      "commandName": "Executable",
+      "executablePath": "$(VintageStoryPath)\\Vintagestory.exe",
+      "commandLineArgs": "--dataPath \"$(ISRWorldGenDataPath)\" --tracelog --addModPath \"$(ProjectDir)bin\\$(Configuration)\\Mods\" --addOrigin \"$(ProjectDir)assets\"",
+      "workingDirectory": "$(VintageStoryPath)"
+    },
+    "ISRWorldGen Server (isolated data)": {
+      "commandName": "Executable",
+      "executablePath": "$(VintageStoryPath)\\VintagestoryServer.exe",
+      "commandLineArgs": "--dataPath \"$(ISRWorldGenDataPath)\" --tracelog --addModPath \"$(ProjectDir)bin\\$(Configuration)\\Mods\" --addOrigin \"$(ProjectDir)assets\"",
+      "workingDirectory": "$(VintageStoryPath)"
+    }
+  }
+}

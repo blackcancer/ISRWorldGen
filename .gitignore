@@ -1,0 +1,17 @@
+.vs/
+**/bin/
+**/obj/
+TestResults/
+*.trx
+*.binlog
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+tools/__pycache__/
+*.pyc
+.local/
+Directory.Build.local.props
+artifacts/build/
+artifacts/logs/
+artifacts/test-results/

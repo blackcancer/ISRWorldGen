@@ -1,0 +1,14 @@
+{
+  "$schema": "https://moddbcdn.vintagestory.at/schema/modinfo.latest.json",
+  "type": "code",
+  "modid": "isrworldgen",
+  "name": "ISRWorldGen",
+  "authors": [
+    "InitSysRev"
+  ],
+  "description": "Deterministic geological and hydrological procedural world generation for Vintage Story.",
+  "version": "0.1.0-dev",
+  "dependencies": {
+    "game": "1.22.7"
+  }
+}
