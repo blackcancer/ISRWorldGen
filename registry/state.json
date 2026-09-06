@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "updated_utc": null,
-  "integrated_commit": null,
+  "updated_utc": "2026-09-06T11:41:43.959Z",
+  "integrated_commit": "5e79ad458c072c379e23ee6aca8129d659e3051c",
   "tasks": {
     "L00-A": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
+      "status": "IN_PROGRESS",
+      "owner": "agent:l00_a",
+      "branch": "agent/l00-a",
+      "base_commit": "5e79ad458c072c379e23ee6aca8129d659e3051c",
       "evidence": [],
       "blocker": null
     },
