@@ -1,3 +1,4 @@
+#if DEBUG
 using System.Threading;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
@@ -11,9 +12,7 @@ namespace ISRWorldGen;
 /// </summary>
 public sealed class L00BDebugProbeModSystem : ModSystem
 {
-#if DEBUG
     private int exceptionIssued;
-#endif
 
     /// <inheritdoc />
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Server;
@@ -21,11 +20,9 @@ public sealed class L00BDebugProbeModSystem : ModSystem
     /// <inheritdoc />
     public override void StartServerSide(ICoreServerAPI api)
     {
-#if DEBUG
         // T00-03 mutates this local through the debugger. Normal launches never
         // request a probe column and therefore retain vanilla loading behavior.
         bool generateProbeColumn = false;
-#endif
         int processId = Environment.ProcessId;
         string modulePath = typeof(L00BDebugProbeModSystem).Assembly.Location;
 
@@ -37,15 +34,12 @@ public sealed class L00BDebugProbeModSystem : ModSystem
             EnumWorldGenPass.Terrain,
             "standard");
 
-#if DEBUG
         if (generateProbeColumn)
         {
             api.Event.ServerRunPhase(EnumServerRunPhase.RunGame, () => RequestProbeColumn(api));
         }
-#endif
     }
 
-#if DEBUG
     private void RequestProbeColumn(ICoreServerAPI api)
     {
         int chunkCountX = api.WorldManager.MapSizeX / api.WorldManager.ChunkSize;
@@ -68,7 +62,6 @@ public sealed class L00BDebugProbeModSystem : ModSystem
             probeChunkZ);
         api.WorldManager.LoadChunkColumnPriority(probeChunkX, probeChunkZ, options);
     }
-#endif
 
     private void OnChunkColumnGeneration(IChunkColumnGenerateRequest request)
     {
@@ -78,7 +71,6 @@ public sealed class L00BDebugProbeModSystem : ModSystem
 
         Mod.Logger.Notification("L00B_COLUMN_CALLBACK chunk={0}", coordinate);
 
-#if DEBUG
         // Deliberately false in every normal run. During T00-03 only, the Visual
         // Studio debugger changes this local to true while paused on the next line.
         bool throwRequested = false;
@@ -87,6 +79,6 @@ public sealed class L00BDebugProbeModSystem : ModSystem
             Mod.Logger.Warning("L00B_CONTROLLED_EXCEPTION chunk={0}", coordinate);
             throw new InvalidOperationException($"L00-B controlled debug exception at chunk {coordinate}.");
         }
-#endif
     }
 }
+#endif

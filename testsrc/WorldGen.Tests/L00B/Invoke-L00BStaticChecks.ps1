@@ -51,6 +51,76 @@ foreach ($artifact in @($assemblyPath, $symbolsPath)) {
     }
 }
 
+function Get-TypeShapeFromPortableExecutable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$FullTypeName
+    )
+
+    $stream = [IO.File]::OpenRead($Path)
+    $peReader = $null
+    try {
+        $peReader = [System.Reflection.PortableExecutable.PEReader]::new($stream)
+        $metadata = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($peReader)
+
+        foreach ($handle in $metadata.TypeDefinitions) {
+            $definition = $metadata.GetTypeDefinition($handle)
+            $namespace = $metadata.GetString($definition.Namespace)
+            $name = $metadata.GetString($definition.Name)
+            $candidate = if ([string]::IsNullOrEmpty($namespace)) { $name } else { "$namespace.$name" }
+
+            if ($candidate -eq $FullTypeName) {
+                $methods = @($definition.GetMethods() | ForEach-Object {
+                    $metadata.GetString($metadata.GetMethodDefinition($_).Name)
+                })
+                $fields = @($definition.GetFields() | ForEach-Object {
+                    $metadata.GetString($metadata.GetFieldDefinition($_).Name)
+                })
+
+                return [PSCustomObject]@{
+                    Present = $true
+                    Methods = $methods
+                    Fields = $fields
+                }
+            }
+        }
+
+        return [PSCustomObject]@{
+            Present = $false
+            Methods = @()
+            Fields = @()
+        }
+    }
+    finally {
+        if ($null -ne $peReader) {
+            $peReader.Dispose()
+        }
+        $stream.Dispose()
+    }
+}
+
+$probeType = Get-TypeShapeFromPortableExecutable -Path $assemblyPath -FullTypeName 'ISRWorldGen.L00BDebugProbeModSystem'
+if ($Configuration -eq 'Debug') {
+    if (-not $probeType.Present) {
+        throw 'The L00-B ModSystem type must be present in the Debug assembly.'
+    }
+
+    foreach ($method in @('StartServerSide', 'RequestProbeColumn', 'OnChunkColumnGeneration')) {
+        if ($method -notin $probeType.Methods) {
+            throw "Debug assembly is missing expected L00-B method: $method"
+        }
+    }
+
+    if ('exceptionIssued' -notin $probeType.Fields) {
+        throw 'Debug assembly is missing the controlled-exception guard field.'
+    }
+}
+elseif ($probeType.Present) {
+    throw 'The complete L00-B ModSystem type must be absent from the Release assembly.'
+}
+
 $localProps = [xml](Get-Content -LiteralPath (Join-Path $RepositoryRoot 'Directory.Build.local.props') -Raw)
 $vintageStoryPath = [string]$localProps.Project.PropertyGroup.VintageStoryPath
 $apiPath = Join-Path $vintageStoryPath 'VintagestoryAPI.dll'
@@ -73,6 +143,12 @@ $result = [ordered]@{
     CallbackSignature = 'void (IChunkColumnGenerateRequest request)'
     WorldGenPass = 'Terrain'
     WorldType = 'standard'
+    BinaryInspection = [ordered]@{
+        ProbeTypePresent = [bool]$probeType.Present
+        ExpectedPresent = ($Configuration -eq 'Debug')
+        Methods = @($probeType.Methods)
+        Fields = @($probeType.Fields)
+    }
     ExceptionProbe = [ordered]@{
         DebugOnly = $true
         OffByDefault = $true
