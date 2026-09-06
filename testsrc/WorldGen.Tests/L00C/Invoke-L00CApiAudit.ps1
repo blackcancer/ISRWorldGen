@@ -48,6 +48,23 @@ function Require-Method {
     return $method
 }
 
+function Require-InstanceMethodAnyVisibility {
+    param([Type]$Type, [string]$Name, [string[]]$ParameterTypeNames)
+
+    $flags = [Reflection.BindingFlags]'Instance,Public,NonPublic'
+    $method = $Type.GetMethods($flags) | Where-Object {
+        if ($_.Name -ne $Name) { return $false }
+        $actual = @($_.GetParameters() | ForEach-Object { $_.ParameterType.FullName })
+        return ([string]::Join('|', $actual) -eq [string]::Join('|', $ParameterTypeNames))
+    } | Select-Object -First 1
+
+    if ($null -eq $method) {
+        throw "Required native handler signature is missing: $($Type.FullName).$Name($([string]::Join(', ', $ParameterTypeNames)))"
+    }
+
+    return $method
+}
+
 $eventApi = Require-Type $api 'Vintagestory.API.Server.IServerEventAPI'
 $handler = Require-Type $api 'Vintagestory.API.Server.IWorldGenHandler'
 $request = Require-Type $api 'Vintagestory.API.Server.IChunkColumnGenerateRequest'
@@ -128,6 +145,15 @@ if (-not $nativeTypeStatus[$storyType]) {
     throw "Expected native generator type is missing: $storyType"
 }
 
+$columnRequestSignature = @('Vintagestory.API.Server.IChunkColumnGenerateRequest')
+$structureType = Require-Type $essentials 'Vintagestory.ServerMods.GenStructures'
+$structureMethods = @(
+    Require-InstanceMethodAnyVisibility $structureType 'OnChunkColumnGen' $columnRequestSignature
+    Require-InstanceMethodAnyVisibility $structureType 'OnChunkColumnGenPostPass' $columnRequestSignature
+)
+$lightType = Require-Type $essentials 'Vintagestory.ServerMods.GenLightSurvival'
+$lightMethod = Require-InstanceMethodAnyVisibility $lightType 'OnChunkColumnGeneration' $columnRequestSignature
+
 $result = [ordered]@{
     TestId = 'T00-04-API-AUDIT'
     Status = 'PASS'
@@ -141,6 +167,8 @@ $result = [ordered]@{
     RequestProperties = $requiredRequestProperties
     MapProperties = $requiredMapProperties
     NativeTypes = $nativeTypeStatus
+    StructureHandlers = @($structureMethods | ForEach-Object { "$($_.DeclaringType.FullName)::$($_.Name)" })
+    LightingAnchor = "$($lightMethod.DeclaringType.FullName)::$($lightMethod.Name)"
 }
 
 $json = $result | ConvertTo-Json -Depth 5

@@ -18,10 +18,12 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private const string MarkerKey = "isrworldgen:l00c:marker:v1";
     private const string MarkerVersion = "l00c-flat-v1";
     private const int StableTickTarget = 40;
+    private const string LightingAnchorType = "Vintagestory.ServerMods.GenLightSurvival";
+    private const string LightingAnchorMethod = "OnChunkColumnGeneration";
 
     private static readonly ReplacementSpec[] ReplacementSpecs =
     [
-        new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenTerra"),
+        new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenTerra", WritesFixture: true),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenRockStrataNew"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenCaves"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenDevastationLayer"),
@@ -40,23 +42,17 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     ];
 
     private readonly string instanceId = Guid.NewGuid().ToString("N");
-    private readonly ChunkColumnGenerationDelegate fixtureHandler;
-    private readonly ChunkColumnGenerationDelegate terrainFeaturesHandler;
-    private readonly ChunkColumnGenerationDelegate vegetationHandler;
-    private readonly ChunkColumnGenerationDelegate neighbourFloodHandler;
-    private readonly ChunkColumnGenerationDelegate metadataFinalizerHandler;
-    private readonly List<RemovedHandler> removedHandlers = [];
+    private readonly ChunkColumnGenerationDelegate lightingFinalizerHandler;
 
     private ICoreServerAPI? api;
-    private IWorldGenHandler? ownedHandlerSet;
+    private HandlerOwnershipState? ownershipState;
     private L00CProbeConfig config = new();
     private ProbeMarker? marker;
+    private FixtureSnapshot? preLightingSnapshot;
     private FixtureSnapshot? initialSnapshot;
     private long tickListenerId;
     private int stableTickCount;
     private int fixtureCallbackCount;
-    private readonly int[] forwardedColumnCounts = new int[6];
-    private readonly int[] forwardLogIssued = new int[6];
     private int requestIssued;
     private int shutdownIssued;
     private bool active;
@@ -64,11 +60,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     /// <summary>Initializes the stable delegate identity used for targeted handler ownership.</summary>
     public L00CWorldgenProbeModSystem()
     {
-        fixtureHandler = GenerateFixtureColumn;
-        terrainFeaturesHandler = FilterTerrainFeatures;
-        vegetationHandler = FilterVegetation;
-        neighbourFloodHandler = FilterNeighbourFlood;
-        metadataFinalizerHandler = FinalizeFixtureMetadata;
+        lightingFinalizerHandler = FinalizeFixtureBeforeLighting;
     }
 
     /// <inheritdoc />
@@ -95,28 +87,29 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         IWorldGenHandler handlers = serverApi.Event.GetRegisteredWorldGenHandlers(WorldType)
             ?? throw new InvalidOperationException("L00-C could not obtain the standard worldgen handler set.");
 
-        bool sameHandlerSet = ReferenceEquals(ownedHandlerSet, handlers);
-        int staleProbeHandlers = ResetOwnedHandlers(handlers, sameHandlerSet);
-        int staleProbeHandlersAfterReset = CountFixtureHandlers(handlers);
+        HandlerOwnershipState? previousOwnership = ownershipState;
+        bool sameHandlerSet = previousOwnership is not null && ReferenceEquals(previousOwnership.HandlerSet, handlers);
+        active = false;
+        RestoreResult priorRestore = RestoreOwnedHandlerSet("world-initialize");
+        int staleProbeHandlersAfterReset = previousOwnership is null ? 0 : CountOwnedHandlers(handlers, previousOwnership);
         if (staleProbeHandlersAfterReset != 0)
         {
             throw new InvalidOperationException($"L00-C failed to remove {staleProbeHandlersAfterReset} stale fixture handler(s) before world initialization.");
         }
 
-        ownedHandlerSet = handlers;
         fixtureCallbackCount = 0;
         requestIssued = 0;
         shutdownIssued = 0;
         stableTickCount = 0;
-        Array.Clear(forwardedColumnCounts);
-        Array.Clear(forwardLogIssued);
+        marker = null;
+        preLightingSnapshot = null;
         initialSnapshot = null;
 
         ISaveGame saveGame = serverApi.WorldManager.SaveGame;
         ProbeMarker? persistedMarker = ReadMarker(saveGame);
         bool activationRequested = config.Enabled;
 
-        LogInventory("before", handlers, saveGame, staleProbeHandlers, sameHandlerSet);
+        LogInventory("before", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
 
         if (saveGame.IsNew)
         {
@@ -163,50 +156,59 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         active = true;
         StoreMarker(saveGame, marker!);
 
-        LogInventory("after", handlers, saveGame, staleProbeHandlers, sameHandlerSet);
+        LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
         Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} open={marker.OpenCount} isnew={saveGame.IsNew} save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
         ScheduleProbeColumn();
     }
 
-    private int ResetOwnedHandlers(IWorldGenHandler handlers, bool sameHandlerSet)
+    private RestoreResult RestoreOwnedHandlerSet(string reason)
     {
-        int removedProbeCount = 0;
-        foreach (List<ChunkColumnGenerationDelegate>? passHandlers in handlers.OnChunkColumnGen)
+        HandlerOwnershipState? state = ownershipState;
+        if (state is null)
         {
-            if (passHandlers is null)
+            return new RestoreResult(0, 0, true);
+        }
+
+        int removedOwned = 0;
+        int restoredNative = 0;
+        foreach (KeyValuePair<EnumWorldGenPass, List<ChunkColumnGenerationDelegate>> entry in state.OriginalInventories.OrderBy(item => item.Key))
+        {
+            List<ChunkColumnGenerationDelegate> current = GetPassHandlers(state.HandlerSet, entry.Key);
+            List<ChunkColumnGenerationDelegate> original = entry.Value;
+            List<ChunkColumnGenerationDelegate> installed = state.InstalledInventories[entry.Key];
+            if (ReferenceSequenceEqual(current, original))
             {
                 continue;
             }
-            for (int index = passHandlers.Count - 1; index >= 0; index--)
+
+            if (!ReferenceSequenceEqual(current, installed))
             {
-                ChunkColumnGenerationDelegate candidate = passHandlers[index];
-                if (IsOwnedProxy(candidate))
-                {
-                    passHandlers.RemoveAt(index);
-                    removedProbeCount++;
-                }
+                string message = $"L00-C cannot restore pass {entry.Key}: the installed handler sequence changed while owned.";
+                Log($"L00C_RESTORE_ERROR reason={reason} instance={instanceId} pass={entry.Key} message={Sanitize(message)}");
+                throw new InvalidOperationException(message);
+            }
+
+            removedOwned += current.Count(candidate => IsOwnedHandler(candidate, state));
+            restoredNative += state.OwnedHandlers.Count(item => item.Pass == entry.Key && current.Any(candidate => ReferenceEquals(candidate, item.Wrapper)));
+            current.Clear();
+            current.AddRange(original);
+            if (!ReferenceSequenceEqual(current, original))
+            {
+                string message = $"L00-C failed exact reference/order verification after restoring pass {entry.Key}.";
+                Log($"L00C_RESTORE_ERROR reason={reason} instance={instanceId} pass={entry.Key} message={Sanitize(message)}");
+                throw new InvalidOperationException(message);
             }
         }
 
-        if (sameHandlerSet)
-        {
-            foreach (IGrouping<EnumWorldGenPass, RemovedHandler> group in removedHandlers.GroupBy(entry => entry.Pass))
-            {
-                List<ChunkColumnGenerationDelegate> passHandlers = GetPassHandlers(handlers, group.Key);
-                foreach (RemovedHandler entry in group.OrderBy(item => item.Index))
-                {
-                    bool present = passHandlers.Any(candidate => ReferenceEquals(candidate, entry.Handler));
-                    if (!present)
-                    {
-                        int insertionIndex = Math.Clamp(entry.Index, 0, passHandlers.Count);
-                        passHandlers.Insert(insertionIndex, entry.Handler);
-                    }
-                }
-            }
-        }
+        string inventory = FormatColumnInventory(state.HandlerSet);
+        Log($"L00C_RESTORE_RESULT reason={reason} instance={instanceId} removedowned={removedOwned} restorednative={restoredNative} exact=True inventory={inventory}");
+        ownershipState = null;
+        return new RestoreResult(removedOwned, restoredNative, true);
+    }
 
-        removedHandlers.Clear();
-        return removedProbeCount;
+    private static bool ReferenceSequenceEqual(IReadOnlyList<ChunkColumnGenerationDelegate> left, IReadOnlyList<ChunkColumnGenerationDelegate> right)
+    {
+        return left.Count == right.Count && !left.Where((candidate, index) => !ReferenceEquals(candidate, right[index])).Any();
     }
 
     private void ValidateReplacementPreconditions(IWorldGenHandler handlers)
@@ -231,59 +233,99 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 Fail("expected-handler-cardinality", $"Expected exactly one {spec.TargetType}{method} handler in pass {spec.Pass}, found {matches.Count}; targeted replacement was not applied.");
             }
         }
+
+        List<HandlerLocation> lightingAnchors = FindHandlers(
+            handlers,
+            LightingAnchorType,
+            EnumWorldGenPass.Vegetation,
+            LightingAnchorMethod);
+        if (lightingAnchors.Count != 1)
+        {
+            Fail("lighting-anchor-cardinality", $"Expected exactly one {LightingAnchorType}::{LightingAnchorMethod} handler in pass Vegetation, found {lightingAnchors.Count}; canonical finalization cannot be positioned safely.");
+        }
     }
 
     private void ApplyTargetedReplacement(IWorldGenHandler handlers)
     {
-        var unaffectedBefore = new Dictionary<EnumWorldGenPass, List<ChunkColumnGenerationDelegate>>();
+        if (ownershipState is not null)
+        {
+            throw new InvalidOperationException("L00-C cannot install handler ownership while another handler set is still owned.");
+        }
+
+        EnumWorldGenPass[] modifiedPasses = ReplacementSpecs
+            .Select(spec => spec.Pass)
+            .Append(EnumWorldGenPass.Vegetation)
+            .Distinct()
+            .OrderBy(pass => pass)
+            .ToArray();
+        var originalInventories = modifiedPasses.ToDictionary(
+            pass => pass,
+            pass => GetPassHandlers(handlers, pass).ToList());
+        var ownedHandlers = new List<OwnedHandler>();
         foreach (ReplacementSpec spec in ReplacementSpecs)
         {
-            List<ChunkColumnGenerationDelegate> passHandlers = GetPassHandlers(handlers, spec.Pass);
-            if (!unaffectedBefore.ContainsKey(spec.Pass))
-            {
-                unaffectedBefore[spec.Pass] = passHandlers
-                    .Where(candidate => !ReplacementSpecs.Any(entry => entry.Pass == spec.Pass && Matches(candidate, entry)))
-                    .ToList();
-            }
-
             HandlerLocation location = FindHandlers(handlers, spec.TargetType, spec.Pass, spec.MethodName).Single();
-            removedHandlers.Add(new RemovedHandler(spec.Pass, location.Index, location.Handler));
+            ownedHandlers.Add(new OwnedHandler(this, spec, location.Index, location.Handler));
         }
 
-        foreach (IGrouping<EnumWorldGenPass, RemovedHandler> group in removedHandlers.GroupBy(entry => entry.Pass))
+        var installedInventories = originalInventories.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value.ToList());
+        foreach (OwnedHandler owned in ownedHandlers)
         {
-            List<ChunkColumnGenerationDelegate> passHandlers = GetPassHandlers(handlers, group.Key);
-            foreach (RemovedHandler entry in group.OrderByDescending(item => item.Index))
+            installedInventories[owned.Pass][owned.OriginalIndex] = owned.Wrapper;
+        }
+
+        int lightingAnchorIndex = FindHandlers(
+            handlers,
+            LightingAnchorType,
+            EnumWorldGenPass.Vegetation,
+            LightingAnchorMethod).Single().Index;
+        installedInventories[EnumWorldGenPass.Vegetation].Insert(lightingAnchorIndex, lightingFinalizerHandler);
+
+        var state = new HandlerOwnershipState(
+            handlers,
+            originalInventories,
+            installedInventories,
+            ownedHandlers,
+            lightingAnchorIndex,
+            lightingFinalizerHandler);
+        var changedPasses = new List<EnumWorldGenPass>();
+
+        try
+        {
+            foreach (EnumWorldGenPass pass in modifiedPasses)
             {
-                if (!ReferenceEquals(passHandlers[entry.Index], entry.Handler))
+                List<ChunkColumnGenerationDelegate> actual = GetPassHandlers(handlers, pass);
+                if (!ReferenceSequenceEqual(actual, originalInventories[pass]))
                 {
-                    throw new InvalidOperationException("L00-C handler inventory changed between validation and targeted removal.");
+                    throw new InvalidOperationException($"L00-C handler inventory changed before installing wrappers for pass {pass}.");
                 }
-                passHandlers.RemoveAt(entry.Index);
+                actual.Clear();
+                actual.AddRange(installedInventories[pass]);
+                changedPasses.Add(pass);
             }
-        }
 
-        foreach (IGrouping<EnumWorldGenPass, RemovedHandler> group in removedHandlers.GroupBy(entry => entry.Pass))
-        {
-            List<ChunkColumnGenerationDelegate> passHandlers = GetPassHandlers(handlers, group.Key);
-            int insertionIndex = group.Min(item => item.Index);
-            passHandlers.Insert(Math.Clamp(insertionIndex, 0, passHandlers.Count), ProxyForPass(group.Key));
-        }
-
-        List<ChunkColumnGenerationDelegate> preDoneHandlers = GetPassHandlers(handlers, EnumWorldGenPass.PreDone);
-        unaffectedBefore[EnumWorldGenPass.PreDone] = preDoneHandlers.ToList();
-        preDoneHandlers.Add(metadataFinalizerHandler);
-
-        foreach (KeyValuePair<EnumWorldGenPass, List<ChunkColumnGenerationDelegate>> entry in unaffectedBefore)
-        {
-            List<ChunkColumnGenerationDelegate> actual = GetPassHandlers(handlers, entry.Key)
-                .Where(candidate => !IsOwnedProxy(candidate))
-                .ToList();
-            if (actual.Count != entry.Value.Count || actual.Where((candidate, index) => !ReferenceEquals(candidate, entry.Value[index])).Any())
+            foreach (EnumWorldGenPass pass in modifiedPasses)
             {
-                throw new InvalidOperationException($"L00-C detected a third-party handler change in pass {entry.Key}; replacement aborted.");
+                if (!ReferenceSequenceEqual(GetPassHandlers(handlers, pass), installedInventories[pass]))
+                {
+                    throw new InvalidOperationException($"L00-C failed exact reference/order verification after installing wrappers for pass {pass}.");
+                }
             }
         }
+        catch
+        {
+            foreach (EnumWorldGenPass pass in changedPasses)
+            {
+                List<ChunkColumnGenerationDelegate> actual = GetPassHandlers(handlers, pass);
+                actual.Clear();
+                actual.AddRange(originalInventories[pass]);
+            }
+            throw;
+        }
+
+        ownershipState = state;
     }
 
     private void ResolveMaterials()
@@ -349,17 +391,35 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
     }
 
-    private void GenerateFixtureColumn(IChunkColumnGenerateRequest request)
+    private void InvokeOwnedHandler(OwnedHandler owned, IChunkColumnGenerateRequest request)
     {
+        if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
+        {
+            owned.Original(request);
+            Interlocked.Increment(ref owned.ForwardedCount);
+            if (Interlocked.Exchange(ref owned.ForwardLogIssued, 1) == 0)
+            {
+                Log($"L00C_NATIVE_FORWARD instance={instanceId} marker={marker!.MarkerId} pass={owned.Pass} index={owned.OriginalIndex} target={owned.OriginalTargetType} method={owned.OriginalMethod.Name} firstchunk=({request.ChunkX},{request.ChunkZ})");
+            }
+            return;
+        }
+
         if (!active)
         {
             throw new InvalidOperationException("L00-C fixture handler ran while the world was inactive.");
         }
-        if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
+
+        if (owned.Specification.WritesFixture)
         {
-            ForwardNative(EnumWorldGenPass.Terrain, request);
+            GenerateFixtureColumn(request);
             return;
         }
+
+        Log($"L00C_HANDLER_SUPPRESSED instance={instanceId} marker={marker!.MarkerId} pass={owned.Pass} index={owned.OriginalIndex} target={owned.OriginalTargetType} method={owned.OriginalMethod.Name} chunk=({request.ChunkX},{request.ChunkZ})");
+    }
+
+    private void GenerateFixtureColumn(IChunkColumnGenerateRequest request)
+    {
         if (Interlocked.Increment(ref fixtureCallbackCount) != 1)
         {
             throw new InvalidOperationException("L00-C fixture handler ran more than once for the bounded column.");
@@ -368,14 +428,23 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         WriteCanonicalFixture(request, "terrain");
     }
 
-    private void FinalizeFixtureMetadata(IChunkColumnGenerateRequest request)
+    private void FinalizeFixtureBeforeLighting(IChunkColumnGenerateRequest request)
     {
         if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
         {
             return;
         }
 
-        WriteCanonicalFixture(request, "predone");
+        if (!active)
+        {
+            throw new InvalidOperationException("L00-C pre-lighting finalizer ran while the world was inactive.");
+        }
+
+        WriteCanonicalFixture(request, "prelighting");
+        int chunkSize = RequireApi().WorldManager.ChunkSize;
+        int worldHeight = request.Chunks.Length * chunkSize;
+        FixtureSnapshot snapshot = InspectFixtureData("prelighting", request.Chunks, request.Chunks[0].MapChunk, chunkSize, worldHeight);
+        Volatile.Write(ref preLightingSnapshot, snapshot);
     }
 
     private void WriteCanonicalFixture(IChunkColumnGenerateRequest request, string phase)
@@ -430,47 +499,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         Log($"L00C_FIXTURE_WRITTEN instance={instanceId} marker={marker!.MarkerId} phase={phase} chunk=({request.ChunkX},{request.ChunkZ}) chunksize={chunkSize} worldheight={worldHeight} rock={config.RockBlockId} fresh={config.FreshWaterBlockId} salt={config.SaltWaterBlockId} rocksurface={geometry.RockSurface} watersurface={geometry.WaterSurface} thread={Environment.CurrentManagedThreadId}");
     }
 
-    private void FilterTerrainFeatures(IChunkColumnGenerateRequest request)
-    {
-        FilterFixturePass(EnumWorldGenPass.TerrainFeatures, request);
-    }
-
-    private void FilterVegetation(IChunkColumnGenerateRequest request)
-    {
-        FilterFixturePass(EnumWorldGenPass.Vegetation, request);
-    }
-
-    private void FilterNeighbourFlood(IChunkColumnGenerateRequest request)
-    {
-        FilterFixturePass(EnumWorldGenPass.NeighbourSunLightFlood, request);
-    }
-
-    private void FilterFixturePass(EnumWorldGenPass pass, IChunkColumnGenerateRequest request)
-    {
-        if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
-        {
-            ForwardNative(pass, request);
-            return;
-        }
-
-        Log($"L00C_PASS_SUPPRESSED instance={instanceId} marker={marker!.MarkerId} pass={pass} chunk=({request.ChunkX},{request.ChunkZ}) delegates={removedHandlers.Count(item => item.Pass == pass)}");
-    }
-
-    private void ForwardNative(EnumWorldGenPass pass, IChunkColumnGenerateRequest request)
-    {
-        foreach (RemovedHandler entry in removedHandlers.Where(item => item.Pass == pass).OrderBy(item => item.Index))
-        {
-            entry.Handler(request);
-        }
-
-        int passIndex = (int)pass;
-        Interlocked.Increment(ref forwardedColumnCounts[passIndex]);
-        if (Interlocked.Exchange(ref forwardLogIssued[passIndex], 1) == 0)
-        {
-            Log($"L00C_NATIVE_FORWARD instance={instanceId} marker={marker!.MarkerId} pass={pass} firstchunk=({request.ChunkX},{request.ChunkZ}) delegates={removedHandlers.Count(item => item.Pass == pass)}");
-        }
-    }
-
     private static void SetSolid(IServerChunk[] chunks, int chunkSize, int x, int y, int z, int blockId)
     {
         int chunkY = y / chunkSize;
@@ -496,6 +524,15 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             if (active)
             {
                 initialSnapshot = InspectFixture("loaded");
+                FixtureSnapshot? lightingSnapshot = Interlocked.Exchange(ref preLightingSnapshot, null);
+                if (lightingSnapshot is not null)
+                {
+                    if (!string.Equals(lightingSnapshot.Hash, initialSnapshot.Hash, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException($"L00-C blocks or heightmaps changed after the native lighting handlers: {lightingSnapshot.Hash} -> {initialSnapshot.Hash}.");
+                    }
+                    Log($"L00C_LIGHTING_STABLE instance={instanceId} marker={marker!.MarkerId} prelighting={lightingSnapshot.Hash} postlighting={initialSnapshot.Hash}");
+                }
                 stableTickCount = 0;
             }
             else
@@ -542,9 +579,29 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ICoreServerAPI serverApi = RequireApi();
         int chunkSize = serverApi.WorldManager.ChunkSize;
         int worldHeight = serverApi.WorldManager.MapSizeY;
-        FixtureGeometry geometry = FixtureGeometry.Create(chunkSize, worldHeight);
         IMapChunk mapChunk = serverApi.WorldManager.GetMapChunk(config.FixtureChunkX, config.FixtureChunkZ)
             ?? throw new InvalidOperationException("L00-C fixture map chunk is not loaded.");
+        int chunkCount = worldHeight / chunkSize;
+        var chunks = new IServerChunk[chunkCount];
+        for (int chunkY = 0; chunkY < chunkCount; chunkY++)
+        {
+            IServerChunk chunk = serverApi.WorldManager.GetChunk(config.FixtureChunkX, chunkY, config.FixtureChunkZ)
+                ?? throw new InvalidOperationException($"L00-C fixture chunk y={chunkY} is not loaded.");
+            chunk.Unpack_ReadOnly();
+            chunks[chunkY] = chunk;
+        }
+
+        return InspectFixtureData(phase, chunks, mapChunk, chunkSize, worldHeight);
+    }
+
+    private FixtureSnapshot InspectFixtureData(
+        string phase,
+        IReadOnlyList<IServerChunk> chunks,
+        IMapChunk mapChunk,
+        int chunkSize,
+        int worldHeight)
+    {
+        FixtureGeometry geometry = FixtureGeometry.Create(chunkSize, worldHeight);
 
         int solidCount = 0;
         int fluidCount = 0;
@@ -592,9 +649,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
                 for (int y = 0; y < worldHeight; y++)
                 {
-                    IServerChunk chunk = serverApi.WorldManager.GetChunk(config.FixtureChunkX, y / chunkSize, config.FixtureChunkZ)
-                        ?? throw new InvalidOperationException($"L00-C fixture chunk y={y / chunkSize} is not loaded.");
-                    chunk.Unpack_ReadOnly();
+                    IServerChunk chunk = chunks[y / chunkSize];
                     int index3d = MapUtil.Index3d(x, y % chunkSize, z, chunkSize, chunkSize);
                     int solid = chunk.Data.GetBlockId(index3d, BlockLayersAccess.Solid);
                     int fluid = chunk.Data.GetBlockId(index3d, BlockLayersAccess.Fluid);
@@ -653,6 +708,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         {
             IServerChunk chunk = serverApi.WorldManager.GetChunk(config.FixtureChunkX, y / chunkSize, config.FixtureChunkZ)
                 ?? throw new InvalidOperationException($"L00-C witness chunk y={y / chunkSize} is not loaded.");
+            chunk.Unpack_ReadOnly();
             for (int x = 0; x < chunkSize; x++)
             {
                 for (int z = 0; z < chunkSize; z++)
@@ -725,13 +781,34 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     {
         string mapRegion = DescribeHandlers(handlers.OnMapRegionGen.Cast<Delegate>());
         string mapChunk = DescribeHandlers(handlers.OnMapChunkGen.Cast<Delegate>());
-        string column = string.Join(";", handlers.OnChunkColumnGen.Select((items, index) => items is null ? $"{index}=[null]" : $"{index}=[{DescribeHandlers(items.Cast<Delegate>())}]"));
+        string column = FormatColumnInventory(handlers);
         Log($"L00C_HANDLERS phase={phase} instance={instanceId} save={saveGame.SavegameIdentifier} isnew={saveGame.IsNew} samehandlerset={sameHandlerSet} staleprobe={staleProbeHandlers} mapregion=[{mapRegion}] mapchunk=[{mapChunk}] column={column}");
     }
 
-    private static string DescribeHandlers(IEnumerable<Delegate> handlers)
+    private string FormatColumnInventory(IWorldGenHandler handlers)
     {
-        return string.Join(",", handlers.Select((handler, index) => $"{index}:{TargetType(handler)}::{handler.Method.Name}"));
+        return string.Join(";", handlers.OnChunkColumnGen.Select((items, index) =>
+            items is null ? $"{index}=[null]" : $"{index}=[{DescribeHandlers(items.Cast<Delegate>())}]"));
+    }
+
+    private string DescribeHandlers(IEnumerable<Delegate> handlers)
+    {
+        return string.Join(",", handlers.Select((handler, index) => $"{index}:{DescribeHandler(handler)}"));
+    }
+
+    private string DescribeHandler(Delegate handler)
+    {
+        HandlerOwnershipState? state = ownershipState;
+        OwnedHandler? owned = state?.OwnedHandlers.FirstOrDefault(candidate => ReferenceEquals(candidate.Wrapper, handler));
+        if (owned is not null)
+        {
+            return $"L00CWrapper(original={owned.OriginalTargetType}::{owned.OriginalMethod.Name}@index={owned.OriginalIndex})";
+        }
+        if (state is not null && ReferenceEquals(state.LightingFinalizer, handler))
+        {
+            return $"L00CFinalizer(before={LightingAnchorType}::{LightingAnchorMethod}@index={state.LightingAnchorIndex})";
+        }
+        return $"{TargetType(handler)}::{handler.Method.Name}";
     }
 
     private static string TargetType(Delegate handler)
@@ -773,33 +850,15 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             ?? throw new InvalidOperationException($"L00-C pass {pass} index {index} has no registered handler list.");
     }
 
-    private int CountFixtureHandlers(IWorldGenHandler handlers)
+    private static int CountOwnedHandlers(IWorldGenHandler handlers, HandlerOwnershipState state)
     {
-        return handlers.OnChunkColumnGen.Sum(items => items?.Count(IsOwnedProxy) ?? 0);
+        return handlers.OnChunkColumnGen.Sum(items => items?.Count(candidate => IsOwnedHandler(candidate, state)) ?? 0);
     }
 
-    private ChunkColumnGenerationDelegate ProxyForPass(EnumWorldGenPass pass) => pass switch
+    private static bool IsOwnedHandler(ChunkColumnGenerationDelegate candidate, HandlerOwnershipState state)
     {
-        EnumWorldGenPass.Terrain => fixtureHandler,
-        EnumWorldGenPass.TerrainFeatures => terrainFeaturesHandler,
-        EnumWorldGenPass.Vegetation => vegetationHandler,
-        EnumWorldGenPass.NeighbourSunLightFlood => neighbourFloodHandler,
-        _ => throw new InvalidOperationException($"L00-C has no targeted proxy for pass {pass}.")
-    };
-
-    private bool IsOwnedProxy(ChunkColumnGenerationDelegate candidate)
-    {
-        return ReferenceEquals(candidate.Target, this) &&
-            (candidate.Method == fixtureHandler.Method ||
-             candidate.Method == terrainFeaturesHandler.Method ||
-             candidate.Method == vegetationHandler.Method ||
-             candidate.Method == neighbourFloodHandler.Method ||
-             candidate.Method == metadataFinalizerHandler.Method);
-    }
-
-    private static bool Matches(ChunkColumnGenerationDelegate candidate, ReplacementSpec spec)
-    {
-        return TargetType(candidate) == spec.TargetType && (spec.MethodName is null || candidate.Method.Name == spec.MethodName);
+        return ReferenceEquals(candidate, state.LightingFinalizer) ||
+            state.OwnedHandlers.Any(owned => ReferenceEquals(candidate, owned.Wrapper));
     }
 
     private void Fail(string code, string message)
@@ -817,42 +876,94 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     /// <inheritdoc />
     public override void Dispose()
     {
-        if (api is not null)
+        ICoreServerAPI? serverApi = api;
+        Exception? disposeFailure = null;
+        if (serverApi is not null)
         {
             try
             {
-                api.Event.GameWorldSave -= OnGameWorldSave;
+                serverApi.Event.GameWorldSave -= OnGameWorldSave;
                 if (tickListenerId != 0)
                 {
-                    api.Event.UnregisterGameTickListener(tickListenerId);
+                    serverApi.Event.UnregisterGameTickListener(tickListenerId);
                     tickListenerId = 0;
-                }
-                if (ownedHandlerSet is not null)
-                {
-                    int nativeToRestore = removedHandlers.Count;
-                    int removed = ResetOwnedHandlers(ownedHandlerSet, true);
-                    Log($"L00C_DISPOSED instance={instanceId} removedprobe={removed} restorednative={nativeToRestore} callbacks={fixtureCallbackCount} forwarded={forwardedColumnCounts.Sum()}");
                 }
             }
             catch (Exception exception)
             {
-                api.Logger.Error($"L00C_DISPOSE_ERROR instance={instanceId} type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
+                serverApi.Logger.Error($"L00C_DISPOSE_ERROR instance={instanceId} stage=events type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
+                disposeFailure = exception;
+            }
+
+            try
+            {
+                HandlerOwnershipState? state = ownershipState;
+                int forwarded = state?.OwnedHandlers.Sum(item => item.ForwardedCount) ?? 0;
+                RestoreResult restored = RestoreOwnedHandlerSet("dispose");
+                Log($"L00C_DISPOSED instance={instanceId} removedowned={restored.RemovedOwned} restorednative={restored.RestoredNative} exact={restored.Exact} callbacks={fixtureCallbackCount} forwarded={forwarded}");
+            }
+            catch (Exception exception)
+            {
+                serverApi.Logger.Error($"L00C_DISPOSE_ERROR instance={instanceId} stage=restore type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
+                disposeFailure = disposeFailure is null ? exception : new AggregateException(disposeFailure, exception);
             }
         }
 
-        ownedHandlerSet = null;
-        removedHandlers.Clear();
         marker = null;
+        preLightingSnapshot = null;
         initialSnapshot = null;
         active = false;
         api = null;
         base.Dispose();
+
+        if (disposeFailure is not null)
+        {
+            throw new InvalidOperationException("L00-C disposal could not restore its handler ownership exactly.", disposeFailure);
+        }
     }
 
-    private sealed record ReplacementSpec(EnumWorldGenPass Pass, string TargetType, string? MethodName = null);
+    private sealed record ReplacementSpec(EnumWorldGenPass Pass, string TargetType, string? MethodName = null, bool WritesFixture = false);
     private sealed record HandlerLocation(EnumWorldGenPass Pass, int Index, ChunkColumnGenerationDelegate Handler);
-    private sealed record RemovedHandler(EnumWorldGenPass Pass, int Index, ChunkColumnGenerationDelegate Handler);
+    private sealed record HandlerOwnershipState(
+        IWorldGenHandler HandlerSet,
+        Dictionary<EnumWorldGenPass, List<ChunkColumnGenerationDelegate>> OriginalInventories,
+        Dictionary<EnumWorldGenPass, List<ChunkColumnGenerationDelegate>> InstalledInventories,
+        List<OwnedHandler> OwnedHandlers,
+        int LightingAnchorIndex,
+        ChunkColumnGenerationDelegate LightingFinalizer);
+    private readonly record struct RestoreResult(int RemovedOwned, int RestoredNative, bool Exact);
     private sealed record FixtureSnapshot(string Hash, int SolidCount, int FluidCount, int FreshCount, int SaltCount, int UnexpectedCount, ushort YMax);
+
+    private sealed class OwnedHandler
+    {
+        private readonly L00CWorldgenProbeModSystem owner;
+
+        public OwnedHandler(L00CWorldgenProbeModSystem owner, ReplacementSpec specification, int originalIndex, ChunkColumnGenerationDelegate original)
+        {
+            this.owner = owner;
+            Specification = specification;
+            Pass = specification.Pass;
+            OriginalIndex = originalIndex;
+            Original = original;
+            OriginalTarget = original.Target;
+            OriginalTargetType = TargetType(original);
+            OriginalMethod = original.Method;
+            Wrapper = Invoke;
+        }
+
+        public ReplacementSpec Specification { get; }
+        public EnumWorldGenPass Pass { get; }
+        public int OriginalIndex { get; }
+        public ChunkColumnGenerationDelegate Original { get; }
+        public object? OriginalTarget { get; }
+        public string OriginalTargetType { get; }
+        public System.Reflection.MethodInfo OriginalMethod { get; }
+        public ChunkColumnGenerationDelegate Wrapper { get; }
+        public int ForwardedCount;
+        public int ForwardLogIssued;
+
+        private void Invoke(IChunkColumnGenerateRequest request) => owner.InvokeOwnedHandler(this, request);
+    }
 
     private sealed class ProbeMarker
     {

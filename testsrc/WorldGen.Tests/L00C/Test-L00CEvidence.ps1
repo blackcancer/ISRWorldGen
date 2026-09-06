@@ -97,6 +97,9 @@ $artifactDirectoryName = Split-Path -Leaf (Split-Path -Parent $dll)
 Assert-Equal $artifactDirectoryName $evidence.TestedCommit 'Assembly artifact directory'
 Assert-Equal (Split-Path -Parent $pdb) (Split-Path -Parent $dll) 'Assembly/symbol directory'
 
+$expectedBeforeInventory = '0=[null];1=[0:Vintagestory.ServerMods.GenTerra::OnChunkColumnGen,1:Vintagestory.ServerMods.GenRockStrataNew::GenChunkColumn,2:ISRWorldGen.L00BDebugProbeModSystem::OnChunkColumnGeneration,3:Vintagestory.ServerMods.GenCaves::GenChunkColumn,4:Vintagestory.ServerMods.GenDevastationLayer::OnChunkColumnGeneration,5:Vintagestory.ServerMods.GenBlockLayers::OnChunkColumnGeneration];2=[0:Vintagestory.ServerMods.GenTerraPostProcess::OnChunkColumnGen,1:Vintagestory.ServerMods.GenHotSprings::GenChunkColumn,2:Vintagestory.ServerMods.GenDungeons::onChunkColumnGen,3:Vintagestory.ServerMods.GenDeposits::GenChunkColumn,4:Vintagestory.ServerMods.GenStructures::OnChunkColumnGen,5:Vintagestory.ServerMods.GenPonds::OnChunkColumnGen,6:Vintagestory.ServerMods.GenStructures::OnChunkColumnGenPostPass];3=[0:Vintagestory.GameContent.GenStoryStructures::OnChunkColumnGen,1:Vintagestory.ServerMods.GenVegetationAndPatches::OnChunkColumnGen,2:Vintagestory.ServerMods.GenRivulets::OnChunkColumnGen,3:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration];4=[0:Vintagestory.ServerMods.GenSnowLayer::OnChunkColumnGen,1:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGenerationFlood];5=[0:Vintagestory.ServerMods.GenCreatures::OnChunkColumnGen]'
+$expectedAfterInventory = '0=[null];1=[0:L00CWrapper(original=Vintagestory.ServerMods.GenTerra::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenRockStrataNew::GenChunkColumn@index=1),2:ISRWorldGen.L00BDebugProbeModSystem::OnChunkColumnGeneration,3:L00CWrapper(original=Vintagestory.ServerMods.GenCaves::GenChunkColumn@index=3),4:L00CWrapper(original=Vintagestory.ServerMods.GenDevastationLayer::OnChunkColumnGeneration@index=4),5:L00CWrapper(original=Vintagestory.ServerMods.GenBlockLayers::OnChunkColumnGeneration@index=5)];2=[0:L00CWrapper(original=Vintagestory.ServerMods.GenTerraPostProcess::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenHotSprings::GenChunkColumn@index=1),2:L00CWrapper(original=Vintagestory.ServerMods.GenDungeons::onChunkColumnGen@index=2),3:L00CWrapper(original=Vintagestory.ServerMods.GenDeposits::GenChunkColumn@index=3),4:L00CWrapper(original=Vintagestory.ServerMods.GenStructures::OnChunkColumnGen@index=4),5:L00CWrapper(original=Vintagestory.ServerMods.GenPonds::OnChunkColumnGen@index=5),6:L00CWrapper(original=Vintagestory.ServerMods.GenStructures::OnChunkColumnGenPostPass@index=6)];3=[0:L00CWrapper(original=Vintagestory.GameContent.GenStoryStructures::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenVegetationAndPatches::OnChunkColumnGen@index=1),2:L00CWrapper(original=Vintagestory.ServerMods.GenRivulets::OnChunkColumnGen@index=2),3:L00CFinalizer(before=Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration@index=3),4:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration];4=[0:L00CWrapper(original=Vintagestory.ServerMods.GenSnowLayer::OnChunkColumnGen@index=0),1:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGenerationFlood];5=[0:Vintagestory.ServerMods.GenCreatures::OnChunkColumnGen]'
+
 $sessionLogPaths = @()
 foreach ($session in @($evidence.Sessions)) {
     if ([int]$session.ProcessId -le 0) { throw 'Every session must record a real process id.' }
@@ -169,8 +172,10 @@ foreach ($session in @($evidence.Sessions)) {
         if ($beforeLine -notmatch 'staleprobe=0' -or $beforeLine -match 'ISRWorldGen\.WorldgenProbe\.L00CWorldgenProbeModSystem') {
             throw "Activated session $($session.Cycle) retained a prior L00-C delegate before installation."
         }
-        $probeTypeCount = [regex]::Matches($afterLine, 'ISRWorldGen\.WorldgenProbe\.L00CWorldgenProbeModSystem').Count
-        Assert-Equal $probeTypeCount 5 "Session $($session.Cycle) owned delegate count after installation"
+        $beforeInventory = [regex]::Match($beforeLine, ' column=(.*)$').Groups[1].Value.TrimEnd("`r")
+        $afterInventory = [regex]::Match($afterLine, ' column=(.*)$').Groups[1].Value.TrimEnd("`r")
+        Assert-Equal $beforeInventory $expectedBeforeInventory "Session $($session.Cycle) exact inventory before installation"
+        Assert-Equal $afterInventory $expectedAfterInventory "Session $($session.Cycle) exact per-delegate wrapper inventory"
 
         $loaded = [regex]::Match($log, "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded .* snapshot=([0-9A-F]{64}) .* unexpected=0")
         $afterTicks = [regex]::Match($log, "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks .* snapshot=([0-9A-F]{64}) .* unexpected=0")
@@ -187,8 +192,23 @@ foreach ($session in @($evidence.Sessions)) {
         $expectedWrites = if ([bool]$session.IsNew) { 2 } else { 0 }
         Assert-Equal $writeCount $expectedWrites "Session $($session.Cycle) fixture write count"
         $expectedCallbacks = if ([bool]$session.IsNew) { 1 } else { 0 }
-        if ($log -notmatch "L00C_DISPOSED instance=$instance removedprobe=5 restorednative=16 callbacks=$expectedCallbacks ") {
+        if ($log -notmatch "L00C_DISPOSED instance=$instance removedowned=17 restorednative=16 exact=True callbacks=$expectedCallbacks ") {
             throw "Activated session $($session.Cycle) disposal did not prove exact delegate cleanup/callback ownership."
+        }
+        $restoreLine = [regex]::Match($log, "(?m)^.*L00C_RESTORE_RESULT reason=dispose instance=$instance removedowned=17 restorednative=16 exact=True inventory=(.*)$")
+        if (-not $restoreLine.Success) {
+            throw "Activated session $($session.Cycle) lacks its exact post-restoration inventory."
+        }
+        Assert-Equal $restoreLine.Groups[1].Value.TrimEnd("`r") $expectedBeforeInventory "Session $($session.Cycle) inventory after restoration"
+
+        if ([bool]$session.IsNew) {
+            $preLighting = [regex]::Match($log, "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=prelighting .* snapshot=([0-9A-F]{64}) .* unexpected=0")
+            $postLighting = [regex]::Match($log, "L00C_LIGHTING_STABLE instance=$instance marker=$marker prelighting=([0-9A-F]{64}) postlighting=([0-9A-F]{64})")
+            if (-not $preLighting.Success -or -not $postLighting.Success) {
+                throw "New-world session $($session.Cycle) lacks its pre/post-lighting proof."
+            }
+            Assert-Equal $preLighting.Groups[1].Value $loaded.Groups[1].Value "Session $($session.Cycle) pre-lighting/full loaded snapshot"
+            Assert-Equal $postLighting.Groups[1].Value $postLighting.Groups[2].Value "Session $($session.Cycle) lighting-stable snapshot"
         }
     }
     else {

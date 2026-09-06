@@ -19,7 +19,20 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
 }
 
 $source = Get-Content -LiteralPath $sourcePath -Raw
-$forbidden = @('WipeAllHandlers', 'Task.Run(', 'GetHashCode(', 'new Random(', 'DateTime.Now', 'DateTime.UtcNow')
+$forbidden = @(
+    'WipeAllHandlers',
+    'Task.Run(',
+    'GetHashCode(',
+    'new Random(',
+    'DateTime.Now',
+    'DateTime.UtcNow',
+    'ForwardNative(',
+    'ProxyForPass(',
+    'FilterFixturePass(',
+    'removedHandlers',
+    'EnumWorldGenPass.PreDone',
+    'preDoneHandlers.Add(metadataFinalizerHandler)'
+)
 foreach ($fragment in $forbidden) {
     if ($source.Contains($fragment)) {
         throw "Forbidden L00-C fragment found: $fragment"
@@ -35,8 +48,17 @@ $required = @(
     'WorldGenTerrainHeightMap',
     'RainHeightMap',
     'TopRockIdMap',
-    'EnumWorldGenPass.PreDone',
-    'preDoneHandlers.Add(metadataFinalizerHandler)',
+    'OwnedHandler',
+    'OriginalIndex',
+    'OriginalTarget',
+    'OriginalMethod',
+    'InvokeOwnedHandler',
+    'RestoreOwnedHandlerSet',
+    'ReferenceSequenceEqual',
+    'lightingAnchorIndex',
+    'preLightingSnapshot',
+    'L00C_LIGHTING_STABLE',
+    'L00C_RESTORE_RESULT',
     'for (int y = 0; y < worldHeight; y++)',
     'chunk.Unpack_ReadOnly()',
     "canonical.Append(solid).Append(',').Append(fluid)",
