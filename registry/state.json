@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-06T13:52:00Z",
-  "integrated_commit": "fce147620d21bb9e3da2091617794993d57c2d0c",
+  "updated_utc": "2026-09-06T14:26:58.2091606Z",
+  "integrated_commit": "87b0d3878c99c14863faa36cd806726b994927ba",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -63,15 +63,20 @@
       "blocker": null
     },
     "L01-C": {
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "owner": "agent:l01_c",
       "branch": "agent/l01-c",
       "base_commit": "9683c595b526a81e01307d3fd9ef4c162b4d5014",
-      "evidence": [],
+      "evidence": [
+        "worklogs/L01-C.md",
+        "commit:87b0d3878c99c14863faa36cd806726b994927ba",
+        "local:.local/L01C-integrated/offline-final/offline-proof.json",
+        "local:.local/L01C-integrated/zero-final/offline-proof.json"
+      ],
       "blocker": null
     },
     "L02-A": {
-      "status": "BACKLOG",
+      "status": "READY",
       "owner": null,
       "branch": null,
       "base_commit": null,
