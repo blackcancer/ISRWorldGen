@@ -15,6 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $packageRoot = Join-Path $RepositoryRoot "src\WorldGen.VintageStory\bin\$Configuration\Mods\isrworldgen"
 $assemblyPath = Join-Path $packageRoot 'ISRWorldGen.dll'
+$coreAssemblyPath = Join-Path $packageRoot 'ISRWorldGen.Core.dll'
 $modInfoPath = Join-Path $packageRoot 'modinfo.json'
 
 if (-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
@@ -25,14 +26,20 @@ if (-not (Test-Path -LiteralPath $assemblyPath -PathType Leaf)) {
     throw "Packaged assembly not found: $assemblyPath"
 }
 
+if (-not (Test-Path -LiteralPath $coreAssemblyPath -PathType Leaf)) {
+    throw "Packaged core assembly not found: $coreAssemblyPath"
+}
+
 if (-not (Test-Path -LiteralPath $modInfoPath -PathType Leaf)) {
     throw "Packaged modinfo not found: $modInfoPath"
 }
 
 $allPackagedAssemblies = @(Get-ChildItem -LiteralPath $packageRoot -Recurse -File -Filter '*.dll')
-$isrAssemblies = @($allPackagedAssemblies | Where-Object Name -eq 'ISRWorldGen.dll')
-if ($allPackagedAssemblies.Count -ne 1 -or $isrAssemblies.Count -ne 1) {
-    throw "Expected one packaged DLL (ISRWorldGen.dll), found $($allPackagedAssemblies.Count) DLL(s)."
+$expectedAssemblyNames = @('ISRWorldGen.Core.dll', 'ISRWorldGen.dll')
+$actualAssemblyNames = @($allPackagedAssemblies | ForEach-Object Name | Sort-Object)
+if ($actualAssemblyNames.Count -ne $expectedAssemblyNames.Count -or
+    (Compare-Object -ReferenceObject $expectedAssemblyNames -DifferenceObject $actualAssemblyNames).Count -ne 0) {
+    throw "Expected exactly ISRWorldGen.dll and ISRWorldGen.Core.dll; found: $($actualAssemblyNames -join ', ')."
 }
 
 $log = Get-Content -LiteralPath $LogPath -Raw
@@ -57,6 +64,7 @@ if ($loadErrors.Count -ne 0) {
 }
 
 $actualHash = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
+$coreHash = (Get-FileHash -LiteralPath $coreAssemblyPath -Algorithm SHA256).Hash
 $loggedHash = $bootstrapMatches[0].Groups['sha'].Value
 if ($actualHash -ne $loggedHash) {
     throw "Loaded hash $loggedHash differs from packaged hash $actualHash."
@@ -78,6 +86,7 @@ $result = [ordered]@{
     server_ready_marker_count = $readyMatches.Count
     load_reference_error_count = $loadErrors.Count
     assembly_sha256 = $actualHash
+    core_assembly_sha256 = $coreHash
     runtime = $bootstrapMatches[0].Groups['runtime'].Value
     architecture = $bootstrapMatches[0].Groups['architecture'].Value
 }
