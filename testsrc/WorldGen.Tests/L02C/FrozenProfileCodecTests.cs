@@ -126,4 +126,88 @@ public sealed class FrozenProfileCodecTests
         Assert.AreEqual(GenerationFailureCode.InvalidInput, failure.Error.Code);
         Assert.AreEqual("atlas.profile.native-height", failure.Error.Stage);
     }
+
+    [TestMethod]
+    public void EveryTruncatedManifestBoundary_IsRejectedWithoutEscapingTypedFailure()
+    {
+        FrozenScaleProfile frozen = ProfileTestSupport.FreezeBalanced();
+        byte[] valid = FrozenScaleProfileCodec.Serialize(frozen);
+
+        for (int length = 0; length < valid.Length; length++)
+        {
+            GenerationFailure<FrozenScaleProfile> failure = ProfileTestSupport.Failure(
+                FrozenScaleProfileCodec.Reload(
+                    valid.AsSpan(0, length),
+                    frozen.GeographyConfigHash,
+                    ProfileTestSupport.QualifiedNativeConstraints()));
+            Assert.AreEqual(
+                GenerationFailureCode.CorruptData,
+                failure.Error.Code,
+                $"Unexpected failure code at truncation length {length}.");
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void HostilePayloadLengths_AreRejectedBeforeAllocation()
+    {
+        FrozenScaleProfile frozen = ProfileTestSupport.FreezeBalanced();
+        byte[] forged = FrozenScaleProfileCodec.Serialize(frozen);
+        BinaryPrimitives.WriteInt32BigEndian(forged.AsSpan(12, 4), int.MaxValue);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        GenerationFailure<FrozenScaleProfile> failure = ProfileTestSupport.Failure(
+            FrozenScaleProfileCodec.Reload(
+                forged,
+                frozen.GeographyConfigHash,
+                ProfileTestSupport.QualifiedNativeConstraints()));
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.AreEqual(GenerationFailureCode.CorruptData, failure.Error.Code);
+        Assert.AreEqual("atlas.profile.manifest-format", failure.Error.Stage);
+        Assert.IsLessThan(64 * 1024L, allocated);
+    }
+
+    [TestMethod]
+    public void InvalidUtf8Payload_IsRejectedStrictlyAfterChecksumVerification()
+    {
+        FrozenScaleProfile frozen = ProfileTestSupport.FreezeBalanced();
+        byte[] invalidUtf8 = FrozenScaleProfileCodec.Serialize(frozen);
+        invalidUtf8[24] = 0xff;
+        RewriteChecksum(invalidUtf8);
+
+        GenerationFailure<FrozenScaleProfile> failure = ProfileTestSupport.Failure(
+            FrozenScaleProfileCodec.Reload(
+                invalidUtf8,
+                frozen.GeographyConfigHash,
+                ProfileTestSupport.QualifiedNativeConstraints()));
+
+        Assert.AreEqual(GenerationFailureCode.CorruptData, failure.Error.Code);
+        Assert.AreEqual("atlas.profile.manifest-format", failure.Error.Stage);
+    }
+
+    [TestMethod]
+    public void UnknownPersistedProfileVersion_IsUnsupportedRatherThanMutation()
+    {
+        FrozenScaleProfile frozen = ProfileTestSupport.FreezeBalanced();
+        byte[] unknownProfile = FrozenScaleProfileCodec.Serialize(frozen);
+        BinaryPrimitives.WriteUInt32BigEndian(unknownProfile.AsSpan(16, 4), 999);
+        RewriteChecksum(unknownProfile);
+
+        GenerationFailure<FrozenScaleProfile> failure = ProfileTestSupport.Failure(
+            FrozenScaleProfileCodec.Reload(
+                unknownProfile,
+                frozen.GeographyConfigHash,
+                ProfileTestSupport.QualifiedNativeConstraints()));
+
+        Assert.AreEqual(GenerationFailureCode.UnsupportedVersion, failure.Error.Code);
+        Assert.AreEqual("atlas.profile.version", failure.Error.Stage);
+    }
+
+    private static void RewriteChecksum(byte[] manifest)
+    {
+        int checksumOffset = manifest.Length - Hash256.ByteWidth;
+        Hash256.Compute(manifest.AsSpan(0, checksumOffset))
+            .WriteCanonicalBytes(manifest.AsSpan(checksumOffset, Hash256.ByteWidth));
+    }
 }

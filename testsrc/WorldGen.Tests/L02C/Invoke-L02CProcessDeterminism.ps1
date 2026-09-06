@@ -17,6 +17,10 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $RepositoryRoot = [System.IO.Path]::GetFullPath($RepositoryRoot)
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$summaryPath = Join-Path $OutputDirectory "T02-05-analytical-06-process.json"
+if (Test-Path -LiteralPath $summaryPath) {
+    Remove-Item -LiteralPath $summaryPath -Force
+}
 $commit = (& git -C $RepositoryRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch "^[0-9a-f]{40}$") {
     throw "Unable to resolve exact Git commit."
@@ -30,6 +34,13 @@ try {
     for ($index = 1; $index -le 2; $index++) {
         $reportPath = Join-Path $OutputDirectory ("process-{0}.json" -f $index)
         $trxName = "process-{0}.trx" -f $index
+        $trxPath = Join-Path $OutputDirectory $trxName
+        if (Test-Path -LiteralPath $reportPath) {
+            Remove-Item -LiteralPath $reportPath -Force
+        }
+        if (Test-Path -LiteralPath $trxPath) {
+            Remove-Item -LiteralPath $trxPath -Force
+        }
         [Environment]::SetEnvironmentVariable("ISRW_L02C_PROBE_OUTPUT", $reportPath, "Process")
         & dotnet test (Join-Path $RepositoryRoot "testsrc\WorldGen.Tests\WorldGen.Tests.csproj") `
             -c Release --no-build --no-restore `
@@ -46,7 +57,11 @@ try {
             throw "L02-C process probe $index did not discover and pass exactly one test."
         }
 
-        $reports += Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+        $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+        if ($report.status -ne "PASS" -or $report.commit -ne $commit -or $report.schemaVersion -ne 1) {
+            throw "L02-C process probe $index returned stale or invalid identity evidence."
+        }
+        $reports += $report
     }
 }
 finally {
@@ -62,6 +77,7 @@ $sameContent =
     $reports[0].profileHash -eq $reports[1].profileHash -and
     $reports[0].profileBytes -eq $reports[1].profileBytes -and
     $reports[0].mapsHash -eq $reports[1].mapsHash -and
+    $reports[0].policyHash -eq $reports[1].policyHash -and
     $reports[0].diagnosticHash -eq $reports[1].diagnosticHash -and
     $reports[0].sensitivityHash -eq $reports[1].sensitivityHash
 $sameMetrics =
@@ -72,7 +88,14 @@ $sameMetrics =
     $reports[0].truePositiveCount -eq $reports[1].truePositiveCount -and
     $reports[0].trueNegativeCount -eq $reports[1].trueNegativeCount -and
     $reports[0].falsePositiveCount -eq $reports[1].falsePositiveCount -and
-    $reports[0].falseNegativeCount -eq $reports[1].falseNegativeCount
+    $reports[0].falseNegativeCount -eq $reports[1].falseNegativeCount -and
+    $reports[0].EdgeGradientThreshold -eq $reports[1].EdgeGradientThreshold -and
+    $reports[0].EdgeAlignmentThresholdPpm -eq $reports[1].EdgeAlignmentThresholdPpm -and
+    $reports[0].PeriodicityThresholdPpm -eq $reports[1].PeriodicityThresholdPpm -and
+    $reports[0].MinimumPeriodLag -eq $reports[1].MinimumPeriodLag -and
+    $reports[0].MaximumPeriodLag -eq $reports[1].MaximumPeriodLag -and
+    $reports[0].MaximumAnalysisWorkUnits -eq $reports[1].MaximumAnalysisWorkUnits -and
+    $reports[0].MaximumCorpusAnalysisWorkUnits -eq $reports[1].MaximumCorpusAnalysisWorkUnits
 $distinctProcesses = $reports[0].processId -ne $reports[1].processId
 $passed = $sameQualification -and $sameContent -and $sameMetrics -and $distinctProcesses
 
@@ -89,6 +112,14 @@ $summary = [pscustomobject][ordered]@{
     architecture = $reports[0].architecture
     profileHash = $reports[0].profileHash
     mapsHash = $reports[0].mapsHash
+    policyHash = $reports[0].policyHash
+    edgeGradientThreshold = $reports[0].EdgeGradientThreshold
+    edgeAlignmentThresholdPpm = $reports[0].EdgeAlignmentThresholdPpm
+    periodicityThresholdPpm = $reports[0].PeriodicityThresholdPpm
+    minimumPeriodLag = $reports[0].MinimumPeriodLag
+    maximumPeriodLag = $reports[0].MaximumPeriodLag
+    maximumAnalysisWorkUnits = $reports[0].MaximumAnalysisWorkUnits
+    maximumCorpusAnalysisWorkUnits = $reports[0].MaximumCorpusAnalysisWorkUnits
     diagnosticHash = $reports[0].diagnosticHash
     sensitivityHash = $reports[0].sensitivityHash
     edgeAlignmentScorePpm = $reports[0].edgeAlignmentScorePpm
@@ -98,7 +129,6 @@ $summary = [pscustomobject][ordered]@{
     falsePositiveCount = $reports[0].falsePositiveCount
     falseNegativeCount = $reports[0].falseNegativeCount
 }
-$summaryPath = Join-Path $OutputDirectory "T02-05-06-process.json"
 $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 if (-not $passed) {
     throw "L02-C process determinism proof failed. See $summaryPath"

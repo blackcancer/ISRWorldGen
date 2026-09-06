@@ -9,13 +9,51 @@ using ISRWorldGen.Core.Foundation;
 
 namespace ISRWorldGen.Core.Atlas.Profiles;
 
+public sealed record PatternInspectionBudget
+{
+    public PatternInspectionBudget(
+        long maximumPixelsPerRaster,
+        long maximumBytesPerRaster,
+        long maximumMapPairBytes)
+    {
+        if (maximumPixelsPerRaster <= 0 || maximumPixelsPerRaster >= Array.MaxLength)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumPixelsPerRaster),
+                maximumPixelsPerRaster,
+                "Raster pixel budget must be positive and below CLR array capacity.");
+        }
+
+        if (maximumBytesPerRaster <= 0 || maximumMapPairBytes < maximumBytesPerRaster)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumMapPairBytes),
+                maximumMapPairBytes,
+                "Map byte budgets must be positive and ordered.");
+        }
+
+        MaximumPixelsPerRaster = maximumPixelsPerRaster;
+        MaximumBytesPerRaster = maximumBytesPerRaster;
+        MaximumMapPairBytes = maximumMapPairBytes;
+    }
+
+    public long MaximumPixelsPerRaster { get; }
+
+    public long MaximumBytesPerRaster { get; }
+
+    public long MaximumMapPairBytes { get; }
+}
+
 public sealed class InspectionRaster
 {
-    private InspectionRaster(int width, int height, ushort[] values)
+    private const long EstimatedArrayAndWrapperBytes = 56;
+
+    private InspectionRaster(int width, int height, ushort[] values, long estimatedStorageBytes)
     {
         Width = width;
         Height = height;
         Values = Array.AsReadOnly(values);
+        EstimatedStorageBytes = estimatedStorageBytes;
         ContentChecksum = PatternCanonical.ComputeRasterHash(width, height, values);
     }
 
@@ -24,6 +62,8 @@ public sealed class InspectionRaster
     public int Height { get; }
 
     public ReadOnlyCollection<ushort> Values { get; }
+
+    public long EstimatedStorageBytes { get; }
 
     public Hash256 ContentChecksum { get; }
 
@@ -43,9 +83,11 @@ public sealed class InspectionRaster
     public static GenerationResult<InspectionRaster> Create(
         int width,
         int height,
-        IReadOnlyList<ushort> values)
+        IReadOnlyList<ushort> values,
+        PatternInspectionBudget budget)
     {
         ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(budget);
         BigInteger cellCount = (BigInteger)width * height;
         if (width <= 0 || height <= 0 || cellCount > Array.MaxLength)
         {
@@ -54,6 +96,16 @@ public sealed class InspectionRaster
                 "atlas.pattern.raster-capacity",
                 Hash256.Zero,
                 "Raster dimensions are non-positive or exceed the runtime array capacity.");
+        }
+
+        BigInteger estimatedStorageBytes = EstimatedArrayAndWrapperBytes + (cellCount * sizeof(ushort));
+        if (cellCount > budget.MaximumPixelsPerRaster || estimatedStorageBytes > budget.MaximumBytesPerRaster)
+        {
+            return PatternFailure.For<InspectionRaster>(
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.pattern.raster-budget",
+                Hash256.Zero,
+                $"Raster requires {cellCount} pixels and {estimatedStorageBytes} estimated bytes, exceeding explicit inspection budget.");
         }
 
         int expectedCount = (int)cellCount;
@@ -72,7 +124,11 @@ public sealed class InspectionRaster
             copy[index] = values[index];
         }
 
-        return GenerationResult<InspectionRaster>.Success(new InspectionRaster(width, height, copy));
+        return GenerationResult<InspectionRaster>.Success(new InspectionRaster(
+            width,
+            height,
+            copy,
+            checked((long)estimatedStorageBytes)));
     }
 }
 
@@ -93,10 +149,12 @@ public sealed class PatternInspectionMaps
 
     public static GenerationResult<PatternInspectionMaps> Create(
         InspectionRaster finalOutput,
-        InspectionRaster atlasEdges)
+        InspectionRaster atlasEdges,
+        PatternInspectionBudget budget)
     {
         ArgumentNullException.ThrowIfNull(finalOutput);
         ArgumentNullException.ThrowIfNull(atlasEdges);
+        ArgumentNullException.ThrowIfNull(budget);
         if (ReferenceEquals(finalOutput, atlasEdges))
         {
             return PatternFailure.For<PatternInspectionMaps>(
@@ -115,6 +173,16 @@ public sealed class PatternInspectionMaps
                 "Final output and atlas-edge maps require identical dimensions.");
         }
 
+        BigInteger mapPairBytes = (BigInteger)finalOutput.EstimatedStorageBytes + atlasEdges.EstimatedStorageBytes;
+        if (mapPairBytes > budget.MaximumMapPairBytes)
+        {
+            return PatternFailure.For<PatternInspectionMaps>(
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.pattern.map-budget",
+                finalOutput.ContentChecksum,
+                $"Inspection map pair requires {mapPairBytes} estimated bytes, exceeding explicit pair budget.");
+        }
+
         return GenerationResult<PatternInspectionMaps>.Success(new PatternInspectionMaps(finalOutput, atlasEdges));
     }
 }
@@ -131,7 +199,9 @@ public sealed record PatternDiagnosticPolicy
         int edgeAlignmentThresholdPpm,
         int periodicityThresholdPpm,
         int minimumPeriodLag,
-        int maximumPeriodLag)
+        int maximumPeriodLag,
+        long maximumAnalysisWorkUnits,
+        long maximumCorpusAnalysisWorkUnits)
     {
         if (!ProfileCanonicalEncoding.IsCanonicalIdentifier(policyId))
         {
@@ -159,6 +229,14 @@ public sealed record PatternDiagnosticPolicy
             throw new ArgumentOutOfRangeException(nameof(minimumPeriodLag), "Period lag interval is invalid.");
         }
 
+        if (maximumAnalysisWorkUnits <= 0 || maximumCorpusAnalysisWorkUnits < maximumAnalysisWorkUnits)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumCorpusAnalysisWorkUnits),
+                maximumCorpusAnalysisWorkUnits,
+                "Analysis work budgets must be positive and ordered.");
+        }
+
         PolicyId = policyId;
         PolicyVersion = policyVersion;
         EdgeGradientThreshold = edgeGradientThreshold;
@@ -166,6 +244,9 @@ public sealed record PatternDiagnosticPolicy
         PeriodicityThresholdPpm = periodicityThresholdPpm;
         MinimumPeriodLag = minimumPeriodLag;
         MaximumPeriodLag = maximumPeriodLag;
+        MaximumAnalysisWorkUnits = maximumAnalysisWorkUnits;
+        MaximumCorpusAnalysisWorkUnits = maximumCorpusAnalysisWorkUnits;
+        ContentChecksum = PatternCanonical.ComputePolicyHash(this);
     }
 
     public string PolicyId { get; }
@@ -181,6 +262,12 @@ public sealed record PatternDiagnosticPolicy
     public int MinimumPeriodLag { get; }
 
     public int MaximumPeriodLag { get; }
+
+    public long MaximumAnalysisWorkUnits { get; }
+
+    public long MaximumCorpusAnalysisWorkUnits { get; }
+
+    public Hash256 ContentChecksum { get; }
 }
 
 public enum PatternReviewDisposition
@@ -193,6 +280,7 @@ public sealed class PatternDiagnosticReport
     internal PatternDiagnosticReport(
         string policyId,
         uint policyVersion,
+        Hash256 policyChecksum,
         Hash256 mapsChecksum,
         int edgeAlignmentScorePpm,
         int axisPeriodicityScorePpm,
@@ -204,6 +292,7 @@ public sealed class PatternDiagnosticReport
     {
         PolicyId = policyId;
         PolicyVersion = policyVersion;
+        PolicyChecksum = policyChecksum;
         MapsChecksum = mapsChecksum;
         EdgeAlignmentScorePpm = edgeAlignmentScorePpm;
         AxisPeriodicityScorePpm = axisPeriodicityScorePpm;
@@ -221,6 +310,8 @@ public sealed class PatternDiagnosticReport
     public string PolicyId { get; }
 
     public uint PolicyVersion { get; }
+
+    public Hash256 PolicyChecksum { get; }
 
     public Hash256 MapsChecksum { get; }
 
@@ -247,11 +338,27 @@ public sealed class PatternDiagnosticReport
     public Hash256 ContentChecksum { get; }
 }
 
+public sealed class PatternAnalysisEstimate
+{
+    internal PatternAnalysisEstimate(long rasterPixels, int evaluatedLagCount, long workUnits)
+    {
+        RasterPixels = rasterPixels;
+        EvaluatedLagCount = evaluatedLagCount;
+        WorkUnits = workUnits;
+    }
+
+    public long RasterPixels { get; }
+
+    public int EvaluatedLagCount { get; }
+
+    public long WorkUnits { get; }
+}
+
 public static class PatternDiagnostics
 {
     public const int PartsPerMillion = 1_000_000;
 
-    public static GenerationResult<PatternDiagnosticReport> Analyze(
+    public static GenerationResult<PatternAnalysisEstimate> Estimate(
         PatternInspectionMaps maps,
         PatternDiagnosticPolicy policy)
     {
@@ -260,11 +367,54 @@ public static class PatternDiagnostics
         if (policy.MaximumPeriodLag >= maps.FinalOutput.Width ||
             policy.MaximumPeriodLag >= maps.FinalOutput.Height)
         {
-            return PatternFailure.For<PatternDiagnosticReport>(
+            return PatternFailure.For<PatternAnalysisEstimate>(
                 GenerationFailureCode.InvalidInput,
                 "atlas.pattern.policy-range",
                 maps.ContentChecksum,
                 "Diagnostic lag range does not fit both raster axes.");
+        }
+
+        int lagCount = checked(policy.MaximumPeriodLag - policy.MinimumPeriodLag + 1);
+        BigInteger rasterPixels = (BigInteger)maps.FinalOutput.Width * maps.FinalOutput.Height;
+        BigInteger workUnits = rasterPixels + (2 * rasterPixels * lagCount);
+        if (workUnits > long.MaxValue)
+        {
+            return PatternFailure.For<PatternAnalysisEstimate>(
+                GenerationFailureCode.InvalidInput,
+                "atlas.pattern.analysis-capacity",
+                maps.ContentChecksum,
+                "Diagnostic work cannot be represented by the qualified 64-bit model.");
+        }
+
+        if (workUnits > policy.MaximumAnalysisWorkUnits)
+        {
+            return PatternFailure.For<PatternAnalysisEstimate>(
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.pattern.analysis-budget",
+                maps.ContentChecksum,
+                $"Diagnostic requires {workUnits} work units, exceeding explicit policy budget {policy.MaximumAnalysisWorkUnits}.");
+        }
+
+        return GenerationResult<PatternAnalysisEstimate>.Success(new PatternAnalysisEstimate(
+            checked((long)rasterPixels),
+            lagCount,
+            checked((long)workUnits)));
+    }
+
+    public static GenerationResult<PatternDiagnosticReport> Analyze(
+        PatternInspectionMaps maps,
+        PatternDiagnosticPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(maps);
+        ArgumentNullException.ThrowIfNull(policy);
+        GenerationResult<PatternAnalysisEstimate> estimateResult = Estimate(maps, policy);
+        if (estimateResult is GenerationFailure<PatternAnalysisEstimate> estimateFailure)
+        {
+            return PatternFailure.For<PatternDiagnosticReport>(
+                estimateFailure.Error.Code,
+                estimateFailure.Error.Stage,
+                estimateFailure.Error.InputHash,
+                estimateFailure.Error.Details);
         }
 
         int edgeAlignment = ComputeEdgeAlignment(maps, policy.EdgeGradientThreshold);
@@ -293,6 +443,7 @@ public static class PatternDiagnostics
         return GenerationResult<PatternDiagnosticReport>.Success(new PatternDiagnosticReport(
             policy.PolicyId,
             policy.PolicyVersion,
+            policy.ContentChecksum,
             maps.ContentChecksum,
             edgeAlignment,
             periodicity,
@@ -450,6 +601,7 @@ public sealed class PatternSensitivityReport
     internal PatternSensitivityReport(
         string policyId,
         uint policyVersion,
+        Hash256 policyChecksum,
         IEnumerable<PatternCaseOutcome> cases,
         int truePositiveCount,
         int trueNegativeCount,
@@ -460,6 +612,7 @@ public sealed class PatternSensitivityReport
     {
         PolicyId = policyId;
         PolicyVersion = policyVersion;
+        PolicyChecksum = policyChecksum;
         Cases = Array.AsReadOnly(cases.ToArray());
         TruePositiveCount = truePositiveCount;
         TrueNegativeCount = trueNegativeCount;
@@ -480,6 +633,8 @@ public sealed class PatternSensitivityReport
     public string PolicyId { get; }
 
     public uint PolicyVersion { get; }
+
+    public Hash256 PolicyChecksum { get; }
 
     public ReadOnlyCollection<PatternCaseOutcome> Cases { get; }
 
@@ -540,7 +695,32 @@ public static class PatternSensitivityEvaluator
             }
         }
 
+        BigInteger estimatedCorpusWork = BigInteger.Zero;
+        for (int index = 0; index < captured.Length; index++)
+        {
+            GenerationResult<PatternAnalysisEstimate> estimateResult = PatternDiagnostics.Estimate(captured[index].Maps, policy);
+            if (estimateResult is GenerationFailure<PatternAnalysisEstimate> estimateFailure)
+            {
+                return PatternFailure.For<PatternSensitivityReport>(
+                    estimateFailure.Error.Code,
+                    estimateFailure.Error.Stage,
+                    estimateFailure.Error.InputHash,
+                    $"Case {captured[index].CaseId} failed planning: {estimateFailure.Error.Details}");
+            }
+
+            estimatedCorpusWork += ((GenerationSuccess<PatternAnalysisEstimate>)estimateResult).Snapshot.WorkUnits;
+            if (estimatedCorpusWork > policy.MaximumCorpusAnalysisWorkUnits)
+            {
+                return PatternFailure.For<PatternSensitivityReport>(
+                    GenerationFailureCode.BudgetExceeded,
+                    "atlas.pattern.corpus-work-budget",
+                    Hash256.Zero,
+                    $"Corpus requires {estimatedCorpusWork} planned work units, exceeding explicit policy budget {policy.MaximumCorpusAnalysisWorkUnits}.");
+            }
+        }
+
         var outcomes = new PatternCaseOutcome[captured.Length];
+        var diagnosticCache = new Dictionary<Hash256, PatternDiagnosticReport>();
         int truePositive = 0;
         int trueNegative = 0;
         int falsePositive = 0;
@@ -548,17 +728,22 @@ public static class PatternSensitivityEvaluator
         for (int index = 0; index < captured.Length; index++)
         {
             PatternCorpusCase item = captured[index];
-            GenerationResult<PatternDiagnosticReport> diagnosticResult = PatternDiagnostics.Analyze(item.Maps, policy);
-            if (diagnosticResult is GenerationFailure<PatternDiagnosticReport> failure)
+            if (!diagnosticCache.TryGetValue(item.Maps.ContentChecksum, out PatternDiagnosticReport? diagnostic))
             {
-                return PatternFailure.For<PatternSensitivityReport>(
-                    failure.Error.Code,
-                    failure.Error.Stage,
-                    failure.Error.InputHash,
-                    $"Case {item.CaseId} failed: {failure.Error.Details}");
+                GenerationResult<PatternDiagnosticReport> diagnosticResult = PatternDiagnostics.Analyze(item.Maps, policy);
+                if (diagnosticResult is GenerationFailure<PatternDiagnosticReport> failure)
+                {
+                    return PatternFailure.For<PatternSensitivityReport>(
+                        failure.Error.Code,
+                        failure.Error.Stage,
+                        failure.Error.InputHash,
+                        $"Case {item.CaseId} failed: {failure.Error.Details}");
+                }
+
+                diagnostic = ((GenerationSuccess<PatternDiagnosticReport>)diagnosticResult).Snapshot;
+                diagnosticCache.Add(item.Maps.ContentChecksum, diagnostic);
             }
 
-            PatternDiagnosticReport diagnostic = ((GenerationSuccess<PatternDiagnosticReport>)diagnosticResult).Snapshot;
             PatternClassification classification;
             if (item.ExpectedVisibleVoronoi && diagnostic.SignalDetected)
             {
@@ -594,11 +779,16 @@ public static class PatternSensitivityEvaluator
 
         int positives = checked(truePositive + falseNegative);
         int negatives = checked(trueNegative + falsePositive);
-        int sensitivity = positives == 0 ? 0 : checked((truePositive * PatternDiagnostics.PartsPerMillion) / positives);
-        int specificity = negatives == 0 ? 0 : checked((trueNegative * PatternDiagnostics.PartsPerMillion) / negatives);
+        int sensitivity = positives == 0
+            ? 0
+            : checked((int)(((long)truePositive * PatternDiagnostics.PartsPerMillion) / positives));
+        int specificity = negatives == 0
+            ? 0
+            : checked((int)(((long)trueNegative * PatternDiagnostics.PartsPerMillion) / negatives));
         return GenerationResult<PatternSensitivityReport>.Success(new PatternSensitivityReport(
             policy.PolicyId,
             policy.PolicyVersion,
+            policy.ContentChecksum,
             outcomes,
             truePositive,
             trueNegative,
@@ -669,6 +859,21 @@ public static class InspectionMapRenderer
 
 internal static class PatternCanonical
 {
+    internal static Hash256 ComputePolicyHash(PatternDiagnosticPolicy policy)
+    {
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendText(hash, policy.PolicyId);
+        AppendUInt32(hash, policy.PolicyVersion);
+        AppendInt32(hash, policy.EdgeGradientThreshold);
+        AppendInt32(hash, policy.EdgeAlignmentThresholdPpm);
+        AppendInt32(hash, policy.PeriodicityThresholdPpm);
+        AppendInt32(hash, policy.MinimumPeriodLag);
+        AppendInt32(hash, policy.MaximumPeriodLag);
+        AppendInt64(hash, policy.MaximumAnalysisWorkUnits);
+        AppendInt64(hash, policy.MaximumCorpusAnalysisWorkUnits);
+        return Hash256.FromCanonicalBytes(hash.GetHashAndReset());
+    }
+
     internal static Hash256 ComputeRasterHash(int width, int height, IReadOnlyList<ushort> values)
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -702,6 +907,7 @@ internal static class PatternCanonical
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         AppendText(hash, report.PolicyId);
         AppendUInt32(hash, report.PolicyVersion);
+        AppendHash(hash, report.PolicyChecksum);
         AppendHash(hash, report.MapsChecksum);
         AppendInt32(hash, report.EdgeAlignmentScorePpm);
         AppendInt32(hash, report.AxisPeriodicityScorePpm);
@@ -722,6 +928,7 @@ internal static class PatternCanonical
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         AppendText(hash, report.PolicyId);
         AppendUInt32(hash, report.PolicyVersion);
+        AppendHash(hash, report.PolicyChecksum);
         AppendInt32(hash, report.TruePositiveCount);
         AppendInt32(hash, report.TrueNegativeCount);
         AppendInt32(hash, report.FalsePositiveCount);
@@ -773,6 +980,13 @@ internal static class PatternCanonical
     {
         Span<byte> encoded = stackalloc byte[4];
         BinaryPrimitives.WriteInt32BigEndian(encoded, value);
+        hash.AppendData(encoded);
+    }
+
+    private static void AppendInt64(IncrementalHash hash, long value)
+    {
+        Span<byte> encoded = stackalloc byte[8];
+        BinaryPrimitives.WriteInt64BigEndian(encoded, value);
         hash.AppendData(encoded);
     }
 }

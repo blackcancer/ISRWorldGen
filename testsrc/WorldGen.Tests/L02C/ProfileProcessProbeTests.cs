@@ -12,15 +12,16 @@ public sealed class ProfileProcessProbeTests
     {
         FrozenScaleProfile profile = ProfileTestSupport.FreezeBalanced();
         PatternInspectionMaps maps = PatternTestSupport.VisibleVoronoiWitness();
+        PatternDiagnosticPolicy policy = PatternTestSupport.CalibratedPolicy();
         PatternDiagnosticReport diagnostic = ProfileTestSupport.Success(
-            PatternDiagnostics.Analyze(maps, PatternTestSupport.CalibratedPolicy()));
+            PatternDiagnostics.Analyze(maps, policy));
         PatternSensitivityReport sensitivity = ProfileTestSupport.Success(PatternSensitivityEvaluator.Evaluate(
         [
             new PatternCorpusCase("visible", true, maps),
             new PatternCorpusCase("smooth", false, PatternTestSupport.SmoothField()),
             new PatternCorpusCase("periodic-other", false, PatternTestSupport.PeriodicNonVoronoi()),
             new PatternCorpusCase("low-contrast", true, PatternTestSupport.LowContrastWitness()),
-        ], PatternTestSupport.CalibratedPolicy()));
+        ], policy));
 
         Assert.IsTrue(diagnostic.SignalDetected);
         Assert.AreEqual(1, sensitivity.FalsePositiveCount);
@@ -41,11 +42,19 @@ public sealed class ProfileProcessProbeTests
             schemaVersion = 1,
             status = "PASS",
             requirement = new[] { "R02-05", "R02-06" },
-            test = new[] { "T02-05", "T02-06-analytical" },
+            test = new[] { "T02-05-analytical", "T02-06-analytical" },
             commit,
             profileHash = profile.GeographyConfigHash.ToString(),
             profileBytes = FrozenScaleProfileCodec.Serialize(profile).Length,
             mapsHash = maps.ContentChecksum.ToString(),
+            policyHash = policy.ContentChecksum.ToString(),
+            policy.EdgeGradientThreshold,
+            policy.EdgeAlignmentThresholdPpm,
+            policy.PeriodicityThresholdPpm,
+            policy.MinimumPeriodLag,
+            policy.MaximumPeriodLag,
+            policy.MaximumAnalysisWorkUnits,
+            policy.MaximumCorpusAnalysisWorkUnits,
             diagnosticHash = diagnostic.ContentChecksum.ToString(),
             sensitivityHash = sensitivity.ContentChecksum.ToString(),
             diagnostic.EdgeAlignmentScorePpm,

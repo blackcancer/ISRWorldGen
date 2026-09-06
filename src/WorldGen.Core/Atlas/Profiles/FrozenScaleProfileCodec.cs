@@ -106,6 +106,15 @@ public static class FrozenScaleProfileCodec
                 return Corrupt("Manifest payload is not canonical.", "atlas.profile.manifest-format");
             }
 
+            if (definition.ProfileVersion != ScaleProfileCatalog.SupportedProfileVersion)
+            {
+                return Fail(
+                    GenerationFailureCode.UnsupportedVersion,
+                    "atlas.profile.version",
+                    ProfileCanonicalEncoding.TryComputeConfigurationHash(definition),
+                    $"Profile version {definition.ProfileVersion} is unsupported.");
+            }
+
             Hash256 actualGeographyHash = ProfileCanonicalEncoding.ComputeConfigurationHash(definition);
             if (actualGeographyHash != expectedGeographyConfigHash)
             {

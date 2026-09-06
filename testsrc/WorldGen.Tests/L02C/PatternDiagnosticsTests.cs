@@ -22,8 +22,10 @@ public sealed class PatternDiagnosticsTests
         Assert.IsTrue(report.PeriodicityExceeded);
         Assert.IsGreaterThanOrEqualTo(policy.EdgeAlignmentThresholdPpm, report.EdgeAlignmentScorePpm);
         Assert.IsGreaterThanOrEqualTo(policy.PeriodicityThresholdPpm, report.AxisPeriodicityScorePpm);
-        Assert.IsTrue(report.StrongestHorizontalLag is 8 or 16);
-        Assert.IsTrue(report.StrongestVerticalLag is 8 or 16);
+        Assert.IsGreaterThanOrEqualTo(policy.MinimumPeriodLag, report.StrongestHorizontalLag);
+        Assert.IsLessThanOrEqualTo(policy.MaximumPeriodLag, report.StrongestHorizontalLag);
+        Assert.IsGreaterThanOrEqualTo(policy.MinimumPeriodLag, report.StrongestVerticalLag);
+        Assert.IsLessThanOrEqualTo(policy.MaximumPeriodLag, report.StrongestVerticalLag);
         Assert.IsTrue(report.RequiresQualitativeReview);
     }
 
@@ -119,7 +121,7 @@ public sealed class PatternDiagnosticsTests
         InspectionRaster edges = PatternTestSupport.Raster(8, 2, new ushort[16]);
 
         GenerationFailure<PatternInspectionMaps> failure = ProfileTestSupport.Failure(
-            PatternInspectionMaps.Create(final, edges));
+            PatternInspectionMaps.Create(final, edges, PatternTestSupport.InspectionBudget()));
 
         Assert.AreEqual(GenerationFailureCode.InvalidInput, failure.Error.Code);
         Assert.AreEqual("atlas.pattern.map-dimensions", failure.Error.Stage);
@@ -131,11 +133,65 @@ public sealed class PatternDiagnosticsTests
         var values = new ImpossibleRasterList(int.MaxValue);
 
         GenerationFailure<InspectionRaster> failure = ProfileTestSupport.Failure(
-            InspectionRaster.Create(int.MaxValue, int.MaxValue, values));
+            InspectionRaster.Create(int.MaxValue, int.MaxValue, values, PatternTestSupport.InspectionBudget()));
 
         Assert.AreEqual(GenerationFailureCode.InvalidInput, failure.Error.Code);
         Assert.AreEqual("atlas.pattern.raster-capacity", failure.Error.Stage);
         Assert.AreEqual(0, values.EnumerationCount);
+        Assert.AreEqual(0, values.IndexAccessCount);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void LargeRepresentableRaster_IsRefusedByExplicitBudgetBeforeCallerAccess()
+    {
+        const int width = 20_000;
+        const int height = 20_000;
+        var values = new ImpossibleRasterList(width * height);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        GenerationFailure<InspectionRaster> failure = ProfileTestSupport.Failure(
+            InspectionRaster.Create(width, height, values, PatternTestSupport.InspectionBudget()));
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, failure.Error.Code);
+        Assert.AreEqual("atlas.pattern.raster-budget", failure.Error.Stage);
+        Assert.AreEqual(0, values.EnumerationCount);
+        Assert.AreEqual(0, values.IndexAccessCount);
+        Assert.IsLessThan(64 * 1024L, allocated);
+    }
+
+    [TestMethod]
+    public void MapPairAndAnalysisWork_ArePreflightedAgainstExplicitBudgets()
+    {
+        var permissive = new PatternInspectionBudget(100, 100, 200);
+        InspectionRaster final = ProfileTestSupport.Success(InspectionRaster.Create(4, 4, new ushort[16], permissive));
+        InspectionRaster edges = ProfileTestSupport.Success(InspectionRaster.Create(4, 4, new ushort[16], permissive));
+        var pairLimited = new PatternInspectionBudget(100, 100, 100);
+        GenerationFailure<PatternInspectionMaps> pairFailure = ProfileTestSupport.Failure(
+            PatternInspectionMaps.Create(final, edges, pairLimited));
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, pairFailure.Error.Code);
+        Assert.AreEqual("atlas.pattern.map-budget", pairFailure.Error.Stage);
+
+        PatternDiagnosticPolicy normal = PatternTestSupport.CalibratedPolicy();
+        var workLimited = new PatternDiagnosticPolicy(
+            normal.PolicyId,
+            normal.PolicyVersion,
+            normal.EdgeGradientThreshold,
+            normal.EdgeAlignmentThresholdPpm,
+            normal.PeriodicityThresholdPpm,
+            normal.MinimumPeriodLag,
+            normal.MaximumPeriodLag,
+            maximumAnalysisWorkUnits: 1_000,
+            maximumCorpusAnalysisWorkUnits: 1_000);
+        GenerationFailure<PatternAnalysisEstimate> estimateFailure = ProfileTestSupport.Failure(
+            PatternDiagnostics.Estimate(PatternTestSupport.VisibleVoronoiWitness(), workLimited));
+        GenerationFailure<PatternDiagnosticReport> analysisFailure = ProfileTestSupport.Failure(
+            PatternDiagnostics.Analyze(PatternTestSupport.VisibleVoronoiWitness(), workLimited));
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, estimateFailure.Error.Code);
+        Assert.AreEqual("atlas.pattern.analysis-budget", estimateFailure.Error.Stage);
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, analysisFailure.Error.Code);
+        Assert.AreEqual("atlas.pattern.analysis-budget", analysisFailure.Error.Stage);
     }
 
     [TestMethod]
@@ -148,7 +204,9 @@ public sealed class PatternDiagnosticsTests
             edgeAlignmentThresholdPpm: 1_000_001,
             periodicityThresholdPpm: 1,
             minimumPeriodLag: 2,
-            maximumPeriodLag: 8));
+            maximumPeriodLag: 8,
+            maximumAnalysisWorkUnits: 100_000,
+            maximumCorpusAnalysisWorkUnits: 1_000_000));
 
         PatternInspectionMaps maps = PatternTestSupport.VisibleVoronoiWitness();
         PatternDiagnosticPolicy tooLarge = new(
@@ -158,11 +216,62 @@ public sealed class PatternDiagnosticsTests
             edgeAlignmentThresholdPpm: 1,
             periodicityThresholdPpm: 1,
             minimumPeriodLag: 2,
-            maximumPeriodLag: 64);
+            maximumPeriodLag: 64,
+            maximumAnalysisWorkUnits: 100_000,
+            maximumCorpusAnalysisWorkUnits: 1_000_000);
         GenerationFailure<PatternDiagnosticReport> failure = ProfileTestSupport.Failure(
             PatternDiagnostics.Analyze(maps, tooLarge));
         Assert.AreEqual(GenerationFailureCode.InvalidInput, failure.Error.Code);
         Assert.AreEqual("atlas.pattern.policy-range", failure.Error.Stage);
+    }
+
+    [TestMethod]
+    public void PolicyIdentity_CoversEveryEffectiveThresholdLagAndBudget()
+    {
+        PatternDiagnosticPolicy first = PatternTestSupport.CalibratedPolicy();
+        var second = new PatternDiagnosticPolicy(
+            first.PolicyId,
+            first.PolicyVersion,
+            edgeGradientThreshold: first.EdgeGradientThreshold + 1,
+            first.EdgeAlignmentThresholdPpm,
+            first.PeriodicityThresholdPpm,
+            first.MinimumPeriodLag,
+            first.MaximumPeriodLag,
+            first.MaximumAnalysisWorkUnits,
+            first.MaximumCorpusAnalysisWorkUnits);
+        PatternInspectionMaps maps = PatternTestSupport.VisibleVoronoiWitness();
+        PatternDiagnosticReport firstReport = ProfileTestSupport.Success(PatternDiagnostics.Analyze(maps, first));
+        PatternDiagnosticReport secondReport = ProfileTestSupport.Success(PatternDiagnostics.Analyze(maps, second));
+        PatternSensitivityReport firstSensitivity = ProfileTestSupport.Success(PatternSensitivityEvaluator.Evaluate(
+            new[] { new PatternCorpusCase("same-result", true, maps) }, first));
+        PatternSensitivityReport secondSensitivity = ProfileTestSupport.Success(PatternSensitivityEvaluator.Evaluate(
+            new[] { new PatternCorpusCase("same-result", true, maps) }, second));
+
+        Assert.AreNotEqual(first.ContentChecksum, second.ContentChecksum);
+        Assert.AreNotEqual(firstReport.PolicyChecksum, secondReport.PolicyChecksum);
+        Assert.AreNotEqual(firstReport.ContentChecksum, secondReport.ContentChecksum);
+        Assert.AreNotEqual(firstSensitivity.PolicyChecksum, secondSensitivity.PolicyChecksum);
+        Assert.AreNotEqual(firstSensitivity.ContentChecksum, secondSensitivity.ContentChecksum);
+        Assert.AreEqual(firstReport.EdgeAlignmentScorePpm, secondReport.EdgeAlignmentScorePpm);
+        Assert.AreEqual(firstReport.AxisPeriodicityScorePpm, secondReport.AxisPeriodicityScorePpm);
+    }
+
+    [TestMethod]
+    public void TenThousandHomogeneousCases_DoNotOverflowSensitivityArithmetic()
+    {
+        PatternInspectionMaps witness = PatternTestSupport.VisibleVoronoiWitness();
+        PatternCorpusCase[] corpus = Enumerable.Range(0, 10_000)
+            .Select(index => new PatternCorpusCase($"visible-{index:D5}", true, witness))
+            .ToArray();
+
+        PatternSensitivityReport report = ProfileTestSupport.Success(
+            PatternSensitivityEvaluator.Evaluate(corpus, PatternTestSupport.CalibratedPolicy()));
+
+        Assert.AreEqual(10_000, report.TruePositiveCount);
+        Assert.AreEqual(0, report.FalseNegativeCount);
+        Assert.AreEqual(PatternDiagnostics.PartsPerMillion, report.SensitivityPpm);
+        Assert.AreEqual(0, report.SpecificityPpm);
+        Assert.HasCount(10_000, report.Cases);
     }
 
     [TestMethod]
@@ -172,8 +281,10 @@ public sealed class PatternDiagnosticsTests
         string outputDirectory = Path.Combine(repositoryRoot, ".local", "L02C", "qualitative-evidence");
         Directory.CreateDirectory(outputDirectory);
         PatternInspectionMaps witness = PatternTestSupport.VisibleVoronoiWitness();
+        PatternInspectionMaps control = PatternTestSupport.SmoothField();
         PatternDiagnosticPolicy policy = PatternTestSupport.CalibratedPolicy();
         PatternDiagnosticReport diagnostic = ProfileTestSupport.Success(PatternDiagnostics.Analyze(witness, policy));
+        PatternDiagnosticReport controlDiagnostic = ProfileTestSupport.Success(PatternDiagnostics.Analyze(control, policy));
         PatternSensitivityReport sensitivity = ProfileTestSupport.Success(PatternSensitivityEvaluator.Evaluate(
         [
             new PatternCorpusCase("visible-voronoi", true, witness),
@@ -184,36 +295,73 @@ public sealed class PatternDiagnosticsTests
 
         string finalPath = Path.Combine(outputDirectory, "visible-voronoi-final.bmp");
         string edgesPath = Path.Combine(outputDirectory, "visible-voronoi-edges.bmp");
+        string controlFinalPath = Path.Combine(outputDirectory, "smooth-anisotropic-final.bmp");
+        string controlEdgesPath = Path.Combine(outputDirectory, "smooth-anisotropic-edges.bmp");
         string reportPath = Path.Combine(outputDirectory, "sensitivity-report.json");
         File.WriteAllBytes(finalPath, InspectionMapRenderer.RenderBitmap24(witness.FinalOutput));
         File.WriteAllBytes(edgesPath, InspectionMapRenderer.RenderBitmap24(witness.AtlasEdges));
+        File.WriteAllBytes(controlFinalPath, InspectionMapRenderer.RenderBitmap24(control.FinalOutput));
+        File.WriteAllBytes(controlEdgesPath, InspectionMapRenderer.RenderBitmap24(control.AtlasEdges));
         File.WriteAllText(reportPath, JsonSerializer.Serialize(new
         {
             schemaVersion = 1,
             status = "REVIEW_REQUIRED",
             requirement = "R02-06",
-            test = "T02-06",
+            test = "T02-06-analytical-review",
             detectorPolicy = policy.PolicyId,
             detectorPolicyVersion = policy.PolicyVersion,
-            mapsChecksum = witness.ContentChecksum.ToString(),
-            diagnosticChecksum = diagnostic.ContentChecksum.ToString(),
+            detectorPolicyChecksum = policy.ContentChecksum.ToString(),
+            policy.EdgeGradientThreshold,
+            policy.EdgeAlignmentThresholdPpm,
+            policy.PeriodicityThresholdPpm,
+            policy.MinimumPeriodLag,
+            policy.MaximumPeriodLag,
+            policy.MaximumAnalysisWorkUnits,
+            policy.MaximumCorpusAnalysisWorkUnits,
+            positiveWitness = new
+            {
+                expectedSignal = true,
+                actualSignal = diagnostic.SignalDetected,
+                mapsChecksum = witness.ContentChecksum.ToString(),
+                diagnosticChecksum = diagnostic.ContentChecksum.ToString(),
+                diagnostic.EdgeAlignmentScorePpm,
+                diagnostic.AxisPeriodicityScorePpm,
+            },
+            smoothAnisotropicControl = new
+            {
+                expectedSignal = false,
+                actualSignal = controlDiagnostic.SignalDetected,
+                mapsChecksum = control.ContentChecksum.ToString(),
+                diagnosticChecksum = controlDiagnostic.ContentChecksum.ToString(),
+                controlDiagnostic.EdgeAlignmentScorePpm,
+                controlDiagnostic.AxisPeriodicityScorePpm,
+            },
             sensitivityChecksum = sensitivity.ContentChecksum.ToString(),
-            edgeAlignmentScorePpm = diagnostic.EdgeAlignmentScorePpm,
-            axisPeriodicityScorePpm = diagnostic.AxisPeriodicityScorePpm,
             truePositiveCount = sensitivity.TruePositiveCount,
             trueNegativeCount = sensitivity.TrueNegativeCount,
             falsePositiveCount = sensitivity.FalsePositiveCount,
             falseNegativeCount = sensitivity.FalseNegativeCount,
             limitations = sensitivity.Limitations,
-            evidenceMaps = new[] { Path.GetFileName(finalPath), Path.GetFileName(edgesPath) },
+            evidenceMaps = new[]
+            {
+                Path.GetFileName(controlFinalPath),
+                Path.GetFileName(controlEdgesPath),
+                Path.GetFileName(finalPath),
+                Path.GetFileName(edgesPath),
+            },
         }, new JsonSerializerOptions { WriteIndented = true }));
 
         Assert.IsTrue(File.Exists(finalPath));
         Assert.IsTrue(File.Exists(edgesPath));
+        Assert.IsTrue(File.Exists(controlFinalPath));
+        Assert.IsTrue(File.Exists(controlEdgesPath));
         Assert.IsTrue(File.Exists(reportPath));
         CollectionAssert.AreEqual(new byte[] { (byte)'B', (byte)'M' }, File.ReadAllBytes(finalPath)[..2]);
         CollectionAssert.AreEqual(new byte[] { (byte)'B', (byte)'M' }, File.ReadAllBytes(edgesPath)[..2]);
         CollectionAssert.AreNotEqual(File.ReadAllBytes(finalPath), File.ReadAllBytes(edgesPath));
+        CollectionAssert.AreNotEqual(File.ReadAllBytes(controlFinalPath), File.ReadAllBytes(controlEdgesPath));
+        Assert.IsTrue(diagnostic.SignalDetected);
+        Assert.IsFalse(controlDiagnostic.SignalDetected);
         using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(reportPath));
         Assert.AreEqual("REVIEW_REQUIRED", document.RootElement.GetProperty("status").GetString());
         Assert.AreEqual(1, document.RootElement.GetProperty("falsePositiveCount").GetInt32());
@@ -226,9 +374,18 @@ public sealed class PatternDiagnosticsTests
 
         public int Count { get; }
 
-        public ushort this[int index] => throw new NotSupportedException();
+        public ushort this[int index]
+        {
+            get
+            {
+                IndexAccessCount++;
+                throw new NotSupportedException();
+            }
+        }
 
         public int EnumerationCount { get; private set; }
+
+        public int IndexAccessCount { get; private set; }
 
         public IEnumerator<ushort> GetEnumerator()
         {
