@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-06T20:38:18.9537577Z",
-  "integrated_commit": "e5a61ab42004940c28952a52c64917b29667ebc9",
+  "updated_utc": "2026-09-06T21:26:44.8261965Z",
+  "integrated_commit": "2af16c432f3e16b7ebf97b693a605d199198610f",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -34,8 +34,11 @@
       "owner": "agent:l00_c",
       "branch": "agent/l00-c",
       "base_commit": "9683c595b526a81e01307d3fd9ef4c162b4d5014",
-      "evidence": [],
-      "blocker": null
+      "evidence": [
+        "worklogs/L00-C.md",
+        "commit:e3e3fc5c81cad11fd0d98c17568e4bd88370aa8c"
+      ],
+      "blocker": "T00-04, T00-05 et T00-06 moteur NOT_RUN sur le candidat intégré : la revue statique est acceptée, mais une campagne neuve doit encore être exécutée exclusivement par le débogueur Visual Studio avec la chaîne Initialize/RecordOpen1/AuthorizeOpen2/Finalize. Les preuves moteur antérieures sont supersédées."
     },
     "L01-A": {
       "status": "DONE",
@@ -113,6 +116,7 @@
         "commit:48f477febe7665ba08ba0002ccd3f5026804f6bc",
         "commit:b5eae16769e44dd7709cc94a4224143abd91466e",
         "commit:e5a61ab42004940c28952a52c64917b29667ebc9",
+        "commit:2af16c432f3e16b7ebf97b693a605d199198610f",
         "local:.local/L02C-integrated/tests/L02C-integrated-targeted-release.trx",
         "local:.local/L02C-integrated/tests/L02C-integrated-global-release.trx",
         "local:.local/L02C/process/T02-05-analytical-06-process.json",
