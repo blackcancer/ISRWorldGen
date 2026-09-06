@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-06T21:26:44.8261965Z",
-  "integrated_commit": "2af16c432f3e16b7ebf97b693a605d199198610f",
+  "updated_utc": "2026-09-06T23:22:49.5139089Z",
+  "integrated_commit": "44afa0f96df4581a34a5e568014868f8c967335c",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -36,9 +36,10 @@
       "base_commit": "9683c595b526a81e01307d3fd9ef4c162b4d5014",
       "evidence": [
         "worklogs/L00-C.md",
-        "commit:e3e3fc5c81cad11fd0d98c17568e4bd88370aa8c"
+        "commit:e3e3fc5c81cad11fd0d98c17568e4bd88370aa8c",
+        "commit:44afa0f96df4581a34a5e568014868f8c967335c"
       ],
-      "blocker": "T00-04, T00-05 et T00-06 moteur NOT_RUN sur le candidat intégré : la revue statique est acceptée, mais une campagne neuve doit encore être exécutée exclusivement par le débogueur Visual Studio avec la chaîne Initialize/RecordOpen1/AuthorizeOpen2/Finalize. Les preuves moteur antérieures sont supersédées."
+      "blocker": "T00-04, T00-05 et T00-06 moteur NOT_RUN sur le candidat 44afa0f : la campagne 3e5b0ca a prouvé 9/9 mapchunks et 72/72 chunks puis révélé que BlockingLoadChunkColumn n'attache pas MapChunk. Le snapshot cartographique borné, le fail-closed et l'arrêt différé intégrés doivent être rejoués exclusivement par le débogueur Visual Studio avec la chaîne Initialize/RecordOpen1/AuthorizeOpen2/Finalize."
     },
     "L01-A": {
       "status": "DONE",
@@ -122,7 +123,7 @@
         "local:.local/L02C/process/T02-05-analytical-06-process.json",
         "local:.local/L02C/qualitative-evidence/sensitivity-report.json"
       ],
-      "blocker": "T02-05 moteur NOT_RUN : l'adaptateur natif, l'opt-in fail-closed, le gel versionné et le paquet à deux DLL sont intégrés et acceptés statiquement. Les scénarios valide/reload/refus doivent encore être exécutés dans Vintage Story 1.22.7 lancé par le débogueur Visual Studio ; NOT_RUN ne vaut pas DONE."
+      "blocker": "T02-05 moteur NOT_RUN sur le candidat courant : un essai 3e5b0ca a observé Pending, Committed et le gate Frozen, mais l'arrêt RunGame trop précoce n'a pas persisté l'enveloppe et le reload a échoué. L'arrêt différé post-RunGame est intégré à 44afa0f ; les scénarios valide/reload/refus doivent être rejoués dans Vintage Story 1.22.7 par le débogueur Visual Studio."
     },
     "L03-A": {
       "status": "BACKLOG",
