@@ -146,8 +146,12 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private int ResetOwnedHandlers(IWorldGenHandler handlers, bool sameHandlerSet)
     {
         int removedProbeCount = 0;
-        foreach (List<ChunkColumnGenerationDelegate> passHandlers in handlers.OnChunkColumnGen)
+        foreach (List<ChunkColumnGenerationDelegate>? passHandlers in handlers.OnChunkColumnGen)
         {
+            if (passHandlers is null)
+            {
+                continue;
+            }
             for (int index = passHandlers.Count - 1; index >= 0; index--)
             {
                 ChunkColumnGenerationDelegate candidate = passHandlers[index];
@@ -600,7 +604,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     {
         string mapRegion = DescribeHandlers(handlers.OnMapRegionGen.Cast<Delegate>());
         string mapChunk = DescribeHandlers(handlers.OnMapChunkGen.Cast<Delegate>());
-        string column = string.Join(";", handlers.OnChunkColumnGen.Select((items, index) => $"{index}=[{DescribeHandlers(items.Cast<Delegate>())}]"));
+        string column = string.Join(";", handlers.OnChunkColumnGen.Select((items, index) => items is null ? $"{index}=[null]" : $"{index}=[{DescribeHandlers(items.Cast<Delegate>())}]"));
         Log($"L00C_HANDLERS phase={phase} instance={instanceId} save={saveGame.SavegameIdentifier} isnew={saveGame.IsNew} samehandlerset={sameHandlerSet} staleprobe={staleProbeHandlers} mapregion=[{mapRegion}] mapchunk=[{mapChunk}] column={column}");
     }
 
@@ -619,7 +623,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         var matches = new List<HandlerLocation>();
         IEnumerable<EnumWorldGenPass> passes = pass.HasValue
             ? [pass.Value]
-            : Enum.GetValues<EnumWorldGenPass>().Where(value => (int)value >= 0 && (int)value < handlers.OnChunkColumnGen.Length);
+            : Enum.GetValues<EnumWorldGenPass>().Where(value =>
+                (int)value >= 0 &&
+                (int)value < handlers.OnChunkColumnGen.Length &&
+                handlers.OnChunkColumnGen[(int)value] is not null);
         foreach (EnumWorldGenPass passValue in passes)
         {
             List<ChunkColumnGenerationDelegate> passHandlers = GetPassHandlers(handlers, passValue);
@@ -641,12 +648,13 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         {
             throw new InvalidOperationException($"L00-C pass {pass} index {index} is outside handler array length {handlers.OnChunkColumnGen.Length}.");
         }
-        return handlers.OnChunkColumnGen[index];
+        return handlers.OnChunkColumnGen[index]
+            ?? throw new InvalidOperationException($"L00-C pass {pass} index {index} has no registered handler list.");
     }
 
     private int CountFixtureHandlers(IWorldGenHandler handlers)
     {
-        return handlers.OnChunkColumnGen.Sum(items => items.Count(candidate => ReferenceEquals(candidate.Target, this) && candidate.Method == fixtureHandler.Method));
+        return handlers.OnChunkColumnGen.Sum(items => items?.Count(candidate => ReferenceEquals(candidate.Target, this) && candidate.Method == fixtureHandler.Method) ?? 0);
     }
 
     private void Fail(string code, string message)
