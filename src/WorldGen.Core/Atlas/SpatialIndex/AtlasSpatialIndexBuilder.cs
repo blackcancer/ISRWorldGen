@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.ObjectModel;
 using System.Numerics;
 using System.Text;
 using ISRWorldGen.Core.Atlas.Geometry;
@@ -24,7 +25,17 @@ public static class AtlasSpatialIndexBuilder
         ArgumentNullException.ThrowIfNull(primitives);
         options ??= SpatialIndexBuildOptions.Default;
 
-        GenerationResult<AtlasMemoryEstimate> estimateResult = AtlasSpatialIndexPlanner.Estimate(identity, profile, primitives);
+        GenerationResult<CanonicalPrimitiveSet> captureResult = CanonicalPrimitiveSet.Capture(identity, primitives);
+        if (captureResult is GenerationFailure<CanonicalPrimitiveSet> captureFailure)
+        {
+            return GenerationResult<AtlasIndexBuildOutcome>.Failure(captureFailure.Error);
+        }
+
+        CanonicalPrimitiveSet primitiveSet = ((GenerationSuccess<CanonicalPrimitiveSet>)captureResult).Snapshot;
+        GenerationResult<AtlasMemoryEstimate> estimateResult = AtlasSpatialIndexPlanner.EstimateOwned(
+            identity,
+            profile,
+            primitiveSet);
         if (estimateResult is GenerationFailure<AtlasMemoryEstimate> estimateFailure)
         {
             return GenerationResult<AtlasIndexBuildOutcome>.Failure(estimateFailure.Error);
@@ -74,15 +85,23 @@ public static class AtlasSpatialIndexBuilder
 
             AtlasMesh mesh = ((GenerationSuccess<AtlasMesh>)meshResult).Snapshot;
             var graph = new CompactAtlasGraph(mesh);
-            SpatialPrimitiveDefinition[] canonicalDefinitions = primitives
-                .OrderBy(primitive => primitive.Id, StableIdComparer.Instance)
-                .ToArray();
-            SpatialTileKey[][] memberships = BuildMemberships(profile, canonicalDefinitions, options);
-            long actualPlacementCount = memberships.Sum(membership => (long)membership.Length);
+            ReadOnlyCollection<SpatialPrimitiveDefinition> canonicalDefinitions = primitiveSet.Definitions;
+            PrimitiveTileMembership[] memberships = BuildMemberships(profile, canonicalDefinitions, options);
+            long actualPlacementCount = memberships.Sum(membership => (long)membership.CandidateTiles.Length);
             if (actualPlacementCount != estimate.PlacementReferenceCount)
             {
                 throw new InvalidOperationException(
                     $"Planned {estimate.PlacementReferenceCount} placement references but constructed {actualPlacementCount}.");
+            }
+
+            string? collision = FindPublishedStableIdCollision(graph, canonicalDefinitions, memberships);
+            if (collision is not null)
+            {
+                return AtlasSpatialIndexPlanner.Failure<AtlasIndexBuildOutcome>(
+                    identity,
+                    GenerationFailureCode.CorruptData,
+                    "atlas.spatial-index.stable-id",
+                    collision);
             }
 
             var index = new CompactSpatialIndex(profile, canonicalDefinitions, memberships);
@@ -108,21 +127,49 @@ public static class AtlasSpatialIndexBuilder
         }
     }
 
-    private static SpatialTileKey[][] BuildMemberships(
+    private static PrimitiveTileMembership[] BuildMemberships(
         AtlasIndexProfile profile,
         IReadOnlyList<SpatialPrimitiveDefinition> definitions,
         SpatialIndexBuildOptions options)
     {
-        var result = new SpatialTileKey[definitions.Count][];
+        var result = new PrimitiveTileMembership[definitions.Count];
         Parallel.For(
             0,
             definitions.Count,
             new ParallelOptions { MaxDegreeOfParallelism = options.Workers },
-            index => result[index] = EnumerateTouchedTiles(profile, definitions[index].Bounds));
+            index => result[index] = BuildMembership(profile, definitions[index]));
         return result;
     }
 
-    private static SpatialTileKey[] EnumerateTouchedTiles(AtlasIndexProfile profile, SpatialBounds bounds)
+    private static PrimitiveTileMembership BuildMembership(
+        AtlasIndexProfile profile,
+        SpatialPrimitiveDefinition definition)
+    {
+        SpatialTileKey[] candidateTiles = EnumerateCandidateTiles(profile, definition.Bounds);
+        SpatialTileKey? ownerTile = null;
+        foreach (SpatialTileKey tile in candidateTiles)
+        {
+            if (!PolylineTouchesTile(profile, definition.Points, tile))
+            {
+                continue;
+            }
+
+            ownerTile = tile;
+            break;
+        }
+
+        if (ownerTile is not SpatialTileKey physicalOwner)
+        {
+            throw new InvalidOperationException($"Primitive {definition.Id} does not physically touch a finite-world tile.");
+        }
+
+        return new PrimitiveTileMembership(
+            candidateTiles,
+            physicalOwner,
+            CompactSpatialIndex.DeriveOwnerId(profile, definition.Id, physicalOwner));
+    }
+
+    private static SpatialTileKey[] EnumerateCandidateTiles(AtlasIndexProfile profile, SpatialBounds bounds)
     {
         SpatialTileKey first = profile.GetTile(new SpatialPoint(bounds.MinX, bounds.MinZ));
         SpatialTileKey last = profile.GetTile(new SpatialPoint(
@@ -140,6 +187,196 @@ public static class AtlasSpatialIndexBuilder
         }
 
         return result;
+    }
+
+    private static bool PolylineTouchesTile(
+        AtlasIndexProfile profile,
+        IReadOnlyList<SpatialPoint> points,
+        SpatialTileKey tile)
+    {
+        BigInteger minXValue = (BigInteger)profile.Domain.X.MinInclusive + ((BigInteger)tile.X * profile.TileSize);
+        BigInteger minZValue = (BigInteger)profile.Domain.Z.MinInclusive + ((BigInteger)tile.Z * profile.TileSize);
+        long minX = checked((long)minXValue);
+        long minZ = checked((long)minZValue);
+        long maxX = checked((long)BigInteger.Min(minXValue + profile.TileSize, profile.Domain.X.MaxExclusive));
+        long maxZ = checked((long)BigInteger.Min(minZValue + profile.TileSize, profile.Domain.Z.MaxExclusive));
+        for (int index = 1; index < points.Count; index++)
+        {
+            if (SegmentTouchesSemiOpenRectangle(points[index - 1], points[index], minX, minZ, maxX, maxZ))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool SegmentTouchesSemiOpenRectangle(
+        SpatialPoint first,
+        SpatialPoint second,
+        long minX,
+        long minZ,
+        long maxXExclusive,
+        long maxZExclusive)
+    {
+        var interval = ParameterInterval.Unit;
+        return IntersectAxis(ref interval, first.X, second.X, minX, maxXExclusive) &&
+               IntersectAxis(ref interval, first.Z, second.Z, minZ, maxZExclusive) &&
+               !interval.IsEmpty;
+    }
+
+    private static bool IntersectAxis(
+        ref ParameterInterval interval,
+        long first,
+        long second,
+        long minimumInclusive,
+        long maximumExclusive)
+    {
+        BigInteger delta = (BigInteger)second - first;
+        if (delta.IsZero)
+        {
+            return first >= minimumInclusive && first < maximumExclusive;
+        }
+
+        if (delta.Sign > 0)
+        {
+            interval.IntersectLower(new ExactRational((BigInteger)minimumInclusive - first, delta), inclusive: true);
+            interval.IntersectUpper(new ExactRational((BigInteger)maximumExclusive - first, delta), inclusive: false);
+        }
+        else
+        {
+            BigInteger positiveDelta = BigInteger.Negate(delta);
+            interval.IntersectLower(new ExactRational((BigInteger)first - maximumExclusive, positiveDelta), inclusive: false);
+            interval.IntersectUpper(new ExactRational((BigInteger)first - minimumInclusive, positiveDelta), inclusive: true);
+        }
+
+        return !interval.IsEmpty;
+    }
+
+    private static string? FindPublishedStableIdCollision(
+        CompactAtlasGraph graph,
+        IReadOnlyList<SpatialPrimitiveDefinition> definitions,
+        IReadOnlyList<PrimitiveTileMembership> memberships)
+    {
+        var labelsById = new Dictionary<StableId, string>();
+        foreach (CompactAtlasSite site in graph.Sites)
+        {
+            string? collision = RegisterPublishedId(labelsById, site.Id, $"site {site.Id}");
+            if (collision is not null)
+            {
+                return collision;
+            }
+        }
+
+        foreach (SpatialPrimitiveDefinition definition in definitions)
+        {
+            string? collision = RegisterPublishedId(labelsById, definition.Id, $"primitive {definition.Id}");
+            if (collision is not null)
+            {
+                return collision;
+            }
+        }
+
+        for (int index = 0; index < memberships.Count; index++)
+        {
+            PrimitiveTileMembership membership = memberships[index];
+            string? collision = RegisterPublishedId(
+                labelsById,
+                membership.OwnerId,
+                $"owner for primitive {definitions[index].Id} in tile {membership.OwnerTile}");
+            if (collision is not null)
+            {
+                return collision;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? RegisterPublishedId(
+        IDictionary<StableId, string> labelsById,
+        StableId id,
+        string label)
+    {
+        if (id == StableId.Zero)
+        {
+            return $"Reserved zero StableId is published by {label}; publication aborted.";
+        }
+
+        if (labelsById.TryGetValue(id, out string? existing))
+        {
+            return $"StableId {id} is published by both {existing} and {label}; publication aborted.";
+        }
+
+        labelsById.Add(id, label);
+        return null;
+    }
+}
+
+internal sealed record PrimitiveTileMembership(
+    SpatialTileKey[] CandidateTiles,
+    SpatialTileKey OwnerTile,
+    StableId OwnerId);
+
+internal struct ParameterInterval
+{
+    private ParameterInterval(
+        ExactRational lower,
+        bool lowerInclusive,
+        ExactRational upper,
+        bool upperInclusive)
+    {
+        Lower = lower;
+        LowerInclusive = lowerInclusive;
+        Upper = upper;
+        UpperInclusive = upperInclusive;
+    }
+
+    internal static ParameterInterval Unit => new(ExactRational.Zero, true, ExactRational.One, true);
+
+    internal ExactRational Lower { get; private set; }
+
+    internal bool LowerInclusive { get; private set; }
+
+    internal ExactRational Upper { get; private set; }
+
+    internal bool UpperInclusive { get; private set; }
+
+    internal bool IsEmpty
+    {
+        get
+        {
+            int comparison = Lower.CompareTo(Upper);
+            return comparison > 0 || (comparison == 0 && (!LowerInclusive || !UpperInclusive));
+        }
+    }
+
+    internal void IntersectLower(ExactRational value, bool inclusive)
+    {
+        int comparison = value.CompareTo(Lower);
+        if (comparison > 0)
+        {
+            Lower = value;
+            LowerInclusive = inclusive;
+        }
+        else if (comparison == 0)
+        {
+            LowerInclusive &= inclusive;
+        }
+    }
+
+    internal void IntersectUpper(ExactRational value, bool inclusive)
+    {
+        int comparison = value.CompareTo(Upper);
+        if (comparison < 0)
+        {
+            Upper = value;
+            UpperInclusive = inclusive;
+        }
+        else if (comparison == 0)
+        {
+            UpperInclusive &= inclusive;
+        }
     }
 }
 

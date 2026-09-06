@@ -74,7 +74,7 @@ public sealed class CanonicalOwnershipTests
         foreach (OwnedSpatialPrimitive primitive in outcome.Snapshot.Index.Primitives)
         {
             Assert.AreEqual(new SpatialTileKey(0, 0), primitive.OwnerTile);
-            Assert.AreEqual(index.GetOwnerId(new SpatialTileKey(0, 0)), primitive.OwnerId);
+            Assert.AreEqual(index.GetOwnerId(primitive.Id, new SpatialTileKey(0, 0)), primitive.OwnerId);
         }
 
         OwnedSpatialPrimitive northeastRiver = queries[3].Single(item => item.Kind == SpatialPrimitiveKind.River);

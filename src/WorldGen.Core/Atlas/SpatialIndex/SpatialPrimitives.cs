@@ -189,25 +189,12 @@ public sealed record AtlasIndexProfile
             throw new ArgumentOutOfRangeException(nameof(memoryBudgetBytes), memoryBudgetBytes, "Memory budget must be positive.");
         }
 
-        long width = checked(domain.X.MaxExclusive - domain.X.MinInclusive);
-        long length = checked(domain.Z.MaxExclusive - domain.Z.MinInclusive);
-        long tileCountX = 1 + ((width - 1) / tileSize);
-        long tileCountZ = 1 + ((length - 1) / tileSize);
-        if ((BigInteger)tileCountX * tileCountZ > ulong.MaxValue)
-        {
-            throw new ArgumentOutOfRangeException(nameof(tileSize), "The tile grid cannot be encoded as a stable owner ordinal.");
-        }
-
         Domain = domain;
         Scale = scale;
         TileSize = tileSize;
         RequestedSiteCount = requestedSiteCount;
         SiteQuota = siteQuota;
         MemoryBudgetBytes = memoryBudgetBytes;
-        Width = width;
-        Length = length;
-        TileCountX = tileCountX;
-        TileCountZ = tileCountZ;
     }
 
     public WorldDomain Domain { get; }
@@ -222,13 +209,23 @@ public sealed record AtlasIndexProfile
 
     public long MemoryBudgetBytes { get; }
 
-    public long Width { get; }
+    /// <summary>
+    /// Validated signed 64-bit width. Planning validates the exact domain span before build code reads this property.
+    /// </summary>
+    public long Width => checked((long)WidthMagnitude);
 
-    public long Length { get; }
+    /// <summary>
+    /// Validated signed 64-bit length. Planning validates the exact domain span before build code reads this property.
+    /// </summary>
+    public long Length => checked((long)LengthMagnitude);
 
-    public long TileCountX { get; }
+    public long TileCountX => checked((long)((WidthMagnitude + TileSize - 1) / TileSize));
 
-    public long TileCountZ { get; }
+    public long TileCountZ => checked((long)((LengthMagnitude + TileSize - 1) / TileSize));
+
+    internal BigInteger WidthMagnitude => (BigInteger)Domain.X.MaxExclusive - Domain.X.MinInclusive;
+
+    internal BigInteger LengthMagnitude => (BigInteger)Domain.Z.MaxExclusive - Domain.Z.MinInclusive;
 
     internal bool Contains(SpatialPoint point) =>
         Domain.X.Contains(point.X) && Domain.Z.Contains(point.Z);

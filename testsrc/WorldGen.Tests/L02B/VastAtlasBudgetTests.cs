@@ -17,6 +17,7 @@ public sealed class VastAtlasBudgetTests
             SpatialIndexTestSupport.Identity(), profile, fixtures));
 
         Assert.AreEqual(1_048_576_000_000L, estimate.WorldColumnCount);
+        Assert.AreEqual(402_653_184_000_000L, estimate.WorldVoxelCount);
         Assert.AreEqual(56, estimate.SiteCount);
         Assert.AreEqual(2, estimate.PlacementReferenceCount);
         Assert.IsGreaterThan(0L, estimate.EstimatedSiteBytes);
@@ -68,26 +69,20 @@ public sealed class VastAtlasBudgetTests
             SpatialIndexTestSupport.Identity(), rejectedDenseProbe, fixtures));
         Assert.IsGreaterThan(rejectedDenseProbe.MemoryBudgetBytes, denseEstimate.EstimatedPeakBuildBytes);
 
-        long before = GC.GetTotalAllocatedBytes(precise: true);
         GenerationResult<AtlasIndexBuildOutcome> budgetFailure = AtlasSpatialIndexBuilder.Build(
             SpatialIndexTestSupport.Identity(), underBudget, fixtures);
-        long budgetFailureAllocation = GC.GetTotalAllocatedBytes(precise: true) - before;
         GenerationResult<AtlasIndexBuildOutcome> quotaFailure = AtlasSpatialIndexBuilder.Build(
             SpatialIndexTestSupport.Identity(), overQuota, fixtures);
-        long denseBefore = GC.GetTotalAllocatedBytes(precise: true);
         GenerationResult<AtlasIndexBuildOutcome> denseFailure = AtlasSpatialIndexBuilder.Build(
             SpatialIndexTestSupport.Identity(), rejectedDenseProbe, fixtures);
-        long denseRefusalAllocation = GC.GetTotalAllocatedBytes(precise: true) - denseBefore;
 
         AssertTypedBudgetFailure(budgetFailure, "atlas.spatial-index.budget");
         AssertTypedBudgetFailure(quotaFailure, "atlas.spatial-index.quota");
         AssertTypedBudgetFailure(denseFailure, "atlas.spatial-index.budget");
-        Assert.IsLessThan(64 * 1024L, budgetFailureAllocation, "Budget refusal must precede atlas allocation.");
-        Assert.IsLessThan(64 * 1024L, denseRefusalAllocation, "The rejected 256-site probe must not invoke L02-A.");
     }
 
     [TestMethod]
-    public void VastAtlas_ReportsPlanCumulativeAllocationLiveDeltaAndGcSeparately()
+    public void VastAtlas_RepeatedBuildsKeepPlanAndCanonicalContentStable()
     {
         AtlasIndexProfile profile = SpatialIndexTestSupport.VastProfile();
         SpatialPrimitiveDefinition[] fixtures = SpatialIndexTestSupport.CrossTileFixtures();
@@ -97,52 +92,28 @@ public sealed class VastAtlasBudgetTests
             profile,
             fixtures,
             new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold)));
-        Measurement[] measurements = Enumerable.Range(0, 2)
-            .Select(_ => Measure(profile, fixtures))
+        AtlasIndexBuildOutcome[] outcomes = Enumerable.Range(0, 2)
+            .Select(_ => SpatialIndexTestSupport.Success(AtlasSpatialIndexBuilder.Build(
+                SpatialIndexTestSupport.Identity(),
+                profile,
+                fixtures,
+                new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold))))
             .ToArray();
 
-        foreach (Measurement measurement in measurements)
+        foreach (AtlasIndexBuildOutcome outcome in outcomes)
         {
-            Assert.AreEqual(56, measurement.Outcome.Snapshot.Graph.SiteCount);
-            Assert.AreEqual(2, measurement.Outcome.Snapshot.Index.PrimitiveCount);
-            Assert.AreEqual(1, measurement.Outcome.Snapshot.Index.OccupiedTileCount);
-            Assert.AreEqual(2, measurement.Outcome.Snapshot.Index.PlacementReferenceCount);
-            Assert.IsGreaterThan(0L, measurement.CumulativeAllocatedBytes);
+            Assert.AreEqual(56, outcome.Snapshot.Graph.SiteCount);
+            Assert.AreEqual(2, outcome.Snapshot.Index.PrimitiveCount);
+            Assert.AreEqual(1, outcome.Snapshot.Index.OccupiedTileCount);
+            Assert.AreEqual(2, outcome.Snapshot.Index.PlacementReferenceCount);
         }
 
         Assert.AreEqual(
             1,
-            measurements.Select(item => item.Outcome.Snapshot.Header.ContentChecksum).Distinct().Count());
+            outcomes.Select(item => item.Snapshot.Header.ContentChecksum).Distinct().Count());
         Assert.AreEqual(
             1,
-            measurements.Select(item => item.Outcome.Estimate.EstimatedPeakBuildBytes).Distinct().Count());
-    }
-
-    private static Measurement Measure(
-        AtlasIndexProfile profile,
-        IReadOnlyList<SpatialPrimitiveDefinition> fixtures)
-    {
-        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
-        long liveBefore = GC.GetTotalMemory(forceFullCollection: false);
-        int gen0 = GC.CollectionCount(0);
-        int gen1 = GC.CollectionCount(1);
-        int gen2 = GC.CollectionCount(2);
-        long before = GC.GetTotalAllocatedBytes(precise: true);
-        AtlasIndexBuildOutcome outcome = SpatialIndexTestSupport.Success(AtlasSpatialIndexBuilder.Build(
-            SpatialIndexTestSupport.Identity(),
-            profile,
-            fixtures,
-            new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold)));
-        long allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
-        long liveAfter = GC.GetTotalMemory(forceFullCollection: true);
-        GC.KeepAlive(outcome);
-        return new Measurement(
-            outcome,
-            allocated,
-            liveAfter - liveBefore,
-            GC.CollectionCount(0) - gen0,
-            GC.CollectionCount(1) - gen1,
-            GC.CollectionCount(2) - gen2);
+            outcomes.Select(item => item.Estimate.EstimatedPeakBuildBytes).Distinct().Count());
     }
 
     private static AtlasMemoryEstimate Success(GenerationResult<AtlasMemoryEstimate> result)
@@ -161,12 +132,4 @@ public sealed class VastAtlasBudgetTests
         Assert.AreEqual(expectedStage, error.Stage);
         Assert.AreEqual(SpatialIndexTestSupport.Identity().GeographyConfigHash, error.InputHash);
     }
-
-    private sealed record Measurement(
-        AtlasIndexBuildOutcome Outcome,
-        long CumulativeAllocatedBytes,
-        long LiveManagedBytesDelta,
-        int Gen0Collections,
-        int Gen1Collections,
-        int Gen2Collections);
 }

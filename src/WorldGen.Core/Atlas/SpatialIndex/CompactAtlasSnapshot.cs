@@ -95,11 +95,6 @@ public sealed class CompactAtlasGraph
 /// <summary>Compact local tile index. Only occupied tiles and their primitive references are stored.</summary>
 public sealed class CompactSpatialIndex
 {
-    private static readonly StableId OwnerNamespace = StableId.Derive(
-        RandomDomain.Sites,
-        StableId.Zero,
-        ulong.MaxValue);
-
     private readonly AtlasIndexProfile profile;
     private readonly SpatialTileKey[] tileKeys;
     private readonly int[] tileOffsets;
@@ -108,25 +103,24 @@ public sealed class CompactSpatialIndex
     internal CompactSpatialIndex(
         AtlasIndexProfile profile,
         IReadOnlyList<SpatialPrimitiveDefinition> definitions,
-        IReadOnlyList<SpatialTileKey[]> memberships)
+        IReadOnlyList<PrimitiveTileMembership> memberships)
     {
         this.profile = profile;
         var primitives = new OwnedSpatialPrimitive[definitions.Count];
         var placements = new SortedDictionary<SpatialTileKey, List<int>>(SpatialTileKeyComparer.Instance);
         for (int primitiveIndex = 0; primitiveIndex < definitions.Count; primitiveIndex++)
         {
-            SpatialTileKey[] touchedTiles = memberships[primitiveIndex];
-            if (touchedTiles.Length == 0)
+            PrimitiveTileMembership membership = memberships[primitiveIndex];
+            if (membership.CandidateTiles.Length == 0)
             {
                 throw new InvalidOperationException("A spatial primitive must touch at least one finite-world tile.");
             }
 
-            SpatialTileKey ownerTile = touchedTiles[0];
             primitives[primitiveIndex] = new OwnedSpatialPrimitive(
                 definitions[primitiveIndex],
-                ownerTile,
-                GetOwnerId(ownerTile));
-            foreach (SpatialTileKey tile in touchedTiles)
+                membership.OwnerTile,
+                membership.OwnerId);
+            foreach (SpatialTileKey tile in membership.CandidateTiles)
             {
                 if (!placements.TryGetValue(tile, out List<int>? indices))
                 {
@@ -160,10 +154,19 @@ public sealed class CompactSpatialIndex
 
     public int PlacementReferenceCount => primitiveIndices.Length;
 
-    public StableId GetOwnerId(SpatialTileKey tile)
+    /// <summary>
+    /// Derives the globally unique ID of one primitive's ownership decision from its ID and physical owner tile.
+    /// </summary>
+    public StableId GetOwnerId(StableId primitiveId, SpatialTileKey tile)
+        => DeriveOwnerId(profile, primitiveId, tile);
+
+    internal static StableId DeriveOwnerId(
+        AtlasIndexProfile profile,
+        StableId primitiveId,
+        SpatialTileKey tile)
     {
         ulong ordinal = profile.GetTileOrdinal(tile);
-        return StableId.Derive(RandomDomain.Sites, OwnerNamespace, ordinal);
+        return StableId.Derive(RandomDomain.Sites, primitiveId, ordinal);
     }
 
     public ReadOnlyCollection<OwnedSpatialPrimitive> Query(SpatialTileKey tile)
