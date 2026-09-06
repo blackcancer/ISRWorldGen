@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-06T12:52:10.7712664Z",
-  "integrated_commit": "a7350eb7a2044e3318d430273be47f119ea87e78",
+  "updated_utc": "2026-09-06T13:46:00Z",
+  "integrated_commit": "fce147620d21bb9e3da2091617794993d57c2d0c",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -17,15 +17,20 @@
       "blocker": null
     },
     "L00-B": {
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "owner": "agent:l00_b",
       "branch": "agent/l00-b",
-      "base_commit": "b3db708c98f613861ee7d8ac66f31df4057e95ce",
-      "evidence": [],
+      "base_commit": "381548c42215658d913cad564ecd1d2b024ce5fb",
+      "evidence": [
+        "worklogs/L00-B.md",
+        "commit:db4ffcac98075c180e4e89be4daf40faba1b7a66",
+        "local:.local/L00B-integrated/evidence/T00-03.json",
+        "local:.local/L00B-integrated/evidence/T00-02-regression.json"
+      ],
       "blocker": null
     },
     "L00-C": {
-      "status": "BACKLOG",
+      "status": "READY",
       "owner": null,
       "branch": null,
       "base_commit": null,
@@ -45,15 +50,20 @@
       "blocker": null
     },
     "L01-B": {
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "owner": "agent:l01_a",
       "branch": "agent/l01-b",
       "base_commit": "a7350eb7a2044e3318d430273be47f119ea87e78",
-      "evidence": [],
+      "evidence": [
+        "worklogs/L01-B.md",
+        "commit:fce147620d21bb9e3da2091617794993d57c2d0c",
+        "local:.local/L01B-integrated/tests/L01-AB-integrated.trx",
+        "local:.local/L01B-integrated/process/T01-04-process.json"
+      ],
       "blocker": null
     },
     "L01-C": {
-      "status": "BACKLOG",
+      "status": "READY",
       "owner": null,
       "branch": null,
       "base_commit": null,
@@ -253,7 +263,7 @@
       "blocker": null
     },
     "L10-A": {
-      "status": "BACKLOG",
+      "status": "READY",
       "owner": null,
       "branch": null,
       "base_commit": null,
