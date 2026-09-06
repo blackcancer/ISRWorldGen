@@ -68,6 +68,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private int disposalStarted;
     private bool active;
     private bool columnOwnershipClosing;
+    private bool markerCommitted;
     private long worldRunId;
 
     /// <inheritdoc />
@@ -127,6 +128,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         shutdownIssued = 0;
         stableTickCount = 0;
         haloPreparedCount = 0;
+        markerCommitted = false;
         marker = null;
         preLightingSnapshot = null;
         initialSnapshot = null;
@@ -175,16 +177,17 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         else
         {
             ValidateMarker(persistedMarker, saveGame);
-            persistedMarker.OpenCount++;
-            marker = persistedMarker;
+            marker = CopyMarker(persistedMarker);
         }
 
         if (!saveGame.IsNew)
         {
             ResolveMaterials();
             PersistedFootprintSnapshot persistedSnapshot = InspectPersistedFootprintBlocking();
-            active = true;
+            marker!.OpenCount++;
             StoreMarker(saveGame, marker!);
+            markerCommitted = true;
+            active = true;
 
             LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
             Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} open={marker.OpenCount} isnew=False save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
@@ -195,8 +198,9 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ValidateReplacementPreconditions(handlers);
         ResolveMaterials();
         ApplyTargetedReplacement(handlers);
-        active = true;
         StoreMarker(saveGame, marker!);
+        markerCommitted = true;
+        active = true;
 
         LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
         Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} open={marker.OpenCount} isnew={saveGame.IsNew} save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
@@ -1522,7 +1526,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void OnGameWorldSaveCore()
     {
-        if (Volatile.Read(ref disposalStarted) == 0 && marker is not null)
+        if (Volatile.Read(ref disposalStarted) == 0 && markerCommitted && marker is not null)
         {
             StoreMarker(RequireApi().WorldManager.SaveGame, marker);
             Log($"L00C_MARKER_SAVED instance={instanceId} marker={marker.MarkerId} open={marker.OpenCount}");
@@ -1554,6 +1558,17 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         {
             throw new InvalidOperationException("L00-C persistent marker is incompatible with this save; loading is stopped explicitly.");
         }
+    }
+
+    private static ProbeMarker CopyMarker(ProbeMarker marker)
+    {
+        return new ProbeMarker
+        {
+            MarkerId = marker.MarkerId,
+            SavegameIdentifier = marker.SavegameIdentifier,
+            Version = marker.Version,
+            OpenCount = marker.OpenCount
+        };
     }
 
     private static void StoreMarker(ISaveGame saveGame, ProbeMarker marker)
@@ -1714,6 +1729,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
 
         marker = null;
+        markerCommitted = false;
         preLightingSnapshot = null;
         initialSnapshot = null;
         initialHaloSnapshot = null;

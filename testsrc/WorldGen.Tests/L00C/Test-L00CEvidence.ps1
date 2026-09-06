@@ -156,8 +156,10 @@ foreach ($session in @($evidence.Sessions)) {
         if ($log -notmatch "L00C_ERROR code=expected-handler-absent instance=$instance ") {
             throw 'Missing-handler session lacks the explicit expected-handler-absent error.'
         }
-        if ($log -match "L00C_ACTIVATED instance=$instance " -or $log -match "L00C_FIXTURE_WRITTEN instance=$instance ") {
-            throw 'Missing-handler session silently activated or wrote the fixture.'
+        if ($log -match "L00C_ACTIVATED instance=$instance " -or
+            $log -match "L00C_FIXTURE_WRITTEN instance=$instance " -or
+            $log -match "L00C_MARKER_SAVED instance=$instance ") {
+            throw 'Missing-handler session silently activated, wrote the fixture, or published a marker candidate.'
         }
     }
     elseif ($session.WorldRole -like 'activated-*') {

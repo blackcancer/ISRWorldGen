@@ -86,6 +86,8 @@ $required = @(
     'BlockingTestMapChunkExists',
     'BlockingLoadChunkColumn',
     'L00C_PERSISTED_REOPEN_STABLE',
+    'markerCommitted',
+    'CopyMarker(persistedMarker)',
     'chunk.MarkModified()',
     'mapChunk.MarkDirty()',
     'for (int y = 0; y < worldHeight; y++)',
