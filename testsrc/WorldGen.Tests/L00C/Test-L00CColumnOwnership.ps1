@@ -59,6 +59,15 @@ if ([regex]::Matches($source, '\.LoadChunkColumnPriority\(').Count -ne 2 -or
 if ($source.Contains('ownedLoadedColumns.Clear()')) {
     throw 'Owned coordinates must never be forgotten without an exact UnloadChunkColumn call.'
 }
+$initializeStart = $source.IndexOf('private void InitializeWorld()', [StringComparison]::Ordinal)
+$runInvalidation = $source.IndexOf('Interlocked.Increment(ref worldRunId)', $initializeStart, [StringComparison]::Ordinal)
+$worldRelease = $source.IndexOf('ReleaseOwnedColumns("world-initialize")', $initializeStart, [StringComparison]::Ordinal)
+if ($initializeStart -lt 0 -or $runInvalidation -le $initializeStart -or $worldRelease -le $runInvalidation) {
+    throw 'InitializeWorld must invalidate the prior run before releasing its owned columns.'
+}
+if ($source -notmatch 'if \(columnOwnershipClosing \|\| Volatile\.Read\(ref disposalStarted\) != 0\)\s*\{\s*reservation\.CallbackInvoked = true;') {
+    throw 'A late owned-load callback is not consumed after ownership cleanup starts.'
+}
 
 function Invoke-LoadModel {
     param(
@@ -119,6 +128,14 @@ $disposeUnloads = [Collections.Generic.List[string]]::new()
 $disposeResult = Invoke-LoadModel $disposeStates $modelCoordinates $emptyPreloaded -DisposeDuringLoad -UnloadCalls $disposeUnloads
 if ($disposeResult -ne 'disposed-after-accept' -or $disposeStates.Count -ne 0 -or $disposeUnloads.Count -ne $modelCoordinates.Count) {
     throw 'Dispose interleaving did not wait for load acceptance before exact release.'
+}
+
+$oldRunId = 1L
+$currentRunId = [Threading.Interlocked]::Increment([ref]$oldRunId)
+$lateCallbackInvocationCount = 0
+if (1L -eq $currentRunId) { $lateCallbackInvocationCount++ }
+if ($lateCallbackInvocationCount -ne 0 -or $currentRunId -ne 2L) {
+    throw 'A prior-world callback was not invalidated before world-initialize cleanup.'
 }
 
 function New-Coordinate([int]$X, [int]$Z) {
@@ -208,4 +225,5 @@ if ($releasedOnRetry -ne 1 -or $retryOwned.Count -ne 0) {
     PreloadedNoEffectUnloadCount = $preloadedUnloads.Count
     ThrowingLoadUnloadCount = $throwUnloads.Count
     DisposeInterleaveReleaseCount = $disposeUnloads.Count
+    LatePriorWorldCallbackInvocationCount = $lateCallbackInvocationCount
 } | ConvertTo-Json -Depth 4

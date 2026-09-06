@@ -93,8 +93,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private void InitializeWorld()
     {
         ICoreServerAPI serverApi = RequireApi();
-        ReleaseOwnedColumns("world-initialize");
         long runId = Interlocked.Increment(ref worldRunId);
+        ReleaseOwnedColumns("world-initialize");
         lock (ownedColumnsGate)
         {
             columnOwnershipClosing = false;
@@ -574,8 +574,13 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         bool invokeLoaded = false;
         lock (ownedColumnsGate)
         {
-            if (reservation.Cancelled || reservation.CallbackInvoked || Volatile.Read(ref disposalStarted) != 0)
+            if (reservation.Cancelled || reservation.CallbackInvoked)
             {
+                return;
+            }
+            if (columnOwnershipClosing || Volatile.Read(ref disposalStarted) != 0)
+            {
+                reservation.CallbackInvoked = true;
                 return;
             }
             reservation.CallbackArrived = true;
