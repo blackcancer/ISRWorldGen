@@ -6,7 +6,7 @@ public sealed class DeterminismTests
     [TestMethod]
     public void CanonicalHashes_AreIndependentOfWorkersOrderAndCacheState()
     {
-        IReadOnlyList<SeedHash> hashes = DeterminismFixture.VerifyFullMatrix();
+        IReadOnlyList<SeedHashes> hashes = DeterminismFixture.VerifyFullMatrix();
 
         Assert.HasCount(16, hashes);
         Assert.HasCount(16, hashes.Select(result => result.Seed).Distinct());
@@ -15,7 +15,7 @@ public sealed class DeterminismTests
     [TestMethod]
     public void ProcessProbe_ProducesCanonicalHashesForRealRestartComparison()
     {
-        IReadOnlyList<SeedHash> hashes = DeterminismFixture.VerifyFullMatrix();
+        IReadOnlyList<SeedHashes> hashes = DeterminismFixture.VerifyFullMatrix();
 
         Assert.HasCount(16, hashes);
         DeterminismFixture.WriteProcessReportIfRequested(hashes);

@@ -121,17 +121,45 @@ public sealed class CanonicalSnapshotTests
     }
 
     [TestMethod]
+    public void TruncatedPayloadAndForgedLengthsAndCounts_AreRejected()
+    {
+        HeightSnapshot snapshot = SnapshotTestData.CreateSnapshot(SnapshotTestData.Inputs);
+        byte[] valid = HeightSnapshotBinaryCodec.Serialize(snapshot);
+
+        Assert.ThrowsExactly<CorruptSnapshotException>(() =>
+            HeightSnapshotBinaryCodec.Deserialize(valid.AsSpan(0, valid.Length - 1)));
+
+        byte[] forgedTextLength = valid.ToArray();
+        BinaryPrimitives.WriteUInt32BigEndian(forgedTextLength.AsSpan(88, 4), uint.MaxValue);
+        Assert.ThrowsExactly<CorruptSnapshotException>(() =>
+            HeightSnapshotBinaryCodec.Deserialize(forgedTextLength));
+
+        int parentCountOffset = FindParentCountOffset(valid);
+        byte[] forgedParentCount = valid.ToArray();
+        BinaryPrimitives.WriteUInt32BigEndian(forgedParentCount.AsSpan(parentCountOffset, 4), uint.MaxValue);
+        Assert.ThrowsExactly<CorruptSnapshotException>(() =>
+            HeightSnapshotBinaryCodec.Deserialize(forgedParentCount));
+
+        int firstSampleOffset = FindFirstSampleOffset(valid, snapshot);
+        byte[] forgedSampleCount = valid.ToArray();
+        BinaryPrimitives.WriteUInt32BigEndian(forgedSampleCount.AsSpan(firstSampleOffset - 4, 4), uint.MaxValue);
+        Assert.ThrowsExactly<CorruptSnapshotException>(() =>
+            HeightSnapshotBinaryCodec.Deserialize(forgedSampleCount));
+
+        byte[] forgedChecksum = valid.ToArray();
+        forgedChecksum[firstSampleOffset - 4 - Hash256.ByteWidth] ^= 0x80;
+        Assert.ThrowsExactly<CorruptSnapshotException>(() =>
+            HeightSnapshotBinaryCodec.Deserialize(forgedChecksum));
+    }
+
+    [TestMethod]
     public void EncodedDuplicateIdsAndNoncanonicalOrder_AreRejectedBeforeNormalization()
     {
         HeightSnapshot snapshot = SnapshotTestData.CreateSnapshot(SnapshotTestData.Inputs);
         byte[] valid = HeightSnapshotBinaryCodec.Serialize(snapshot);
         Span<byte> firstId = stackalloc byte[StableId.ByteWidth];
         snapshot.Samples[0].Id.WriteCanonicalBytes(firstId);
-        int firstSampleOffset = valid.AsSpan().IndexOf(firstId);
-        if (firstSampleOffset < 0)
-        {
-            Assert.Fail("The first canonical sample ID was not found in the serialized snapshot.");
-        }
+        int firstSampleOffset = FindFirstSampleOffset(valid, snapshot);
 
         byte[] duplicate = valid.ToArray();
         duplicate.AsSpan(firstSampleOffset, StableId.ByteWidth)
@@ -193,6 +221,32 @@ public sealed class CanonicalSnapshotTests
     }
 
     [TestMethod]
+    public void QuantizedSamples_RespectSemiOpenHorizontalAndVerticalBoundaries()
+    {
+        HeightSampleInput basis = SnapshotTestData.Inputs[0];
+        const double halfQuantum = 0.5 / HeightQuantizer.UnitsPerBlock;
+
+        _ = SnapshotTestData.CreateSnapshot([basis with { X = 0, Z = 0, HeightBlocks = -halfQuantum }]);
+        _ = SnapshotTestData.CreateSnapshot(
+            [basis with { X = 1, Z = 1, HeightBlocks = 384 - (0.5001 / HeightQuantizer.UnitsPerBlock) }]);
+
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            SnapshotTestData.CreateSnapshot([basis with { X = -1 }]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            SnapshotTestData.CreateSnapshot([basis with { X = 2 }]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            SnapshotTestData.CreateSnapshot([basis with { Z = 2 }]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            SnapshotTestData.CreateSnapshot(
+                [basis with { HeightBlocks = -(0.5001 / HeightQuantizer.UnitsPerBlock) }]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            SnapshotTestData.CreateSnapshot(
+                [basis with { HeightBlocks = 384 - halfQuantum }]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            SnapshotTestData.CreateSnapshot([basis with { HeightBlocks = 384 }]));
+    }
+
+    [TestMethod]
     public void GoldenSnapshot_HasAnnotatedFrozenCanonicalHash()
     {
         // GOLDEN L01B-SNAPSHOT-V1. Input is SnapshotTestData: seed 73, revision 4,
@@ -204,6 +258,28 @@ public sealed class CanonicalSnapshotTests
         Console.WriteLine($"L01B_GOLDEN_SHA256={Hash256.Compute(bytes)}");
 
         Assert.AreEqual(expectedCanonicalSha256, Hash256.Compute(bytes).ToString());
+    }
+
+    private static int FindFirstSampleOffset(byte[] bytes, HeightSnapshot snapshot)
+    {
+        Span<byte> firstId = stackalloc byte[StableId.ByteWidth];
+        snapshot.Samples[0].Id.WriteCanonicalBytes(firstId);
+        int offset = bytes.AsSpan().IndexOf(firstId);
+        if (offset < 0)
+        {
+            Assert.Fail("The first canonical sample ID was not found in the serialized snapshot.");
+        }
+
+        return offset;
+    }
+
+    private static int FindParentCountOffset(byte[] bytes)
+    {
+        const int profileLengthOffset = 88;
+        int profileLength = checked((int)BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(profileLengthOffset, 4)));
+        int stageLengthOffset = checked(profileLengthOffset + 4 + profileLength);
+        int stageLength = checked((int)BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(stageLengthOffset, 4)));
+        return checked(stageLengthOffset + 4 + stageLength + 8);
     }
 }
 
