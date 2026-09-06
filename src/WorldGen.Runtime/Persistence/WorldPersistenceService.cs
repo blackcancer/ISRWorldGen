@@ -31,7 +31,9 @@ public sealed class WorldPersistenceService
                 $"Snapshot length {payload.Length} exceeds the configured limit {limits.MaxSnapshotDecodedBytes}.");
         }
 
-        if (Hash256.Compute(payload) != reference.PayloadHash)
+        byte[] ownedPayload = payload.ToArray();
+        Hash256 payloadHash = Hash256.Compute(ownedPayload);
+        if (payloadHash != reference.PayloadHash)
         {
             return Failure<SnapshotReference>(
                 PersistenceErrorCode.ChecksumMismatch,
@@ -40,7 +42,8 @@ public sealed class WorldPersistenceService
         }
 
         PersistenceResult<byte[]> encoded = PersistenceEnvelope.Encode(
-            payload,
+            ownedPayload,
+            payloadHash,
             limits.MaxSnapshotDecodedBytes,
             limits.MaxEnvelopeBytes,
             reference.StorageKey);
@@ -68,8 +71,10 @@ public sealed class WorldPersistenceService
             return PersistenceResult<WorldManifest>.Failure(graphError);
         }
 
+        byte[] manifestPayload = ((PersistenceSuccess<byte[]>)serialized).Value;
         PersistenceResult<byte[]> encoded = PersistenceEnvelope.Encode(
-            ((PersistenceSuccess<byte[]>)serialized).Value,
+            manifestPayload,
+            Hash256.Compute(manifestPayload),
             limits.MaxManifestDecodedBytes,
             limits.MaxEnvelopeBytes,
             PersistenceKeys.Manifest);
@@ -242,7 +247,7 @@ public sealed class WorldPersistenceService
                 {
                     return new PersistenceError(
                         PersistenceErrorCode.MissingParent,
-                        PersistenceKeys.Snapshot(parent.Id, parent.Revision),
+                        PersistenceKeys.Snapshot(parent.Id, parent.Revision, parent.PayloadHash),
                         $"Parent of snapshot {reference.StorageKey} is absent from the manifest.");
                 }
 

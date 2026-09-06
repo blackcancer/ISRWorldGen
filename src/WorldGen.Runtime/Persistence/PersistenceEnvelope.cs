@@ -22,11 +22,14 @@ public static class PersistenceEnvelope
     private const int ChecksumOffset = 29;
 
     internal static PersistenceResult<byte[]> Encode(
-        ReadOnlySpan<byte> payload,
+        byte[] payload,
+        Hash256 payloadChecksum,
         long maximumDecodedBytes,
         long maximumEnvelopeBytes,
         string storageKey)
     {
+        ArgumentNullException.ThrowIfNull(payload);
+
         if (payload.Length > maximumDecodedBytes)
         {
             return Failure(
@@ -50,7 +53,7 @@ public static class PersistenceEnvelope
         envelope[EncodingOffset] = RawEncoding;
         BinaryPrimitives.WriteUInt64BigEndian(envelope.AsSpan(DecodedLengthOffset, 8), (ulong)payload.Length);
         BinaryPrimitives.WriteUInt64BigEndian(envelope.AsSpan(StoredLengthOffset, 8), (ulong)payload.Length);
-        Hash256.Compute(payload).WriteCanonicalBytes(envelope.AsSpan(ChecksumOffset, Hash256.ByteWidth));
+        payloadChecksum.WriteCanonicalBytes(envelope.AsSpan(ChecksumOffset, Hash256.ByteWidth));
         payload.CopyTo(envelope.AsSpan(HeaderByteCount));
         return PersistenceResult<byte[]>.Success(envelope);
     }

@@ -1,3 +1,4 @@
+using System.Text;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Runtime.Persistence;
 
@@ -75,5 +76,116 @@ public sealed class ManifestAndTransportTests
 
         Assert.AreEqual(writesBefore, fixture.Store.WriteCount);
         Assert.AreEqual(wrongReference.StorageKey, error.StorageKey);
+    }
+
+    [TestMethod]
+    public void ContentAddressedSnapshots_PreserveEarlierRevisionContent()
+    {
+        PersistenceFixture fixture = PersistenceTestData.Create();
+        byte[] oldPayload = "old-generation"u8.ToArray();
+        byte[] newPayload = "new-generation"u8.ToArray();
+        var oldReference = new SnapshotReference(
+            fixture.Parent.Id,
+            fixture.Parent.Revision,
+            Hash256.Compute(oldPayload),
+            "content-addressed",
+            []);
+        var newReference = new SnapshotReference(
+            fixture.Parent.Id,
+            fixture.Parent.Revision,
+            Hash256.Compute(newPayload),
+            "content-addressed",
+            []);
+        var oldManifest = new WorldManifest(
+            fixture.Manifest.Identity,
+            fixture.Manifest.Units,
+            fixture.FrozenConfiguration,
+            [oldReference]);
+        var newManifest = new WorldManifest(
+            fixture.Manifest.Identity,
+            fixture.Manifest.Units,
+            fixture.FrozenConfiguration,
+            [newReference]);
+        var store = new InMemoryWorldSnapshotStore();
+        var service = new WorldPersistenceService(store, PersistenceTestData.Limits);
+
+        PersistenceTestData.AssertSuccess(service.WriteSnapshot(oldReference, oldPayload));
+        PersistenceTestData.AssertSuccess(service.WriteManifest(oldManifest));
+        CollectionAssert.AreEqual(
+            oldPayload,
+            PersistenceTestData.AssertSuccess(service.Restore(fixture.Compatibility)).Snapshots[0].GetPayloadCopy());
+
+        PersistenceTestData.AssertSuccess(service.WriteSnapshot(newReference, newPayload));
+        PersistenceTestData.AssertSuccess(service.WriteManifest(newManifest));
+        CollectionAssert.AreEqual(
+            newPayload,
+            PersistenceTestData.AssertSuccess(service.Restore(fixture.Compatibility)).Snapshots[0].GetPayloadCopy());
+
+        Assert.AreNotEqual(oldReference.StorageKey, newReference.StorageKey);
+        CollectionAssert.AreNotEqual(store.GetRaw(oldReference.StorageKey), store.GetRaw(newReference.StorageKey));
+        PersistenceTestData.AssertSuccess(service.WriteManifest(oldManifest));
+        CollectionAssert.AreEqual(
+            oldPayload,
+            PersistenceTestData.AssertSuccess(service.Restore(fixture.Compatibility)).Snapshots[0].GetPayloadCopy());
+    }
+
+    [TestMethod]
+    public void SameIdentityAndRevision_IsRejectedTwiceWithinOneManifest()
+    {
+        PersistenceFixture fixture = PersistenceTestData.Create();
+        var colliding = new SnapshotReference(
+            fixture.Parent.Id,
+            fixture.Parent.Revision,
+            Hash256.Compute("collision"u8),
+            fixture.Parent.Kind,
+            []);
+
+        Assert.ThrowsExactly<ArgumentException>(() => new WorldManifest(
+            fixture.Manifest.Identity,
+            fixture.Manifest.Units,
+            fixture.FrozenConfiguration,
+            [fixture.Parent, colliding]));
+        Assert.ThrowsExactly<ArgumentException>(() => new WorldManifest(
+            fixture.Manifest.Identity,
+            fixture.Manifest.Units,
+            fixture.FrozenConfiguration,
+            [fixture.Parent, fixture.Parent]));
+    }
+
+    [TestMethod]
+    public void WriteSnapshot_OwnsPayloadBeforeTheStoreCanMutateTheCallerBuffer()
+    {
+        PersistenceFixture fixture = PersistenceTestData.Create();
+        byte[] callerPayload = Encoding.UTF8.GetBytes("caller-owned-before-write");
+        byte[] expectedPayload = callerPayload.ToArray();
+        var reference = new SnapshotReference(
+            fixture.Child.Id,
+            revision: 17,
+            Hash256.Compute(expectedPayload),
+            "ownership",
+            []);
+        bool callbackObserved = false;
+        var store = new InMemoryWorldSnapshotStore(key =>
+        {
+            if (string.Equals(key, reference.StorageKey, StringComparison.Ordinal))
+            {
+                callerPayload.AsSpan().Fill(0x5a);
+                callbackObserved = true;
+            }
+        });
+        var service = new WorldPersistenceService(store, PersistenceTestData.Limits);
+        var manifest = new WorldManifest(
+            fixture.Manifest.Identity,
+            fixture.Manifest.Units,
+            fixture.FrozenConfiguration,
+            [reference]);
+
+        PersistenceTestData.AssertSuccess(service.WriteSnapshot(reference, callerPayload));
+        PersistenceTestData.AssertSuccess(service.WriteManifest(manifest));
+        RestoredWorld restored = PersistenceTestData.AssertSuccess(service.Restore(fixture.Compatibility));
+
+        Assert.IsTrue(callbackObserved);
+        CollectionAssert.AreNotEqual(expectedPayload, callerPayload);
+        CollectionAssert.AreEqual(expectedPayload, restored.Snapshots[0].GetPayloadCopy());
     }
 }

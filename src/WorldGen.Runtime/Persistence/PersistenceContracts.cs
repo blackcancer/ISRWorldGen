@@ -39,12 +39,14 @@ public static class PersistenceKeys
     public const string DerivedCachePrefix = RootNamespace + "derived-cache/";
     public const string Manifest = CanonicalPrefix + "world-manifest";
 
-    public static string Snapshot(StableId id, ulong revision) =>
+    public static string Snapshot(StableId id, ulong revision, Hash256 payloadHash) =>
         string.Concat(
             CanonicalSnapshotPrefix,
             id.ToString(),
             "/",
-            revision.ToString("x16", CultureInfo.InvariantCulture));
+            revision.ToString("x16", CultureInfo.InvariantCulture),
+            "/",
+            payloadHash.ToString());
 }
 
 public sealed record PersistenceLimits
@@ -172,7 +174,7 @@ public sealed class SnapshotReference
 
     public ReadOnlyCollection<SnapshotParentReference> Parents { get; }
 
-    public string StorageKey => PersistenceKeys.Snapshot(Id, Revision);
+    public string StorageKey => PersistenceKeys.Snapshot(Id, Revision, PayloadHash);
 }
 
 public sealed class WorldManifest
