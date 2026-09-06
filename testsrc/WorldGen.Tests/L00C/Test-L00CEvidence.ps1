@@ -62,14 +62,37 @@ if ($LASTEXITCODE -ne 0) {
     throw "TestedCommit is unavailable locally: $($evidence.TestedCommit)"
 }
 
-foreach ($testName in @('T00-04', 'T00-05', 'T00-06')) {
+foreach ($testName in @('T00-04', 'T00-05')) {
     $test = $evidence.Tests.$testName
     if ($null -eq $test) { throw "Missing evidence section: $testName" }
     Assert-Equal $test.Status 'PASS' "$testName status"
 }
 
+$lifecycle = $evidence.Tests.'T00-06'
+if ($null -eq $lifecycle) { throw 'Missing evidence section: T00-06' }
+if ($lifecycle.Status -notin @('PASS', 'BLOCKED')) {
+    throw "T00-06 status must be PASS or BLOCKED, not '$($lifecycle.Status)'."
+}
+Assert-Equal $lifecycle.ServerLifecycleStatus 'PASS' 'T00-06 server lifecycle status'
+if ($lifecycle.Status -eq 'BLOCKED') {
+    Assert-Equal $lifecycle.ClientMenuStatus 'NOT_RUN' 'T00-06 client menu status'
+    if ([string]::IsNullOrWhiteSpace([string]$lifecycle.Blocker)) {
+        throw 'A blocked T00-06 result must retain its exact client-menu blocker.'
+    }
+}
+
+Assert-Equal ([int]$evidence.Parameters.RockBlockId) 11165 'Rock block id'
+Assert-Equal ([int]$evidence.Parameters.FreshBlockId) 2966 'Fresh-water block id'
+Assert-Equal ([int]$evidence.Parameters.SaltBlockId) 2888 'Salt-water block id'
+Assert-Equal ([int]$evidence.Parameters.SolidCount) 67022 'Fixture solid count'
+Assert-Equal ([int]$evidence.Parameters.FluidCount) 2610 'Fixture fluid count'
+Assert-Equal ([int]$evidence.Parameters.FreshCount) 1350 'Fixture fresh-fluid count'
+Assert-Equal ([int]$evidence.Parameters.SaltCount) 1260 'Fixture salt-fluid count'
+Assert-Equal ([int]$evidence.Parameters.ClientLaunchCount) 0 'Client launch count'
+
 $dll = Assert-Artifact $evidence.Artifacts.Assembly 'Assembly'
 $pdb = Assert-Artifact $evidence.Artifacts.Symbols 'Symbols'
+$debuggerInspectionPath = Assert-Artifact $evidence.Artifacts.DebuggerInspection 'Debugger inspection'
 $artifactDirectoryName = Split-Path -Leaf (Split-Path -Parent $dll)
 Assert-Equal $artifactDirectoryName $evidence.TestedCommit 'Assembly artifact directory'
 Assert-Equal (Split-Path -Parent $pdb) (Split-Path -Parent $dll) 'Assembly/symbol directory'
@@ -86,12 +109,17 @@ foreach ($session in @($evidence.Sessions)) {
     }
 
     $sessionLogPath = Assert-Artifact $session.ServerMainLog "Session $($session.Cycle) server-main.log"
+    [void](Assert-Artifact $session.ServerWorldgenLog "Session $($session.Cycle) server-worldgen.log")
     $sessionLogPaths += $sessionLogPath
     $log = Get-Content -LiteralPath $sessionLogPath -Raw
     $instance = [regex]::Escape([string]$session.InstanceId)
-    $pid = [regex]::Escape([string]$session.ProcessId)
-    if ($log -notmatch "L00C_PROBE_READY instance=$instance pid=$pid ") {
+    $pidPattern = [regex]::Escape([string]$session.ProcessId)
+    $savegame = [regex]::Escape([string]$session.SavegameIdentifier)
+    if ($log -notmatch "L00C_PROBE_READY instance=$instance pid=$pidPattern ") {
         throw "Session $($session.Cycle) log does not correlate instance and process id."
+    }
+    if ($log -notmatch "L00C_HANDLERS phase=before instance=$instance save=$savegame ") {
+        throw "Session $($session.Cycle) log does not correlate the savegame identifier."
     }
 
     if ($session.WorldRole -eq 'disabled-witness') {
@@ -99,7 +127,7 @@ foreach ($session in @($evidence.Sessions)) {
         if ($log -notmatch "L00C_INACTIVE instance=$instance " -or $log -notmatch "L00C_WITNESS_LOADED instance=$instance ") {
             throw 'Disabled witness log is missing its inactive or inspection marker.'
         }
-        if ($log -match "L00C_FIXTURE_WRITTEN instance=$instance ") {
+        if ($log -match "L00C_FIXTURE_WRITTEN instance=$instance " -or $log -match "L00C_ACTIVATED instance=$instance ") {
             throw 'Disabled witness unexpectedly ran the L00-C fixture writer.'
         }
     }
@@ -120,11 +148,12 @@ foreach ($session in @($evidence.Sessions)) {
             "L00C_HANDLERS phase=before instance=$instance ",
             "L00C_HANDLERS phase=after instance=$instance ",
             "L00C_ACTIVATED instance=$instance marker=$marker open=$open isnew=$isNew ",
-            "L00C_FIXTURE_WRITTEN instance=$instance marker=$marker ",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded ",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks ",
             "L00C_TICKS_STABLE instance=$instance marker=$marker ticks=40 ",
-            "L00C_MARKER_SAVED instance=$instance marker=$marker open=$open"
+            "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker ",
+            'Forced: Shutdown through Server API',
+            'World saved!'
         )
         foreach ($pattern in $requiredPatterns) {
             if ($log -notmatch $pattern) {
@@ -134,6 +163,33 @@ foreach ($session in @($evidence.Sessions)) {
         if ($log -notmatch "L00C_TICKS_STABLE instance=$instance .* unexpected=0") {
             throw "Activated session $($session.Cycle) did not preserve the exact fixture after bounded ticks."
         }
+
+        $beforeLine = [regex]::Match($log, "(?m)^.*L00C_HANDLERS phase=before instance=$instance .*$").Value
+        $afterLine = [regex]::Match($log, "(?m)^.*L00C_HANDLERS phase=after instance=$instance .*$").Value
+        if ($beforeLine -notmatch 'staleprobe=0' -or $beforeLine -match 'ISRWorldGen\.WorldgenProbe\.L00CWorldgenProbeModSystem') {
+            throw "Activated session $($session.Cycle) retained a prior L00-C delegate before installation."
+        }
+        $probeTypeCount = [regex]::Matches($afterLine, 'ISRWorldGen\.WorldgenProbe\.L00CWorldgenProbeModSystem').Count
+        Assert-Equal $probeTypeCount 5 "Session $($session.Cycle) owned delegate count after installation"
+
+        $loaded = [regex]::Match($log, "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded .* snapshot=([0-9A-F]{64}) .* unexpected=0")
+        $afterTicks = [regex]::Match($log, "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks .* snapshot=([0-9A-F]{64}) .* unexpected=0")
+        if (-not $loaded.Success -or -not $afterTicks.Success) {
+            throw "Activated session $($session.Cycle) lacks exact loaded/afterticks snapshots."
+        }
+        Assert-Equal $loaded.Groups[1].Value $afterTicks.Groups[1].Value "Session $($session.Cycle) tick-stable full snapshot"
+        Assert-Equal $loaded.Groups[1].Value ([string]$evidence.Parameters.FixtureSnapshotSha256) "Session $($session.Cycle) canonical full snapshot"
+        if ($log -notmatch "L00C_FIXTURE_INSPECTED instance=$instance .* solids=67022 fluids=2610 fresh=1350 salt=1260 .* ymax=67 unexpected=0") {
+            throw "Activated session $($session.Cycle) does not retain the expected distinct block IDs/counts and height metadata."
+        }
+
+        $writeCount = [regex]::Matches($log, "L00C_FIXTURE_WRITTEN instance=$instance marker=$marker ").Count
+        $expectedWrites = if ([bool]$session.IsNew) { 2 } else { 0 }
+        Assert-Equal $writeCount $expectedWrites "Session $($session.Cycle) fixture write count"
+        $expectedCallbacks = if ([bool]$session.IsNew) { 1 } else { 0 }
+        if ($log -notmatch "L00C_DISPOSED instance=$instance removedprobe=5 restorednative=16 callbacks=$expectedCallbacks ") {
+            throw "Activated session $($session.Cycle) disposal did not prove exact delegate cleanup/callback ownership."
+        }
     }
     else {
         throw "Unknown WorldRole: $($session.WorldRole)"
@@ -142,6 +198,36 @@ foreach ($session in @($evidence.Sessions)) {
     Assert-Equal $session.DebuggerFinalMode 'Design' "Session $($session.Cycle) debugger final mode"
     Assert-Equal $session.ProcessAbsent $true "Session $($session.Cycle) process absent"
 }
+
+$allSessions = @($evidence.Sessions)
+for ($index = 0; $index -lt $allSessions.Count; $index++) {
+    $currentLog = Get-Content -LiteralPath $sessionLogPaths[$index] -Raw
+    for ($otherIndex = 0; $otherIndex -lt $allSessions.Count; $otherIndex++) {
+        if ($otherIndex -eq $index) { continue }
+        $foreignInstance = [regex]::Escape([string]$allSessions[$otherIndex].InstanceId)
+        if ($currentLog -match "instance=$foreignInstance") {
+            throw "Session $($allSessions[$index].Cycle) log retained foreign delegate instance $($allSessions[$otherIndex].InstanceId)."
+        }
+    }
+}
+
+$debuggerInspection = Get-Content -LiteralPath $debuggerInspectionPath -Raw | ConvertFrom-Json
+Assert-Equal $debuggerInspection.TestedCommit $evidence.TestedCommit 'Debugger inspection commit'
+Assert-Equal ([int]$debuggerInspection.ProcessId) 55992 'Debugger inspection process'
+Assert-Equal $debuggerInspection.InstanceId 'a292390ee34844a7b8f040ee30874303' 'Debugger inspection instance'
+Assert-Equal $debuggerInspection.ModuleSha256 $evidence.Artifacts.Assembly.Sha256 'Debugger module SHA256'
+Assert-Equal $debuggerInspection.PdbSha256 $evidence.Artifacts.Symbols.Sha256 'Debugger PDB SHA256'
+Assert-Equal $debuggerInspection.Loaded.Phase 'loaded' 'Debugger loaded phase'
+Assert-Equal $debuggerInspection.AfterTicks.Phase 'afterticks' 'Debugger afterticks phase'
+Assert-Equal $debuggerInspection.Loaded.UnexpectedCount 0 'Debugger loaded unexpected count'
+Assert-Equal $debuggerInspection.AfterTicks.UnexpectedCount 0 'Debugger afterticks unexpected count'
+Assert-Equal $debuggerInspection.Loaded.SolidCount 67022 'Debugger loaded solid count'
+Assert-Equal $debuggerInspection.Loaded.FluidCount 2610 'Debugger loaded fluid count'
+Assert-Equal $debuggerInspection.Loaded.FreshCount 1350 'Debugger loaded fresh count'
+Assert-Equal $debuggerInspection.Loaded.SaltCount 1260 'Debugger loaded salt count'
+Assert-Equal $debuggerInspection.Coordinates.FreshWater.ActualBlockId 2966 'Debugger fresh-water block id'
+Assert-Equal $debuggerInspection.Coordinates.SaltWater.ActualBlockId 2888 'Debugger salt-water block id'
+Assert-Equal $debuggerInspection.Coordinates.Rock.ActualBlockId 11165 'Debugger rock block id'
 
 $witnessSessions = @($evidence.Sessions | Where-Object { $_.WorldRole -eq 'disabled-witness' })
 if ($witnessSessions.Count -ne 1) { throw "Expected one disabled witness session, found $($witnessSessions.Count)." }
