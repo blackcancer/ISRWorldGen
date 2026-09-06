@@ -88,6 +88,8 @@ try {
             largeInputRefusalAllocatedBytes = $allocationReport.largeInputRefusalAllocatedBytes
             manyPrimitiveEstimateAllocatedBytes = $allocationReport.manyPrimitiveEstimateAllocatedBytes
             manyPrimitiveBuildAllocatedBytes = $allocationReport.manyPrimitiveBuildAllocatedBytes
+            maximumPrimitiveEstimateAllocatedBytes = $allocationReport.maximumPrimitiveEstimateAllocatedBytes
+            maximumPrimitiveBuildAllocatedBytes = $allocationReport.maximumPrimitiveBuildAllocatedBytes
         }
     }
 }
@@ -178,12 +180,32 @@ $isolatedAllocation =
     $allocationReports[1].manyPrimitiveFailureCode -eq "BudgetExceeded" -and
     $allocationReports[0].manyPrimitiveFailureStage -eq "atlas.spatial-index.budget" -and
     $allocationReports[1].manyPrimitiveFailureStage -eq "atlas.spatial-index.budget" -and
+    $allocationReports[0].maximumPrimitiveCount -eq 2147483647 -and
+    $allocationReports[1].maximumPrimitiveCount -eq 2147483647 -and
+    $allocationReports[0].maximumPrimitiveMemoryBudgetBytes -eq [long]::MaxValue -and
+    $allocationReports[1].maximumPrimitiveMemoryBudgetBytes -eq [long]::MaxValue -and
+    $allocationReports[0].maximumPrimitiveEstimateAllocatedBytes -lt 65536 -and
+    $allocationReports[1].maximumPrimitiveEstimateAllocatedBytes -lt 65536 -and
+    $allocationReports[0].maximumPrimitiveBuildAllocatedBytes -lt 65536 -and
+    $allocationReports[1].maximumPrimitiveBuildAllocatedBytes -lt 65536 -and
+    $allocationReports[0].maximumPrimitiveEstimateFailureCode -eq "InvalidInput" -and
+    $allocationReports[1].maximumPrimitiveEstimateFailureCode -eq "InvalidInput" -and
+    $allocationReports[0].maximumPrimitiveBuildFailureCode -eq "InvalidInput" -and
+    $allocationReports[1].maximumPrimitiveBuildFailureCode -eq "InvalidInput" -and
+    $allocationReports[0].maximumPrimitiveEstimateFailureStage -eq "atlas.spatial-index.array-capacity" -and
+    $allocationReports[1].maximumPrimitiveEstimateFailureStage -eq "atlas.spatial-index.array-capacity" -and
+    $allocationReports[0].maximumPrimitiveBuildFailureStage -eq "atlas.spatial-index.array-capacity" -and
+    $allocationReports[1].maximumPrimitiveBuildFailureStage -eq "atlas.spatial-index.array-capacity" -and
+    $allocationReports[0].maximumPrimitiveEnumerationCount -eq 0 -and
+    $allocationReports[1].maximumPrimitiveEnumerationCount -eq 0 -and
     -not $allocationReports[0].rejectedDenseSnapshotVisible -and
     -not $allocationReports[1].rejectedDenseSnapshotVisible -and
     -not $allocationReports[0].largeInputSnapshotVisible -and
     -not $allocationReports[1].largeInputSnapshotVisible -and
     -not $allocationReports[0].manyPrimitiveSnapshotVisible -and
-    -not $allocationReports[1].manyPrimitiveSnapshotVisible
+    -not $allocationReports[1].manyPrimitiveSnapshotVisible -and
+    -not $allocationReports[0].maximumPrimitiveSnapshotVisible -and
+    -not $allocationReports[1].maximumPrimitiveSnapshotVisible
 $processIds = @(
     $reports[0].processId,
     $reports[1].processId,
@@ -247,6 +269,16 @@ $summary = [pscustomobject][ordered]@{
         minimumBytes = ($allocationReports.manyPrimitiveBuildAllocatedBytes | Measure-Object -Minimum).Minimum
         maximumBytes = ($allocationReports.manyPrimitiveBuildAllocatedBytes | Measure-Object -Maximum).Maximum
         scope = "500,000 immutable two-point primitives already constructed; 24 MiB profile; Build refusal only"
+    }
+    maximumPrimitiveEstimateAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.maximumPrimitiveEstimateAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.maximumPrimitiveEstimateAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "reported Count=int.MaxValue; budget=long.MaxValue; Estimate structural refusal before enumeration"
+    }
+    maximumPrimitiveBuildAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.maximumPrimitiveBuildAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.maximumPrimitiveBuildAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "reported Count=int.MaxValue; budget=long.MaxValue; Build structural refusal before enumeration"
     }
     runs = $runs
 }

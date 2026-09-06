@@ -216,6 +216,82 @@ public sealed class SpatialIndexContractRegressionTests
 
     [TestMethod]
     [DoNotParallelize]
+    public void RuntimeMaximumPrimitiveCount_WithLongMaxBudgetFailsTypedBeforeEnumerationAndAllocation()
+    {
+        var input = new OversizedReportedCountPrimitiveList(int.MaxValue);
+        AtlasIndexProfile fixture = SpatialIndexTestSupport.FixtureProfile();
+        var profile = new AtlasIndexProfile(
+            fixture.Domain,
+            fixture.Scale,
+            tileSize: 512,
+            requestedSiteCount: 1,
+            siteQuota: 1,
+            memoryBudgetBytes: long.MaxValue);
+
+        long estimateBefore = GC.GetAllocatedBytesForCurrentThread();
+        GenerationResult<AtlasMemoryEstimate> estimateResult = AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), profile, input);
+        long estimateAllocation = GC.GetAllocatedBytesForCurrentThread() - estimateBefore;
+        long buildBefore = GC.GetAllocatedBytesForCurrentThread();
+        GenerationResult<AtlasIndexBuildOutcome> buildResult = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, input);
+        long buildAllocation = GC.GetAllocatedBytesForCurrentThread() - buildBefore;
+
+        AssertArrayCapacityFailure(estimateResult);
+        AssertArrayCapacityFailure(buildResult);
+        Assert.AreEqual(0, input.EnumerationCount);
+        Assert.IsLessThan(64 * 1024L, estimateAllocation);
+        Assert.IsLessThan(64 * 1024L, buildAllocation);
+    }
+
+    [TestMethod]
+    public void SiteTopologyBeyondArrayCapacity_FailsBeforePrimitiveEnumeration()
+    {
+        var input = new OversizedReportedCountPrimitiveList(0);
+        AtlasIndexProfile fixture = SpatialIndexTestSupport.FixtureProfile();
+        var profile = new AtlasIndexProfile(
+            fixture.Domain,
+            fixture.Scale,
+            tileSize: 512,
+            requestedSiteCount: Array.MaxLength,
+            siteQuota: Array.MaxLength,
+            memoryBudgetBytes: long.MaxValue);
+
+        AssertArrayCapacityFailure(AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), profile, input));
+        AssertArrayCapacityFailure(AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, input));
+        Assert.AreEqual(0, input.EnumerationCount);
+    }
+
+    [TestMethod]
+    public void PlacementCsrRequiringArrayMaxLengthEntries_FailsBeforeAtlasConstruction()
+    {
+        var profile = new AtlasIndexProfile(
+            new WorldDomain(
+                new Int64Interval(0, Array.MaxLength),
+                new Int64Interval(0, 1),
+                1,
+                new WorldBlockPosition(0, 0)),
+            new ScaleModel("unit", 1d, "block", 1d),
+            tileSize: 1,
+            requestedSiteCount: 1,
+            siteQuota: 1,
+            memoryBudgetBytes: long.MaxValue);
+        var primitive = new SpatialPrimitiveDefinition(
+            new StableId(1, 1),
+            SpatialPrimitiveKind.River,
+            "array capacity",
+            [new SpatialPoint(0, 0), new SpatialPoint(Array.MaxLength - 1L, 0)]);
+
+        AssertIndexCapacityFailure(AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), profile, [primitive]));
+        AssertIndexCapacityFailure(AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, [primitive]));
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
     public void FiveHundredThousandPrimitives_With24MiBBudgetAvoidPerIdAllocationBeforeRefusal()
     {
         SpatialPrimitiveDefinition[] primitives = SpatialIndexTestSupport.ManyPrimitiveFixtures();
@@ -259,6 +335,24 @@ public sealed class SpatialIndexContractRegressionTests
         Assert.AreEqual(GenerationFailureCode.CorruptData, error.Code);
         Assert.AreEqual("atlas.spatial-index.stable-id", error.Stage);
         StringAssert.Contains(error.Details, "StableId");
+    }
+
+    private static void AssertArrayCapacityFailure<T>(GenerationResult<T> result)
+        where T : class
+    {
+        Assert.IsInstanceOfType<GenerationFailure<T>>(result);
+        GenerationError error = ((GenerationFailure<T>)result).Error;
+        Assert.AreEqual(GenerationFailureCode.InvalidInput, error.Code);
+        Assert.AreEqual("atlas.spatial-index.array-capacity", error.Stage);
+    }
+
+    private static void AssertIndexCapacityFailure<T>(GenerationResult<T> result)
+        where T : class
+    {
+        Assert.IsInstanceOfType<GenerationFailure<T>>(result);
+        GenerationError error = ((GenerationFailure<T>)result).Error;
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, error.Code);
+        Assert.AreEqual("atlas.spatial-index.index-capacity", error.Stage);
     }
 
     private static void AssertDimensionFailure(GenerationResult<AtlasIndexBuildOutcome> result)

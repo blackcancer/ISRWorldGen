@@ -162,13 +162,14 @@ public static class AtlasSpatialIndexPlanner
                 placementCount = checked(placementCount + checked(width * length));
             }
 
-            if (placementCount > int.MaxValue)
+            long maximumPlacementReferences = Array.MaxLength - 1L;
+            if (placementCount > maximumPlacementReferences)
             {
                 return Failure(
                     identity,
                     GenerationFailureCode.BudgetExceeded,
                     "atlas.spatial-index.index-capacity",
-                    $"Spatial index requires {placementCount} references; compact CSR supports at most {int.MaxValue}.");
+                    $"Spatial index requires {placementCount} references; compact CSR supports at most {maximumPlacementReferences} so its terminal offsets remain array-representable.");
             }
 
             int siteCount = profile.RequestedSiteCount;
@@ -257,6 +258,25 @@ public static class AtlasSpatialIndexPlanner
                 $"Requested {profile.RequestedSiteCount} sites exceeds quota {profile.SiteQuota}.");
         }
 
+        int siteCount = profile.RequestedSiteCount;
+        BigInteger maximumEdges = siteCount switch
+        {
+            1 => BigInteger.Zero,
+            2 => BigInteger.One,
+            _ => (3 * (BigInteger)siteCount) - 6,
+        };
+        BigInteger maximumNeighborReferences = 2 * maximumEdges;
+        if ((BigInteger)siteCount + 1 > Array.MaxLength ||
+            maximumEdges > Array.MaxLength ||
+            maximumNeighborReferences > Array.MaxLength)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.InvalidInput,
+                "atlas.spatial-index.array-capacity",
+                $"Requested site topology exceeds CLR array capacity {Array.MaxLength}: sites={siteCount}, edges={maximumEdges}, neighbor references={maximumNeighborReferences}.");
+        }
+
         int primitiveCount;
         try
         {
@@ -293,7 +313,15 @@ public static class AtlasSpatialIndexPlanner
                 $"Canonical reference capture requires at least {captureBytes} bytes, exceeding budget {profile.MemoryBudgetBytes} bytes.");
         }
 
-        int siteCount = profile.RequestedSiteCount;
+        if (primitiveCount > Array.MaxLength)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.InvalidInput,
+                "atlas.spatial-index.array-capacity",
+                $"Primitive collection reports {primitiveCount} items; canonical capture, memberships and owned primitives each support at most {Array.MaxLength} array elements.");
+        }
+
         BigInteger minimumWorkingBytes =
             GeometryFixedWorkingBytes +
             ((BigInteger)GeometryWorkingBytesPerSitePair * siteCount * siteCount) +
@@ -385,6 +413,15 @@ internal sealed class CanonicalPrimitiveSet
         IReadOnlyList<SpatialPrimitiveDefinition> source,
         int expectedCount)
     {
+        if (expectedCount < 0 || expectedCount > Array.MaxLength)
+        {
+            return AtlasSpatialIndexPlanner.Failure<CanonicalPrimitiveSet>(
+                identity,
+                GenerationFailureCode.InvalidInput,
+                "atlas.spatial-index.array-capacity",
+                $"Canonical primitive capture count {expectedCount} is outside CLR array capacity [0, {Array.MaxLength}].");
+        }
+
         try
         {
             var definitions = new SpatialPrimitiveDefinition[expectedCount];

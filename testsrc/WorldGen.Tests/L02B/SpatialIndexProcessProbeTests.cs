@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using ISRWorldGen.Core.Atlas.SpatialIndex;
@@ -233,6 +234,38 @@ public sealed class SpatialIndexProcessProbeTests
         Assert.IsLessThan(8L * 1024 * 1024, manyBuildAllocation);
         GC.KeepAlive(manyPrimitives);
 
+        var maximumCountInput = new ReportedCountPrimitiveList(int.MaxValue);
+        AtlasIndexProfile fixtureProfile = SpatialIndexTestSupport.FixtureProfile();
+        var maximumCountProfile = new AtlasIndexProfile(
+            fixtureProfile.Domain,
+            fixtureProfile.Scale,
+            tileSize: 512,
+            requestedSiteCount: 1,
+            siteQuota: 1,
+            memoryBudgetBytes: long.MaxValue);
+        long maximumCountEstimateBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasMemoryEstimate> maximumCountEstimateResult = AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), maximumCountProfile, maximumCountInput);
+        long maximumCountEstimateAllocation =
+            GC.GetTotalAllocatedBytes(precise: true) - maximumCountEstimateBefore;
+        long maximumCountBuildBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasIndexBuildOutcome> maximumCountBuildResult = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), maximumCountProfile, maximumCountInput);
+        long maximumCountBuildAllocation = GC.GetTotalAllocatedBytes(precise: true) - maximumCountBuildBefore;
+        Assert.IsInstanceOfType<GenerationFailure<AtlasMemoryEstimate>>(maximumCountEstimateResult);
+        Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(maximumCountBuildResult);
+        GenerationError maximumCountEstimateError =
+            ((GenerationFailure<AtlasMemoryEstimate>)maximumCountEstimateResult).Error;
+        GenerationError maximumCountBuildError =
+            ((GenerationFailure<AtlasIndexBuildOutcome>)maximumCountBuildResult).Error;
+        Assert.AreEqual(GenerationFailureCode.InvalidInput, maximumCountEstimateError.Code);
+        Assert.AreEqual(GenerationFailureCode.InvalidInput, maximumCountBuildError.Code);
+        Assert.AreEqual("atlas.spatial-index.array-capacity", maximumCountEstimateError.Stage);
+        Assert.AreEqual("atlas.spatial-index.array-capacity", maximumCountBuildError.Stage);
+        Assert.AreEqual(0, maximumCountInput.EnumerationCount);
+        Assert.IsLessThan(64 * 1024L, maximumCountEstimateAllocation);
+        Assert.IsLessThan(64 * 1024L, maximumCountBuildAllocation);
+
         string commit = Environment.GetEnvironmentVariable("ISRW_L02B_COMMIT")
             ?? throw new InvalidOperationException("ISRW_L02B_COMMIT is required for a persisted allocation proof.");
         var report = new
@@ -274,6 +307,16 @@ public sealed class SpatialIndexProcessProbeTests
             manyPrimitiveFailureCode = manyBuildError.Code.ToString(),
             manyPrimitiveFailureStage = manyBuildError.Stage,
             manyPrimitiveSnapshotVisible = false,
+            maximumPrimitiveCount = maximumCountInput.Count,
+            maximumPrimitiveMemoryBudgetBytes = maximumCountProfile.MemoryBudgetBytes,
+            maximumPrimitiveEstimateAllocatedBytes = maximumCountEstimateAllocation,
+            maximumPrimitiveBuildAllocatedBytes = maximumCountBuildAllocation,
+            maximumPrimitiveEstimateFailureCode = maximumCountEstimateError.Code.ToString(),
+            maximumPrimitiveBuildFailureCode = maximumCountBuildError.Code.ToString(),
+            maximumPrimitiveEstimateFailureStage = maximumCountEstimateError.Stage,
+            maximumPrimitiveBuildFailureStage = maximumCountBuildError.Stage,
+            maximumPrimitiveEnumerationCount = maximumCountInput.EnumerationCount,
+            maximumPrimitiveSnapshotVisible = false,
             processId = Environment.ProcessId,
             framework = RuntimeInformation.FrameworkDescription,
             architecture = RuntimeInformation.ProcessArchitecture.ToString(),
@@ -292,5 +335,24 @@ public sealed class SpatialIndexProcessProbeTests
             profile,
             fixtures,
             new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold)));
+    }
+
+    private sealed class ReportedCountPrimitiveList : IReadOnlyList<SpatialPrimitiveDefinition>
+    {
+        internal ReportedCountPrimitiveList(int count) => Count = count;
+
+        public int Count { get; }
+
+        public SpatialPrimitiveDefinition this[int index] => throw new NotSupportedException();
+
+        public int EnumerationCount { get; private set; }
+
+        public IEnumerator<SpatialPrimitiveDefinition> GetEnumerator()
+        {
+            EnumerationCount++;
+            throw new InvalidOperationException("Structurally impossible input must be rejected before enumeration.");
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }
