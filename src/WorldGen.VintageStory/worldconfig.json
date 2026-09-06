@@ -1,0 +1,12 @@
+{
+  "worldConfigAttributes": [
+    {
+      "code": "isrworldgenProfileId",
+      "dataType": "String",
+      "category": "general",
+      "default": "",
+      "onCustomizeScreen": false,
+      "onlyDuringWorldCreate": true
+    }
+  ]
+}

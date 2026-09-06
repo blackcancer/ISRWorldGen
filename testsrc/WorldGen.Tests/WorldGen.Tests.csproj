@@ -22,6 +22,10 @@
       <HintPath>$(VintageStoryPath)\VintagestoryAPI.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(VintageStoryPath)\Lib\Newtonsoft.Json.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

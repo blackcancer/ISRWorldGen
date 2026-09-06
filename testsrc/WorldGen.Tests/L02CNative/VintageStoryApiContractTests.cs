@@ -1,8 +1,10 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Text.Json;
 using ISRWorldGen;
 using ISRWorldGen.ScaleProfiles;
+using Newtonsoft.Json;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Vintagestory.API.Datastructures;
@@ -91,6 +93,65 @@ public sealed class VintageStoryApiContractTests
         Assert.IsFalse(
             launchSettings.Contains(VintageStoryNativeProfileHost.SelectionConfigKey, StringComparison.Ordinal),
             "Existing L00 launch profiles must not opt into a scale profile implicitly.");
+
+        string packagedWorldConfigPath = Path.Combine(packageRoot, "worldconfig.json");
+        Assert.IsTrue(
+            File.Exists(packagedWorldConfigPath),
+            $"Missing packaged native world configuration declaration: {packagedWorldConfigPath}");
+        AssertWorldConfigDeclaration(packagedWorldConfigPath);
+    }
+
+    [TestMethod]
+    public void WorldConfigDeclaration_RegistersBoundedExplicitProfileSelection()
+    {
+        string sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "WorldGen.VintageStory",
+            "worldconfig.json");
+
+        AssertWorldConfigDeclaration(sourcePath);
+
+        ModWorldConfiguration? declaration =
+            JsonConvert.DeserializeObject<ModWorldConfiguration>(File.ReadAllText(sourcePath));
+        Assert.IsNotNull(declaration);
+        Assert.HasCount(1, declaration.WorldConfigAttributes);
+        WorldConfigurationAttribute attribute = declaration.WorldConfigAttributes[0];
+        Assert.AreEqual(VintageStoryNativeProfileHost.SelectionConfigKey, attribute.Code);
+        Assert.AreEqual(EnumDataType.String, attribute.DataType);
+        Assert.AreEqual(string.Empty, attribute.TypedDefault);
+        Assert.IsFalse(attribute.OnCustomizeScreen);
+        Assert.IsTrue(attribute.OnlyDuringWorldCreate);
+    }
+
+    [TestMethod]
+    public void SelectionConfig_MissingEmptyOrWhitespace_RemainsInactive()
+    {
+        foreach (string? value in new string?[] { null, string.Empty, " \t" })
+        {
+            var config = new TreeAttribute();
+            if (value is not null)
+            {
+                config.SetString(VintageStoryNativeProfileHost.SelectionConfigKey, value);
+            }
+
+            NativeProfileSelection selection = VintageStoryNativeProfileHost.ReadSelection(config);
+
+            Assert.IsFalse(selection.IsSpecified, $"Value '{value}' must not opt into ISRWorldGen.");
+            Assert.IsNull(selection.ProfileId);
+        }
+    }
+
+    [TestMethod]
+    public void SelectionConfig_LaboratoryValue_IsAvailableBeforeGameReadyBridge()
+    {
+        var config = new TreeAttribute();
+        config.SetString(VintageStoryNativeProfileHost.SelectionConfigKey, "laboratory");
+
+        NativeProfileSelection selection = VintageStoryNativeProfileHost.ReadSelection(config);
+
+        Assert.IsTrue(selection.IsSpecified);
+        Assert.AreEqual("laboratory", selection.ProfileId);
     }
 
     private static void AssertProperty<TDeclaring, TProperty>(string name)
@@ -112,6 +173,22 @@ public sealed class VintageStoryApiContractTests
         FieldInfo? field = typeof(GlobalConstants).GetField(name, BindingFlags.Public | BindingFlags.Static);
         Assert.IsNotNull(field, $"Missing {typeof(GlobalConstants).FullName}.{name}.");
         Assert.AreEqual(expected, field.GetRawConstantValue());
+    }
+
+    private static void AssertWorldConfigDeclaration(string path)
+    {
+        Assert.IsTrue(File.Exists(path), $"Missing world configuration declaration: {path}");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        JsonElement attributes = document.RootElement.GetProperty("worldConfigAttributes");
+        Assert.AreEqual(JsonValueKind.Array, attributes.ValueKind);
+        Assert.AreEqual(1, attributes.GetArrayLength());
+
+        JsonElement attribute = attributes[0];
+        Assert.AreEqual(VintageStoryNativeProfileHost.SelectionConfigKey, attribute.GetProperty("code").GetString());
+        Assert.AreEqual("String", attribute.GetProperty("dataType").GetString());
+        Assert.AreEqual(string.Empty, attribute.GetProperty("default").GetString());
+        Assert.IsFalse(attribute.GetProperty("onCustomizeScreen").GetBoolean());
+        Assert.IsTrue(attribute.GetProperty("onlyDuringWorldCreate").GetBoolean());
     }
 
     private static string GetRepositoryRoot([CallerFilePath] string sourcePath = "") =>

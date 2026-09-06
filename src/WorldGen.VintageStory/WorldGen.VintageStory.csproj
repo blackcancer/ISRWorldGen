@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <Content Include="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="worldconfig.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="assets\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

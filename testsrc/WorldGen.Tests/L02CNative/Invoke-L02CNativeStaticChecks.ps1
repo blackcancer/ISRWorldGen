@@ -32,6 +32,149 @@ foreach ($entry in $expectedHashes.GetEnumerator()) {
     }
 }
 
+function Get-CecilMethod {
+    param(
+        [Parameter(Mandatory)]$Assembly,
+        [Parameter(Mandatory)][string]$TypeName,
+        [Parameter(Mandatory)][string]$MethodName
+    )
+
+    $type = $Assembly.MainModule.GetType($TypeName)
+    if ($null -eq $type) {
+        throw "Audited IL type is absent: $TypeName"
+    }
+
+    $methods = @($type.Methods | Where-Object Name -eq $MethodName)
+    if ($methods.Count -ne 1) {
+        throw "Expected one audited IL method $TypeName::$MethodName, found $($methods.Count)."
+    }
+
+    return $methods[0]
+}
+
+function Get-OperandTexts {
+    param([Parameter(Mandatory)]$Method)
+
+    return @($Method.Body.Instructions | ForEach-Object {
+        $operandText = [string]$_.Operand
+        if ($operandText.Length -gt 0) {
+            $operandText
+        }
+    })
+}
+
+function Assert-OperandContains {
+    param(
+        [Parameter(Mandatory)][string[]]$Operands,
+        [Parameter(Mandatory)][string]$Expected,
+        [Parameter(Mandatory)][string]$Evidence
+    )
+
+    if (-not ($Operands | Where-Object { $_.Contains($Expected, [StringComparison]::Ordinal) })) {
+        throw "Audited IL evidence is absent for $Evidence ($Expected)."
+    }
+}
+
+function Find-OperandIndex {
+    param(
+        [Parameter(Mandatory)][string[]]$Operands,
+        [Parameter(Mandatory)][string]$Expected
+    )
+
+    for ($index = 0; $index -lt $Operands.Count; $index++) {
+        if ($Operands[$index].Contains($Expected, [StringComparison]::Ordinal)) {
+            return $index
+        }
+    }
+
+    return -1
+}
+
+$cecilPath = Join-Path $VintageStoryPath 'Lib\Mono.Cecil.dll'
+if (-not (Test-Path -LiteralPath $cecilPath -PathType Leaf)) {
+    throw "Mono.Cecil required for the bounded installed-IL audit is missing: $cecilPath"
+}
+
+Add-Type -Path $cecilPath
+$apiAssemblyDefinition = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($apiPath)
+$libraryAssemblyDefinition = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($libraryPath)
+
+$loadModInfoOperands = Get-OperandTexts (Get-CecilMethod $libraryAssemblyDefinition 'Vintagestory.Common.ModContainer' 'LoadModInfo')
+Assert-OperandContains $loadModInfoOperands 'worldconfig.json' 'mod world-configuration discovery'
+Assert-OperandContains $loadModInfoOperands 'DeserializeObject<Vintagestory.API.Common.ModWorldConfiguration>' 'mod world-configuration deserialization'
+Assert-OperandContains $loadModInfoOperands 'Mod::set_WorldConfig' 'mod world-configuration publication'
+
+$loadWorldConfigOperands = Get-OperandTexts (Get-CecilMethod $libraryAssemblyDefinition 'Vintagestory.Common.WorldConfig' 'loadWorldConfigValues')
+Assert-OperandContains $loadWorldConfigOperands 'Mod::get_WorldConfig' 'world-configuration mod enumeration'
+Assert-OperandContains $loadWorldConfigOperands 'ModWorldConfiguration::WorldConfigAttributes' 'declared-key filtering'
+Assert-OperandContains $loadWorldConfigOperands 'JsonObject::get_Item' 'declared-key value lookup'
+
+$updateWorldConfigOperands = Get-OperandTexts (Get-CecilMethod $libraryAssemblyDefinition 'Vintagestory.Common.WorldConfig' 'updateJWorldConfig')
+Assert-OperandContains $updateWorldConfigOperands 'WorldConfig::allDefaultValues' 'declared defaults rebuild'
+Assert-OperandContains $updateWorldConfigOperands 'WorldConfig::updateJWorldConfigFrom' 'declared custom values publication'
+
+$setNewWorldConfigOperands = Get-OperandTexts (Get-CecilMethod $libraryAssemblyDefinition 'SaveGame' 'SetNewWorldConfig')
+Assert-OperandContains $setNewWorldConfigOperands 'ServerConfig::get_WorldConfig' 'server world configuration source'
+Assert-OperandContains $setNewWorldConfigOperands 'StartServerArgs::WorldConfiguration' 'startup JSON object source'
+Assert-OperandContains $setNewWorldConfigOperands 'WorldConfig::loadWorldConfigValues' 'startup value filtering'
+Assert-OperandContains $setNewWorldConfigOperands 'WorldConfig::updateJWorldConfigFrom' 'startup value publication'
+Assert-OperandContains $setNewWorldConfigOperands 'SaveGame::WorldConfiguration' 'save world-configuration publication'
+
+$loadAssetsOperands = Get-OperandTexts (Get-CecilMethod $libraryAssemblyDefinition 'Vintagestory.Server.ServerSystemModHandler' 'OnLoadAssets')
+$loadModsIndex = Find-OperandIndex $loadAssetsOperands 'ModLoader::LoadMods'
+$setNewWorldConfigIndex = Find-OperandIndex $loadAssetsOperands 'SaveGame::SetNewWorldConfig'
+$runModPhaseIndex = Find-OperandIndex $loadAssetsOperands 'ModLoader::RunModPhase'
+if ($loadModsIndex -lt 0 -or $setNewWorldConfigIndex -le $loadModsIndex -or $runModPhaseIndex -le $setNewWorldConfigIndex) {
+    throw 'Installed IL no longer loads mod declarations, applies the new-world configuration, then starts mod phases in the audited order.'
+}
+
+$beginRunGameOperands = Get-OperandTexts (Get-CecilMethod $libraryAssemblyDefinition 'Vintagestory.Server.ServerSystemLoadConfig' 'OnBeginRunGame')
+Assert-OperandContains $beginRunGameOperands 'ServerConfig::get_StartupCommands' 'startup command source'
+Assert-OperandContains $beginRunGameOperands 'ServerMain::ReceiveServerConsole' 'startup command execution'
+
+$runPhaseType = $apiAssemblyDefinition.MainModule.GetType('Vintagestory.API.Server.EnumServerRunPhase')
+$gameReadyValue = ($runPhaseType.Fields | Where-Object Name -eq 'GameReady').Constant
+$runGameValue = ($runPhaseType.Fields | Where-Object Name -eq 'RunGame').Constant
+if ($gameReadyValue -ne 6 -or $runGameValue -ne 8 -or $runGameValue -le $gameReadyValue) {
+    throw "Unexpected server lifecycle values: GameReady=$gameReadyValue RunGame=$runGameValue"
+}
+
+$worldConfigPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\worldconfig.json'
+if (-not (Test-Path -LiteralPath $worldConfigPath -PathType Leaf)) {
+    throw "ISRWorldGen world configuration declaration is missing: $worldConfigPath"
+}
+
+[Reflection.Assembly]::LoadFrom((Join-Path $VintageStoryPath 'Lib\Newtonsoft.Json.dll')) | Out-Null
+[Reflection.Assembly]::LoadFrom($apiPath) | Out-Null
+$libraryAssembly = [Reflection.Assembly]::LoadFrom($libraryPath)
+$declaration = [Newtonsoft.Json.JsonConvert]::DeserializeObject(
+    (Get-Content -LiteralPath $worldConfigPath -Raw),
+    [Vintagestory.API.Common.ModWorldConfiguration])
+$declaredAttribute = @($declaration.WorldConfigAttributes)
+if ($declaredAttribute.Count -ne 1 -or
+    $declaredAttribute[0].Code -ne 'isrworldgenProfileId' -or
+    $declaredAttribute[0].DataType -ne [Vintagestory.API.Common.EnumDataType]::String -or
+    $declaredAttribute[0].TypedDefault -ne '' -or
+    $declaredAttribute[0].OnCustomizeScreen -or
+    -not $declaredAttribute[0].OnlyDuringWorldCreate) {
+    throw 'ISRWorldGen worldconfig.json does not match the audited 1.22.7 declaration contract.'
+}
+
+$serverConfigType = $libraryAssembly.GetType('Vintagestory.Server.ServerConfig', $true)
+$startServerArgsType = $libraryAssembly.GetType('Vintagestory.Common.StartServerArgs', $true)
+$worldConfigProperty = $serverConfigType.GetProperty('WorldConfig')
+if ($null -eq $worldConfigProperty -or $worldConfigProperty.PropertyType -ne $startServerArgsType) {
+    throw 'ServerConfig.WorldConfig is no longer the audited StartServerArgs type.'
+}
+
+$serverConfigJson = '{"WorldConfig":{"SaveFileLocation":"X:\\disposable\\laboratory.vcdbs","WorldName":"T02-05 laboratory","PlayStyle":"surviveandbuild","WorldType":"standard","WorldConfiguration":{"isrworldgenProfileId":"laboratory"}}}'
+$worldConfigToken = [Newtonsoft.Json.Linq.JObject]::Parse($serverConfigJson)['WorldConfig']
+$worldConfig = [Newtonsoft.Json.JsonConvert]::DeserializeObject($worldConfigToken.ToString(), $startServerArgsType)
+$injectedProfileId = $worldConfig.WorldConfiguration['isrworldgenProfileId'].AsString()
+if ($injectedProfileId -ne 'laboratory') {
+    throw "ServerConfig.WorldConfig.WorldConfiguration did not retain the laboratory selection: $injectedProfileId"
+}
+
 $requiredApiMembers = @(
     'P:Vintagestory.API.Server.ICoreServerAPI.Event',
     'P:Vintagestory.API.Server.ICoreServerAPI.WorldManager',
@@ -69,7 +212,9 @@ $requiredSourceFragments = @(
     'worldManager.MapSizeX',
     'worldManager.MapSizeY',
     'worldManager.MapSizeZ',
-    'api.World.Config.HasAttribute(SelectionConfigKey)',
+    'ReadSelection(api.World.Config)',
+    'config.HasAttribute(SelectionConfigKey)',
+    'string.IsNullOrWhiteSpace(profileId)',
     'api.Server.ShutDown()',
     'internal const string StorageKey = "isrworldgen:l02c:frozen-profile:v1"',
     'internal const string FrozenProfileCodecId = "isrworldgen.core.frozen-scale-profile"',
@@ -108,6 +253,16 @@ if (($packagedDlls -join '|') -ne ($expectedDlls -join '|')) {
     throw "Unexpected packaged DLL set: $($packagedDlls -join ', ')"
 }
 
+$packagedWorldConfigPath = Join-Path $packageRoot 'worldconfig.json'
+if (-not (Test-Path -LiteralPath $packagedWorldConfigPath -PathType Leaf)) {
+    throw "Packaged worldconfig.json is missing: $packagedWorldConfigPath"
+}
+
+if ((Get-FileHash -LiteralPath $packagedWorldConfigPath -Algorithm SHA256).Hash -ne
+    (Get-FileHash -LiteralPath $worldConfigPath -Algorithm SHA256).Hash) {
+    throw 'Packaged worldconfig.json differs from the audited source declaration.'
+}
+
 $dependencyManifestPath = Join-Path $packageRoot 'ISRWorldGen.deps.json'
 $dependencyManifest = Get-Content -LiteralPath $dependencyManifestPath -Raw
 if (-not $dependencyManifest.Contains('"ISRWorldGen.Core.dll"')) {
@@ -126,4 +281,8 @@ if (-not $dependencyManifest.Contains('"ISRWorldGen.Core.dll"')) {
     SelectionConfigKey = 'isrworldgenProfileId'
     StorageKey = 'isrworldgen:l02c:frozen-profile:v1'
     ExistingL00ProfilesImplicitlyActivated = $false
+    SelectionDeclaration = 'worldconfig.json:String:default-empty:hidden:create-only'
+    StartupCommandsPhase = "RunGame:$runGameValue"
+    SelectionReadPhase = "GameReady:$gameReadyValue"
+    ServerConfigInjection = "WorldConfig.WorldConfiguration.isrworldgenProfileId=$injectedProfileId"
 } | ConvertTo-Json -Depth 4

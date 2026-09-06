@@ -1,6 +1,7 @@
 using ISRWorldGen.Core.Contracts;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
+using Vintagestory.API.Datastructures;
 using Vintagestory.API.Server;
 
 namespace ISRWorldGen.ScaleProfiles;
@@ -198,16 +199,20 @@ internal sealed class VintageStoryNativeProfileHost : INativeProfileHost
             NativeRuleSetVersion);
     }
 
-    public NativeProfileSelection ReadSelection()
+    public NativeProfileSelection ReadSelection() => ReadSelection(api.World.Config);
+
+    internal static NativeProfileSelection ReadSelection(ITreeAttribute config)
     {
-        if (!api.World.Config.HasAttribute(SelectionConfigKey))
+        ArgumentNullException.ThrowIfNull(config);
+        if (!config.HasAttribute(SelectionConfigKey))
         {
             return new NativeProfileSelection(isSpecified: false, profileId: null);
         }
 
-        return new NativeProfileSelection(
-            isSpecified: true,
-            api.World.Config.GetString(SelectionConfigKey, string.Empty));
+        string profileId = config.GetString(SelectionConfigKey, string.Empty);
+        return string.IsNullOrWhiteSpace(profileId)
+            ? new NativeProfileSelection(isSpecified: false, profileId: null)
+            : new NativeProfileSelection(isSpecified: true, profileId);
     }
 
     public IFrozenProfileStore CreateStore() => new VintageStoryFrozenProfileStore(api.WorldManager.SaveGame);
