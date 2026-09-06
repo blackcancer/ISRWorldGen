@@ -96,6 +96,7 @@ public sealed class SpatialIndexProcessProbeTests
             neighborReferences = measured.Snapshot.Graph.NeighborReferenceCount,
             occupiedTiles = measured.Snapshot.Index.OccupiedTileCount,
             placementReferences = measured.Snapshot.Index.PlacementReferenceCount,
+            estimatedCanonicalCaptureBytes = measured.Estimate.EstimatedCanonicalCaptureBytes,
             estimatedSiteBytes = measured.Estimate.EstimatedSiteBytes,
             estimatedCompactGraphBytes = measured.Estimate.EstimatedCompactGraphBytes,
             estimatedSpatialIndexBytes = measured.Estimate.EstimatedSpatialIndexBytes,
@@ -193,6 +194,19 @@ public sealed class SpatialIndexProcessProbeTests
         Assert.AreEqual("atlas.spatial-index.budget", refusalError.Stage);
         Assert.IsLessThan(64 * 1024L, refusalAllocation);
 
+        SpatialPrimitiveDefinition largeInput = SpatialIndexTestSupport.LargeInputFixture();
+        AtlasIndexProfile oneMiBProfile = SpatialIndexTestSupport.FixtureProfile(memoryBudgetBytes: 1024 * 1024);
+        long largeInputBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasIndexBuildOutcome> largeInputRefusal = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), oneMiBProfile, [largeInput]);
+        long largeInputRefusalAllocation = GC.GetTotalAllocatedBytes(precise: true) - largeInputBefore;
+        Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(largeInputRefusal);
+        GenerationError largeInputError = ((GenerationFailure<AtlasIndexBuildOutcome>)largeInputRefusal).Error;
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, largeInputError.Code);
+        Assert.AreEqual("atlas.spatial-index.budget", largeInputError.Stage);
+        Assert.IsLessThan(256 * 1024L, largeInputRefusalAllocation);
+        GC.KeepAlive(largeInput);
+
         string commit = Environment.GetEnvironmentVariable("ISRW_L02B_COMMIT")
             ?? throw new InvalidOperationException("ISRW_L02B_COMMIT is required for a persisted allocation proof.");
         var report = new
@@ -220,6 +234,12 @@ public sealed class SpatialIndexProcessProbeTests
             contentHash = measured.Snapshot.Header.ContentChecksum.ToString(),
             rejectedDenseRefusalAllocatedBytes = refusalAllocation,
             rejectedDenseSnapshotVisible = false,
+            largeInputPointCount = largeInput.Points.Count,
+            largeInputMemoryBudgetBytes = oneMiBProfile.MemoryBudgetBytes,
+            largeInputRefusalAllocatedBytes = largeInputRefusalAllocation,
+            largeInputFailureCode = largeInputError.Code.ToString(),
+            largeInputFailureStage = largeInputError.Stage,
+            largeInputSnapshotVisible = false,
             processId = Environment.ProcessId,
             framework = RuntimeInformation.FrameworkDescription,
             architecture = RuntimeInformation.ProcessArchitecture.ToString(),

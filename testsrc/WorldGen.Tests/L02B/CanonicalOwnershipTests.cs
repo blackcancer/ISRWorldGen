@@ -117,6 +117,8 @@ public sealed class CanonicalOwnershipTests
         AtlasIndexBuildOutcome outcome = SpatialIndexTestSupport.Success(AtlasSpatialIndexBuilder.Build(
             SpatialIndexTestSupport.Identity(), SpatialIndexTestSupport.FixtureProfile(), [primitive]));
         Assert.AreEqual(new SpatialPoint(100, 100), outcome.Snapshot.Index.Primitives.Single().Points[0]);
+        Assert.AreSame(primitive.Points, outcome.Snapshot.Index.Primitives.Single().Points,
+            "The sealed immutable definition storage is safe to reuse without a second polyline allocation.");
 
         var conflicting = new SpatialPrimitiveDefinition(
             primitive.Id,

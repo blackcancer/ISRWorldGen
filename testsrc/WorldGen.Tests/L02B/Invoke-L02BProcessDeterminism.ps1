@@ -85,6 +85,7 @@ try {
             cumulativeAllocatedBytes = $allocationReport.cumulativeAllocatedBytes
             liveManagedBytesDelta = $allocationReport.liveManagedBytesDelta
             denseRefusalAllocatedBytes = $allocationReport.rejectedDenseRefusalAllocatedBytes
+            largeInputRefusalAllocatedBytes = $allocationReport.largeInputRefusalAllocatedBytes
         }
     }
 }
@@ -102,6 +103,7 @@ $sameQualification =
     $reports[0].snapshotSchemaVersion -eq $reports[1].snapshotSchemaVersion -and
     $reports[0].configHash -eq $reports[1].configHash
 $samePlan =
+    $reports[0].estimatedCanonicalCaptureBytes -eq $reports[1].estimatedCanonicalCaptureBytes -and
     $reports[0].estimatedSnapshotBytes -eq $reports[1].estimatedSnapshotBytes -and
     $reports[0].estimatedPeakBuildBytes -eq $reports[1].estimatedPeakBuildBytes
 $sameSnapshot = $reports[0].contentHash -eq $reports[1].contentHash
@@ -151,8 +153,20 @@ $isolatedAllocation =
     $allocationReports[1].workers -eq 1 -and
     $allocationReports[0].rejectedDenseRefusalAllocatedBytes -lt 65536 -and
     $allocationReports[1].rejectedDenseRefusalAllocatedBytes -lt 65536 -and
+    $allocationReports[0].largeInputPointCount -eq 200000 -and
+    $allocationReports[1].largeInputPointCount -eq 200000 -and
+    $allocationReports[0].largeInputMemoryBudgetBytes -eq 1048576 -and
+    $allocationReports[1].largeInputMemoryBudgetBytes -eq 1048576 -and
+    $allocationReports[0].largeInputRefusalAllocatedBytes -lt 262144 -and
+    $allocationReports[1].largeInputRefusalAllocatedBytes -lt 262144 -and
+    $allocationReports[0].largeInputFailureCode -eq "BudgetExceeded" -and
+    $allocationReports[1].largeInputFailureCode -eq "BudgetExceeded" -and
+    $allocationReports[0].largeInputFailureStage -eq "atlas.spatial-index.budget" -and
+    $allocationReports[1].largeInputFailureStage -eq "atlas.spatial-index.budget" -and
     -not $allocationReports[0].rejectedDenseSnapshotVisible -and
-    -not $allocationReports[1].rejectedDenseSnapshotVisible
+    -not $allocationReports[1].rejectedDenseSnapshotVisible -and
+    -not $allocationReports[0].largeInputSnapshotVisible -and
+    -not $allocationReports[1].largeInputSnapshotVisible
 $processIds = @(
     $reports[0].processId,
     $reports[1].processId,
@@ -201,6 +215,11 @@ $summary = [pscustomobject][ordered]@{
         minimumBytes = ($allocationReports.rejectedDenseRefusalAllocatedBytes | Measure-Object -Minimum).Minimum
         maximumBytes = ($allocationReports.rejectedDenseRefusalAllocatedBytes | Measure-Object -Maximum).Maximum
         scope = "same dedicated single-test processes, measured after the qualified build window"
+    }
+    largeInputRefusalAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.largeInputRefusalAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.largeInputRefusalAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "200,000-point immutable input already constructed; one MiB profile; measured dedicated refusal only"
     }
     runs = $runs
 }

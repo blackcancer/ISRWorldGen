@@ -176,6 +176,44 @@ public sealed class SpatialIndexContractRegressionTests
             SpatialIndexTestSupport.Identity(), profile, []));
     }
 
+    [TestMethod]
+    [DoNotParallelize]
+    public void TwoHundredThousandPointInput_WithOneMiBBudgetRefusesBeforeMassiveCaptureAllocation()
+    {
+        SpatialPrimitiveDefinition primitive = SpatialIndexTestSupport.LargeInputFixture();
+        AtlasIndexProfile profile = SpatialIndexTestSupport.FixtureProfile(memoryBudgetBytes: 1024 * 1024);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        GenerationResult<AtlasIndexBuildOutcome> result = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, [primitive]);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(result);
+        GenerationError error = ((GenerationFailure<AtlasIndexBuildOutcome>)result).Error;
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, error.Code);
+        Assert.AreEqual("atlas.spatial-index.budget", error.Stage);
+        Assert.IsLessThan(256 * 1024L, allocated,
+            "The refusal path must not clone or hash the 200,000-point polyline.");
+        GC.KeepAlive(primitive);
+    }
+
+    [TestMethod]
+    public void CaptureArrayExceedingBudget_IsRejectedBeforeCallerEnumeration()
+    {
+        var input = new OversizedReportedCountPrimitiveList(int.MaxValue);
+
+        GenerationResult<AtlasIndexBuildOutcome> result = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(),
+            SpatialIndexTestSupport.FixtureProfile(),
+            input);
+
+        Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(result);
+        GenerationError error = ((GenerationFailure<AtlasIndexBuildOutcome>)result).Error;
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, error.Code);
+        Assert.AreEqual("atlas.spatial-index.capture-budget", error.Stage);
+        Assert.AreEqual(0, input.EnumerationCount);
+    }
+
     private static void AssertStableIdCollision(GenerationResult<AtlasIndexBuildOutcome> result)
     {
         Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(result);
@@ -223,6 +261,25 @@ public sealed class SpatialIndexContractRegressionTests
             }
 
             return ((IEnumerable<SpatialPrimitiveDefinition>)items).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class OversizedReportedCountPrimitiveList : IReadOnlyList<SpatialPrimitiveDefinition>
+    {
+        internal OversizedReportedCountPrimitiveList(int reportedCount) => Count = reportedCount;
+
+        public int Count { get; }
+
+        public SpatialPrimitiveDefinition this[int index] => throw new NotSupportedException();
+
+        public int EnumerationCount { get; private set; }
+
+        public IEnumerator<SpatialPrimitiveDefinition> GetEnumerator()
+        {
+            EnumerationCount++;
+            throw new InvalidOperationException("Oversized input must be rejected before enumeration.");
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

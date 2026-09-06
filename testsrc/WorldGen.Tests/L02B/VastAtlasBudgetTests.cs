@@ -20,6 +20,8 @@ public sealed class VastAtlasBudgetTests
         Assert.AreEqual(402_653_184_000_000L, estimate.WorldVoxelCount);
         Assert.AreEqual(56, estimate.SiteCount);
         Assert.AreEqual(2, estimate.PlacementReferenceCount);
+        Assert.AreEqual(24 + (2 * IntPtr.Size) + 32, estimate.EstimatedCanonicalCaptureBytes);
+        Assert.AreEqual(222_392_004L, estimate.EstimatedPeakBuildBytes);
         Assert.IsGreaterThan(0L, estimate.EstimatedSiteBytes);
         Assert.IsGreaterThan(0L, estimate.EstimatedCompactGraphBytes);
         Assert.IsGreaterThan(0L, estimate.EstimatedSpatialIndexBytes);

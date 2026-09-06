@@ -123,7 +123,9 @@ public sealed class OwnedSpatialPrimitive : IEquatable<OwnedSpatialPrimitive>
         Kind = source.Kind;
         Description = source.Description;
         Bounds = source.Bounds;
-        Points = Array.AsReadOnly(source.Points.ToArray());
+        // SpatialPrimitiveDefinition is sealed and already owns this read-only point storage.
+        // Reuse it so publication does not create a second large polyline allocation.
+        Points = source.Points;
         OwnerTile = ownerTile;
         OwnerId = ownerId;
     }

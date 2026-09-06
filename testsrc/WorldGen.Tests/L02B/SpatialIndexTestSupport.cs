@@ -66,6 +66,18 @@ internal static class SpatialIndexTestSupport
         ];
     }
 
+    internal static SpatialPrimitiveDefinition LargeInputFixture(int pointCount = 200_000)
+    {
+        SpatialPoint[] points = Enumerable.Range(0, pointCount)
+            .Select(index => new SpatialPoint(index % 1_024, index / 1_024))
+            .ToArray();
+        return new SpatialPrimitiveDefinition(
+            StableId.Derive(RandomDomain.Hydrology, StableId.Zero, checked((ulong)pointCount)),
+            SpatialPrimitiveKind.River,
+            "large immutable input must be budget-gated before capture",
+            points);
+    }
+
     internal static AtlasIndexBuildOutcome Success(GenerationResult<AtlasIndexBuildOutcome> result)
     {
         Assert.IsInstanceOfType<GenerationSuccess<AtlasIndexBuildOutcome>>(result);

@@ -25,7 +25,21 @@ public static class AtlasSpatialIndexBuilder
         ArgumentNullException.ThrowIfNull(primitives);
         options ??= SpatialIndexBuildOptions.Default;
 
-        GenerationResult<CanonicalPrimitiveSet> captureResult = CanonicalPrimitiveSet.Capture(identity, primitives);
+        GenerationResult<AtlasPreCapturePlan> preflightResult = AtlasSpatialIndexPlanner.Preflight(
+            identity,
+            profile,
+            primitives,
+            enforceBuildBudgetFloor: true);
+        if (preflightResult is GenerationFailure<AtlasPreCapturePlan> preflightFailure)
+        {
+            return GenerationResult<AtlasIndexBuildOutcome>.Failure(preflightFailure.Error);
+        }
+
+        AtlasPreCapturePlan preflight = ((GenerationSuccess<AtlasPreCapturePlan>)preflightResult).Snapshot;
+        GenerationResult<CanonicalPrimitiveSet> captureResult = CanonicalPrimitiveSet.Capture(
+            identity,
+            primitives,
+            preflight.PrimitiveCount);
         if (captureResult is GenerationFailure<CanonicalPrimitiveSet> captureFailure)
         {
             return GenerationResult<AtlasIndexBuildOutcome>.Failure(captureFailure.Error);
@@ -35,7 +49,8 @@ public static class AtlasSpatialIndexBuilder
         GenerationResult<AtlasMemoryEstimate> estimateResult = AtlasSpatialIndexPlanner.EstimateOwned(
             identity,
             profile,
-            primitiveSet);
+            primitiveSet,
+            preflight);
         if (estimateResult is GenerationFailure<AtlasMemoryEstimate> estimateFailure)
         {
             return GenerationResult<AtlasIndexBuildOutcome>.Failure(estimateFailure.Error);

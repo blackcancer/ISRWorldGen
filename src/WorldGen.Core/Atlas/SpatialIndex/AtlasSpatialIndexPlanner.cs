@@ -16,6 +16,7 @@ public sealed class AtlasMemoryEstimate
         int primitiveCount,
         int primitivePointCount,
         long placementReferenceCount,
+        long estimatedCanonicalCaptureBytes,
         long estimatedSiteBytes,
         long estimatedCompactGraphBytes,
         long estimatedSpatialIndexBytes,
@@ -29,6 +30,7 @@ public sealed class AtlasMemoryEstimate
         PrimitiveCount = primitiveCount;
         PrimitivePointCount = primitivePointCount;
         PlacementReferenceCount = placementReferenceCount;
+        EstimatedCanonicalCaptureBytes = estimatedCanonicalCaptureBytes;
         EstimatedSiteBytes = estimatedSiteBytes;
         EstimatedCompactGraphBytes = estimatedCompactGraphBytes;
         EstimatedSpatialIndexBytes = estimatedSpatialIndexBytes;
@@ -49,6 +51,8 @@ public sealed class AtlasMemoryEstimate
 
     public long PlacementReferenceCount { get; }
 
+    public long EstimatedCanonicalCaptureBytes { get; }
+
     public long EstimatedSiteBytes { get; }
 
     public long EstimatedCompactGraphBytes { get; }
@@ -65,6 +69,7 @@ public sealed class AtlasMemoryEstimate
 public static class AtlasSpatialIndexPlanner
 {
     private const long ManagedArrayHeaderBytes = 24;
+    private const long ReadOnlyCollectionWrapperBytes = 32;
     private const long SnapshotHeaderReserveBytes = 2_048;
     private const long SiteGenerationWorkingBytesPerSite = 256;
     // L02-A exact rational clipping allocates heavily. This fixed planning reserve is deliberately
@@ -81,7 +86,21 @@ public static class AtlasSpatialIndexPlanner
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(primitives);
 
-        GenerationResult<CanonicalPrimitiveSet> captureResult = CanonicalPrimitiveSet.Capture(identity, primitives);
+        GenerationResult<AtlasPreCapturePlan> preflightResult = Preflight(
+            identity,
+            profile,
+            primitives,
+            enforceBuildBudgetFloor: false);
+        if (preflightResult is GenerationFailure<AtlasPreCapturePlan> preflightFailure)
+        {
+            return GenerationResult<AtlasMemoryEstimate>.Failure(preflightFailure.Error);
+        }
+
+        AtlasPreCapturePlan preflight = ((GenerationSuccess<AtlasPreCapturePlan>)preflightResult).Snapshot;
+        GenerationResult<CanonicalPrimitiveSet> captureResult = CanonicalPrimitiveSet.Capture(
+            identity,
+            primitives,
+            preflight.PrimitiveCount);
         if (captureResult is GenerationFailure<CanonicalPrimitiveSet> captureFailure)
         {
             return GenerationResult<AtlasMemoryEstimate>.Failure(captureFailure.Error);
@@ -90,31 +109,16 @@ public static class AtlasSpatialIndexPlanner
         return EstimateOwned(
             identity,
             profile,
-            ((GenerationSuccess<CanonicalPrimitiveSet>)captureResult).Snapshot);
+            ((GenerationSuccess<CanonicalPrimitiveSet>)captureResult).Snapshot,
+            preflight);
     }
 
     internal static GenerationResult<AtlasMemoryEstimate> EstimateOwned(
         GenerationIdentity identity,
         AtlasIndexProfile profile,
-        CanonicalPrimitiveSet primitives)
+        CanonicalPrimitiveSet primitives,
+        AtlasPreCapturePlan preflight)
     {
-        GenerationResult<ValidatedAtlasDimensions> dimensionsResult = ValidateDimensions(identity, profile);
-        if (dimensionsResult is GenerationFailure<ValidatedAtlasDimensions> dimensionsFailure)
-        {
-            return GenerationResult<AtlasMemoryEstimate>.Failure(dimensionsFailure.Error);
-        }
-
-        ValidatedAtlasDimensions dimensions =
-            ((GenerationSuccess<ValidatedAtlasDimensions>)dimensionsResult).Snapshot;
-        if (profile.RequestedSiteCount > profile.SiteQuota)
-        {
-            return Failure(
-                identity,
-                GenerationFailureCode.BudgetExceeded,
-                "atlas.spatial-index.quota",
-                $"Requested {profile.RequestedSiteCount} sites exceeds quota {profile.SiteQuota}.");
-        }
-
         try
         {
             int pointCount = 0;
@@ -197,14 +201,19 @@ public static class AtlasSpatialIndexPlanner
                 checked(GeometryWorkingBytesPerSitePair * checked((long)siteCount * siteCount)));
             long snapshotBytes = checked(compactGraphBytes + spatialIndexBytes);
             long siteGenerationWorkingBytes = checked(65_536 + (SiteGenerationWorkingBytesPerSite * siteCount));
-            long peakBuildBytes = checked(snapshotBytes + geometryWorkingBytes + siteGenerationWorkingBytes);
+            long peakBuildBytes = checked(
+                snapshotBytes +
+                geometryWorkingBytes +
+                siteGenerationWorkingBytes +
+                preflight.EstimatedCanonicalCaptureBytes);
             return GenerationResult<AtlasMemoryEstimate>.Success(new AtlasMemoryEstimate(
-                dimensions.WorldColumnCount,
-                dimensions.WorldVoxelCount,
+                preflight.Dimensions.WorldColumnCount,
+                preflight.Dimensions.WorldVoxelCount,
                 siteCount,
                 primitives.Definitions.Count,
                 pointCount,
                 placementCount,
+                preflight.EstimatedCanonicalCaptureBytes,
                 siteBytes,
                 compactGraphBytes,
                 spatialIndexBytes,
@@ -220,6 +229,86 @@ public static class AtlasSpatialIndexPlanner
                 "atlas.spatial-index.validate",
                 exception.Message);
         }
+    }
+
+    internal static GenerationResult<AtlasPreCapturePlan> Preflight(
+        GenerationIdentity identity,
+        AtlasIndexProfile profile,
+        IReadOnlyList<SpatialPrimitiveDefinition> primitives,
+        bool enforceBuildBudgetFloor)
+    {
+        GenerationResult<ValidatedAtlasDimensions> dimensionsResult = ValidateDimensions(identity, profile);
+        if (dimensionsResult is GenerationFailure<ValidatedAtlasDimensions> dimensionsFailure)
+        {
+            return GenerationResult<AtlasPreCapturePlan>.Failure(dimensionsFailure.Error);
+        }
+
+        if (profile.RequestedSiteCount > profile.SiteQuota)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.spatial-index.quota",
+                $"Requested {profile.RequestedSiteCount} sites exceeds quota {profile.SiteQuota}.");
+        }
+
+        int primitiveCount;
+        try
+        {
+            primitiveCount = primitives.Count;
+        }
+        catch (Exception exception) when (exception is ArgumentException or ArithmeticException or InvalidOperationException)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.InvalidInput,
+                "atlas.spatial-index.validate",
+                exception.Message);
+        }
+
+        if (primitiveCount < 0)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.InvalidInput,
+                "atlas.spatial-index.validate",
+                "Primitive collection reports a negative count.");
+        }
+
+        BigInteger captureBytes =
+            ManagedArrayHeaderBytes +
+            ((BigInteger)primitiveCount * IntPtr.Size) +
+            ReadOnlyCollectionWrapperBytes;
+        if (captureBytes > profile.MemoryBudgetBytes)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.spatial-index.capture-budget",
+                $"Canonical reference capture requires at least {captureBytes} bytes, exceeding budget {profile.MemoryBudgetBytes} bytes.");
+        }
+
+        int siteCount = profile.RequestedSiteCount;
+        BigInteger minimumWorkingBytes =
+            GeometryFixedWorkingBytes +
+            ((BigInteger)GeometryWorkingBytesPerSitePair * siteCount * siteCount) +
+            65_536 +
+            ((BigInteger)SiteGenerationWorkingBytesPerSite * siteCount) +
+            captureBytes +
+            (2 * SnapshotHeaderReserveBytes);
+        if (enforceBuildBudgetFloor && minimumWorkingBytes > profile.MemoryBudgetBytes)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.spatial-index.budget",
+                $"Unavoidable pre-allocation floor {minimumWorkingBytes} bytes exceeds budget {profile.MemoryBudgetBytes} bytes.");
+        }
+
+        return GenerationResult<AtlasPreCapturePlan>.Success(new AtlasPreCapturePlan(
+            ((GenerationSuccess<ValidatedAtlasDimensions>)dimensionsResult).Snapshot,
+            primitiveCount,
+            checked((long)captureBytes)));
     }
 
     private static GenerationResult<ValidatedAtlasDimensions> ValidateDimensions(
@@ -288,13 +377,24 @@ internal sealed class CanonicalPrimitiveSet
 
     internal static GenerationResult<CanonicalPrimitiveSet> Capture(
         GenerationIdentity identity,
-        IReadOnlyList<SpatialPrimitiveDefinition> source)
+        IReadOnlyList<SpatialPrimitiveDefinition> source,
+        int expectedCount)
     {
         try
         {
-            var definitions = new List<SpatialPrimitiveDefinition>();
+            var definitions = new SpatialPrimitiveDefinition[expectedCount];
+            int index = 0;
             foreach (SpatialPrimitiveDefinition? primitive in source)
             {
+                if (index >= definitions.Length)
+                {
+                    return AtlasSpatialIndexPlanner.Failure<CanonicalPrimitiveSet>(
+                        identity,
+                        GenerationFailureCode.InvalidInput,
+                        "atlas.spatial-index.validate",
+                        $"Primitive collection enumerated more than its reported count {expectedCount}.");
+                }
+
                 if (primitive is null)
                 {
                     return AtlasSpatialIndexPlanner.Failure<CanonicalPrimitiveSet>(
@@ -304,17 +404,25 @@ internal sealed class CanonicalPrimitiveSet
                         "Primitive collection contains null.");
                 }
 
-                definitions.Add(new SpatialPrimitiveDefinition(
-                    primitive.Id,
-                    primitive.Kind,
-                    primitive.Description,
-                    primitive.Points));
+                // SpatialPrimitiveDefinition is sealed; its constructor already owns a private point array,
+                // exposes it read-only and stores only immutable scalar/string values. Capturing the reference
+                // therefore closes caller-list TOCTOU without duplicating an arbitrarily large polyline.
+                definitions[index++] = primitive;
             }
 
-            SpatialPrimitiveDefinition[] canonical = definitions
-                .OrderBy(primitive => primitive.Id, StableIdComparer.Instance)
-                .ToArray();
-            return GenerationResult<CanonicalPrimitiveSet>.Success(new CanonicalPrimitiveSet(canonical));
+            if (index != expectedCount)
+            {
+                return AtlasSpatialIndexPlanner.Failure<CanonicalPrimitiveSet>(
+                    identity,
+                    GenerationFailureCode.InvalidInput,
+                    "atlas.spatial-index.validate",
+                    $"Primitive collection enumerated {index} items after reporting {expectedCount}.");
+            }
+
+            Array.Sort(
+                definitions,
+                static (left, right) => StableIdComparer.Instance.Compare(left.Id, right.Id));
+            return GenerationResult<CanonicalPrimitiveSet>.Success(new CanonicalPrimitiveSet(definitions));
         }
         catch (Exception exception) when (exception is ArgumentException or ArithmeticException or InvalidOperationException)
         {
@@ -326,6 +434,11 @@ internal sealed class CanonicalPrimitiveSet
         }
     }
 }
+
+internal sealed record AtlasPreCapturePlan(
+    ValidatedAtlasDimensions Dimensions,
+    int PrimitiveCount,
+    long EstimatedCanonicalCaptureBytes);
 
 internal sealed record ValidatedAtlasDimensions(
     long Width,
