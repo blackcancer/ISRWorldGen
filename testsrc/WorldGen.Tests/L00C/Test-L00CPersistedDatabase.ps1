@@ -129,7 +129,7 @@ function Get-ChunkPosition([int]$X, [int]$Y, [int]$Z, [int]$RequestedDimension) 
     return ([int64]$Y -shl 54) -bor (Get-MapChunkPosition $X $Z $RequestedDimension)
 }
 
-$connectionString = "Data Source=$resolvedDatabase;Mode=ReadOnly"
+$connectionString = "Data Source=$resolvedDatabase;Mode=ReadOnly;Pooling=False"
 $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new($connectionString)
 $rows = [Collections.Generic.List[object]]::new()
 $mapChunkCount = 0
@@ -204,6 +204,7 @@ $result = [ordered]@{
     TestId = 'L00-C-PERSISTED-DATABASE'
     Status = $status
     SchemaVersion = 1
+    ControllerPhase = 'RecordOpen1'
     EvidenceOrder = 'open1-complete<attestation<open2-start'
     CampaignId = $CampaignId
     TestedCommit = $TestedCommit

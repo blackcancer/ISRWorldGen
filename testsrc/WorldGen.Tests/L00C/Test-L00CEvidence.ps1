@@ -451,6 +451,90 @@ $primaryOpen1 = $orderedPrimary[0]
 $primaryOpen2 = $orderedPrimary[1]
 $primaryOpen1Index = [Array]::IndexOf($allSessions, $primaryOpen1)
 $primaryOpen1LogPath = $sessionLogPaths[$primaryOpen1Index]
+if ([string]$primaryOpen1.ControllerPhaseBefore -ne 'Initialize' -or
+    [string]$primaryOpen1.ControllerPhaseAfter -ne 'RecordOpen1' -or
+    [string]$primaryOpen2.ControllerPhaseBefore -ne 'AuthorizeOpen2' -or
+    [string]$primaryOpen2.ControllerPhaseAfter -ne 'Finalize') {
+    throw 'Primary open1/open2 sessions do not declare the four campaign controller phases.'
+}
+
+$campaignControl = $evidence.CampaignControl
+if ($null -eq $campaignControl -or
+    [string]$campaignControl.Guarantee -ne 'fresh-tamper-evident-operational-chain' -or
+    [string]$campaignControl.Limitation -notmatch 'no resistance.*rewrite every artifact') {
+    throw 'CampaignControl must state its fresh tamper-evident operational guarantee and non-adversarial limit.'
+}
+$declaredPhases = @($campaignControl.Phases)
+$expectedPhases = @('Initialize', 'RecordOpen1', 'AuthorizeOpen2', 'Finalize')
+$expectedRelatedSessions = @(3, 3, 4, 4)
+if ($declaredPhases.Count -ne $expectedPhases.Count) {
+    throw "CampaignControl must contain exactly four phases, found $($declaredPhases.Count)."
+}
+Import-Module (Join-Path $PSScriptRoot 'L00CCampaignControl.psm1') -Force
+$campaignReceipts = @{}
+$campaignReceiptPaths = @{}
+for ($index = 0; $index -lt $expectedPhases.Count; $index++) {
+    $declaration = $declaredPhases[$index]
+    $expectedPhase = $expectedPhases[$index]
+    Assert-Equal ([string]$declaration.Phase) $expectedPhase "Campaign phase $($index + 1) name"
+    Assert-Equal ([int]$declaration.PhaseSequence) ($index + 1) "Campaign phase $expectedPhase sequence"
+    Assert-Equal ([int]$declaration.RelatedEvidenceSequence) $expectedRelatedSessions[$index] "Campaign phase $expectedPhase related session"
+    $receiptPath = Assert-Artifact $declaration.Receipt "Campaign phase $expectedPhase receipt"
+    $receipt = Read-L00CCampaignReceipt $receiptPath $expectedPhase
+    Assert-Equal ([string]$receipt.CampaignId) ([string]$evidence.CampaignId) "Campaign phase $expectedPhase campaign"
+    Assert-Equal ([string]$receipt.TestedCommit) ([string]$evidence.TestedCommit) "Campaign phase $expectedPhase commit"
+    Assert-Equal ([string]$receipt.AssemblySha256) ([string]$evidence.Artifacts.Assembly.Sha256) "Campaign phase $expectedPhase assembly"
+    $campaignReceipts[$expectedPhase] = $receipt
+    $campaignReceiptPaths[$expectedPhase] = $receiptPath
+}
+
+$initializeReceipt = $campaignReceipts.Initialize
+$recordReceipt = $campaignReceipts.RecordOpen1
+$authorizeReceipt = $campaignReceipts.AuthorizeOpen2
+$finalizeReceipt = $campaignReceipts.Finalize
+for ($index = 1; $index -lt $expectedPhases.Count; $index++) {
+    $current = $campaignReceipts[$expectedPhases[$index]]
+    $previous = $campaignReceipts[$expectedPhases[$index - 1]]
+    $previousPath = $campaignReceiptPaths[$expectedPhases[$index - 1]]
+    Assert-Equal ([string]$current.PreviousReceiptId) ([string]$previous.ReceiptId) "Campaign phase $($current.Phase) previous id"
+    Assert-Equal ([string]$current.PreviousReceiptFileSha256) ((Get-FileHash -LiteralPath $previousPath -Algorithm SHA256).Hash) "Campaign phase $($current.Phase) previous file hash"
+}
+
+$open1Started = ConvertTo-L00CUtcInstant $primaryOpen1.StartedUtc 'Primary open1 StartedUtc'
+$open1Completed = ConvertTo-L00CUtcInstant $primaryOpen1.CompletedUtc 'Primary open1 CompletedUtc'
+$open2Started = ConvertTo-L00CUtcInstant $primaryOpen2.StartedUtc 'Primary open2 StartedUtc'
+$open2Completed = ConvertTo-L00CUtcInstant $primaryOpen2.CompletedUtc 'Primary open2 CompletedUtc'
+$initializedUtc = ConvertTo-L00CUtcInstant $initializeReceipt.InitializedUtc 'Campaign InitializedUtc'
+$recordedUtc = ConvertTo-L00CUtcInstant $recordReceipt.RecordedUtc 'Campaign RecordOpen1 Utc'
+$authorizedUtc = ConvertTo-L00CUtcInstant $authorizeReceipt.AuthorizedUtc 'Campaign AuthorizeOpen2 Utc'
+$finalizedUtc = ConvertTo-L00CUtcInstant $finalizeReceipt.FinalizedUtc 'Campaign Finalize Utc'
+if ($initializedUtc -ge $open1Started -or $open1Completed -gt $recordedUtc -or
+    $recordedUtc -gt $authorizedUtc -or $authorizedUtc -ge $open2Started -or
+    $open2Completed -gt $finalizedUtc) {
+    throw 'Campaign controller receipts do not prove Initialize < open1 < RecordOpen1 <= AuthorizeOpen2 < open2 < Finalize.'
+}
+$initializeFile = Get-Item -LiteralPath $campaignReceiptPaths.Initialize
+$recordFile = Get-Item -LiteralPath $campaignReceiptPaths.RecordOpen1
+$authorizeFile = Get-Item -LiteralPath $campaignReceiptPaths.AuthorizeOpen2
+$finalizeFile = Get-Item -LiteralPath $campaignReceiptPaths.Finalize
+if ([DateTimeOffset]$initializeFile.CreationTimeUtc -lt $initializedUtc -or [DateTimeOffset]$initializeFile.LastWriteTimeUtc -ge $open1Started -or
+    [DateTimeOffset]$recordFile.CreationTimeUtc -lt $open1Completed -or [DateTimeOffset]$recordFile.LastWriteTimeUtc -gt $authorizedUtc -or
+    [DateTimeOffset]$authorizeFile.CreationTimeUtc -lt $authorizedUtc -or [DateTimeOffset]$authorizeFile.LastWriteTimeUtc -ge $open2Started -or
+    [DateTimeOffset]$finalizeFile.CreationTimeUtc -lt $finalizedUtc) {
+    throw 'Campaign receipt filesystem times do not match the declared four-phase execution order.'
+}
+Assert-Equal ([string]$recordReceipt.SavegameIdentifier) ([string]$primaryOpen1.SavegameIdentifier) 'RecordOpen1 savegame'
+Assert-Equal ([string]$recordReceipt.MarkerId) ([string]$primaryOpen1.MarkerId) 'RecordOpen1 marker'
+Assert-Equal ([string]$recordReceipt.InstanceId) ([string]$primaryOpen1.InstanceId) 'RecordOpen1 instance'
+Assert-Equal ([long]$recordReceipt.WorldRunId) ([long]$primaryOpen1.WorldRunId) 'RecordOpen1 world run'
+Assert-Equal ([int]$recordReceipt.Open1EvidenceSequence) ([int]$primaryOpen1.EvidenceSequence) 'RecordOpen1 evidence sequence'
+Assert-Equal ([int]$authorizeReceipt.ExpectedOpen2EvidenceSequence) ([int]$primaryOpen2.EvidenceSequence) 'AuthorizeOpen2 evidence sequence'
+Assert-Equal ([string]$finalizeReceipt.Open2InstanceId) ([string]$primaryOpen2.InstanceId) 'Finalize open2 instance'
+Assert-Equal ([long]$finalizeReceipt.Open2WorldRunId) ([long]$primaryOpen2.WorldRunId) 'Finalize open2 world run'
+Assert-Equal ([int]$finalizeReceipt.Open2EvidenceSequence) ([int]$primaryOpen2.EvidenceSequence) 'Finalize open2 evidence sequence'
+Assert-Equal ([string]$recordReceipt.SnapshotDatabase.Sha256) ([string]$evidence.Artifacts.Open1Database.Sha256) 'RecordOpen1 database snapshot'
+Assert-Equal ([string]$recordReceipt.PersistenceReport.Sha256) ([string]$evidence.Artifacts.Open1DatabaseReport.Sha256) 'RecordOpen1 database report'
+
 Import-Module (Join-Path $PSScriptRoot 'L00CPersistenceAttestation.psm1') -Force
 $persistenceAttestation = Assert-L00CPersistenceAttestation `
     -Report $recordedDatabaseReport `
@@ -463,6 +547,9 @@ $persistenceAttestation = Assert-L00CPersistenceAttestation `
     -TestedCommit ([string]$evidence.TestedCommit) `
     -AssemblySha256 ([string]$evidence.Artifacts.Assembly.Sha256)
 Assert-Equal $persistenceAttestation.Status 'PASS' 'Open1 pre-open2 persistence attestation'
+Assert-Equal ([string]$recordReceipt.PersistenceAttestationId) ([string]$persistenceAttestation.AttestationId) 'RecordOpen1 attestation id'
+Assert-Equal ([string]$authorizeReceipt.PersistenceAttestationId) ([string]$persistenceAttestation.AttestationId) 'AuthorizeOpen2 attestation id'
+Assert-Equal ([string]$finalizeReceipt.PersistenceAttestationId) ([string]$persistenceAttestation.AttestationId) 'Finalize attestation id'
 Assert-Equal ([string]$recordedDatabaseReport.AssemblyProductVersion) "1.0.0+$($evidence.TestedCommit)" 'Open1 attested assembly ProductVersion'
 Assert-Equal ([int]$recordedDatabaseReport.Dimension) ([int]$evidence.Parameters.Dimension) 'Open1 attested dimension'
 Assert-Equal ([int]$recordedDatabaseReport.FixtureChunkX) ([int]$evidence.Parameters.FixtureChunkX) 'Open1 attested fixture X'

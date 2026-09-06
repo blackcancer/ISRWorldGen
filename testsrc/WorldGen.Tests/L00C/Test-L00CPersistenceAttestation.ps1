@@ -91,6 +91,7 @@ $open2 = [pscustomobject]@{
 }
 $report = [pscustomobject][ordered]@{
     SchemaVersion = 1
+    ControllerPhase = 'RecordOpen1'
     EvidenceOrder = 'open1-complete<attestation<open2-start'
     CampaignId = $campaign
     TestedCommit = $commit

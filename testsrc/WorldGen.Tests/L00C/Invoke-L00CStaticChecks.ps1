@@ -182,6 +182,7 @@ if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or 
 $markerOracleStatus = 'NOT_APPLICABLE'
 $callbackOracleStatus = 'NOT_APPLICABLE'
 $persistenceAttestationOracleStatus = 'NOT_APPLICABLE'
+$campaignControllerOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
     $markerOraclePath = Join-Path $PSScriptRoot 'Test-L00CMarkerPublication.ps1'
     $markerOracle = (& $markerOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
@@ -201,6 +202,12 @@ if ($Configuration -eq 'Debug') {
         throw 'The pre-open2 persistence attestation oracle did not pass.'
     }
     $persistenceAttestationOracleStatus = $persistenceOracle.Status
+    $campaignControllerOraclePath = Join-Path $PSScriptRoot 'Test-L00CCampaignController.ps1'
+    $campaignControllerOracle = (& $campaignControllerOraclePath -RepositoryRoot $RepositoryRoot | Out-String | ConvertFrom-Json)
+    if ($campaignControllerOracle.Status -ne 'PASS') {
+        throw 'The four-phase campaign controller oracle did not pass.'
+    }
+    $campaignControllerOracleStatus = $campaignControllerOracle.Status
 }
 
 $result = [ordered]@{
@@ -214,6 +221,7 @@ $result = [ordered]@{
     MarkerPublicationOracle = $markerOracleStatus
     TransientCallbackOracle = $callbackOracleStatus
     PersistenceAttestationOracle = $persistenceAttestationOracleStatus
+    CampaignControllerOracle = $campaignControllerOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }

@@ -7,8 +7,11 @@ function Get-L00CAttestationId {
         [Parameter(Mandatory = $true)]$Report
     )
 
+    $open1Completed = ConvertTo-L00CUtcInstant $Report.Open1CompletedUtc 'Report Open1CompletedUtc'
+    $attested = ConvertTo-L00CUtcInstant $Report.AttestedUtc 'Report AttestedUtc'
     $canonical = @(
         [string]$Report.SchemaVersion,
+        [string]$Report.ControllerPhase,
         [string]$Report.CampaignId,
         [string]$Report.TestedCommit,
         [string]$Report.OracleSha256,
@@ -19,12 +22,12 @@ function Get-L00CAttestationId {
         [string]$Report.WorldRunId,
         [string]$Report.Open1EvidenceSequence,
         [string]$Report.ExpectedOpen2EvidenceSequence,
-        [string]$Report.Open1CompletedUtc,
+        $open1Completed.ToString('o'),
         [string]$Report.DatabaseSha256,
         [string]$Report.DatabaseLength,
         [string]$Report.Open1LogSha256,
         [string]$Report.Open1LogLength,
-        [string]$Report.AttestedUtc
+        $attested.ToString('o')
     ) -join '|'
     $bytes = [Text.Encoding]::UTF8.GetBytes($canonical)
     return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
@@ -33,6 +36,12 @@ function Get-L00CAttestationId {
 function ConvertTo-L00CUtcInstant {
     param($Value, [string]$Label)
 
+    if ($Value -is [DateTimeOffset]) {
+        return ([DateTimeOffset]$Value).ToUniversalTime()
+    }
+    if ($Value -is [DateTime]) {
+        return ([DateTimeOffset]([DateTime]$Value)).ToUniversalTime()
+    }
     $instant = [DateTimeOffset]::MinValue
     if (-not [DateTimeOffset]::TryParse(
         [string]$Value,
@@ -44,7 +53,7 @@ function ConvertTo-L00CUtcInstant {
     return $instant.ToUniversalTime()
 }
 
-function Assert-L00CPersistenceAttestation {
+function Assert-L00CPreOpen2Attestation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Report,
@@ -52,10 +61,10 @@ function Assert-L00CPersistenceAttestation {
         [Parameter(Mandatory = $true)][string]$DatabasePath,
         [Parameter(Mandatory = $true)][string]$Open1LogPath,
         [Parameter(Mandatory = $true)]$Open1Session,
-        [Parameter(Mandatory = $true)]$Open2Session,
         [Parameter(Mandatory = $true)][string]$CampaignId,
         [Parameter(Mandatory = $true)][string]$TestedCommit,
-        [Parameter(Mandatory = $true)][string]$AssemblySha256
+        [Parameter(Mandatory = $true)][string]$AssemblySha256,
+        [Parameter(Mandatory = $true)][string]$UpperBoundUtc
     )
 
     foreach ($path in @($ReportPath, $DatabasePath, $Open1LogPath)) {
@@ -63,7 +72,8 @@ function Assert-L00CPersistenceAttestation {
             throw "Persistence attestation input is missing: $path"
         }
     }
-    if ([int]$Report.SchemaVersion -ne 1 -or [string]$Report.EvidenceOrder -ne 'open1-complete<attestation<open2-start') {
+    if ([int]$Report.SchemaVersion -ne 1 -or [string]$Report.ControllerPhase -ne 'RecordOpen1' -or
+        [string]$Report.EvidenceOrder -ne 'open1-complete<attestation<open2-start') {
         throw 'Persistence attestation schema/order declaration is invalid.'
     }
     foreach ($hash in @($Report.OracleSha256, $Report.AssemblySha256, $Report.DatabaseSha256, $Report.Open1LogSha256, $Report.AttestationId)) {
@@ -79,33 +89,25 @@ function Assert-L00CPersistenceAttestation {
         @([string]$Report.MarkerId, [string]$Open1Session.MarkerId, 'marker'),
         @([string]$Report.InstanceId, [string]$Open1Session.InstanceId, 'open1 instance'),
         @([string]$Report.WorldRunId, [string]$Open1Session.WorldRunId, 'open1 world run'),
-        @([string]$Report.Open1EvidenceSequence, [string]$Open1Session.EvidenceSequence, 'open1 evidence sequence'),
-        @([string]$Report.ExpectedOpen2EvidenceSequence, [string]$Open2Session.EvidenceSequence, 'open2 evidence sequence')
+        @([string]$Report.Open1EvidenceSequence, [string]$Open1Session.EvidenceSequence, 'open1 evidence sequence')
     )) {
         if ($pair[0] -ne $pair[1]) {
             throw "Persistence attestation $($pair[2]) mismatch: '$($pair[0])' != '$($pair[1])'."
         }
     }
-    if ([string]$Open2Session.SavegameIdentifier -ne [string]$Open1Session.SavegameIdentifier -or
-        [string]$Open2Session.MarkerId -ne [string]$Open1Session.MarkerId -or
-        [string]$Open2Session.InstanceId -eq [string]$Open1Session.InstanceId -or
-        [int]$Open1Session.OpenCount -ne 1 -or [int]$Open2Session.OpenCount -ne 2 -or
-        -not [bool]$Open1Session.IsNew -or [bool]$Open2Session.IsNew) {
-        throw 'Persistence attestation is not bounded to primary open1 followed by open2 of the same world.'
-    }
-    if ([int]$Open2Session.EvidenceSequence -ne [int]$Open1Session.EvidenceSequence + 1) {
-        throw 'Primary open2 is not the immediate monotonic successor of open1.'
+    if ([int]$Report.ExpectedOpen2EvidenceSequence -ne [int]$Open1Session.EvidenceSequence + 1 -or
+        [int]$Open1Session.OpenCount -ne 1 -or -not [bool]$Open1Session.IsNew) {
+        throw 'Persistence attestation is not bound to a new primary open1 and its immediate open2 sequence.'
     }
 
     $open1Started = ConvertTo-L00CUtcInstant $Open1Session.StartedUtc 'Open1 StartedUtc'
     $open1Completed = ConvertTo-L00CUtcInstant $Open1Session.CompletedUtc 'Open1 CompletedUtc'
     $attested = ConvertTo-L00CUtcInstant $Report.AttestedUtc 'Report AttestedUtc'
     $reportOpen1Completed = ConvertTo-L00CUtcInstant $Report.Open1CompletedUtc 'Report Open1CompletedUtc'
-    $open2Started = ConvertTo-L00CUtcInstant $Open2Session.StartedUtc 'Open2 StartedUtc'
-    $open2Completed = ConvertTo-L00CUtcInstant $Open2Session.CompletedUtc 'Open2 CompletedUtc'
+    $upperBound = ConvertTo-L00CUtcInstant $UpperBoundUtc 'Pre-open2 upper bound'
     if ($open1Started -ge $open1Completed -or $open1Completed -ne $reportOpen1Completed -or
-        $reportOpen1Completed -gt $attested -or $attested -ge $open2Started -or $open2Started -ge $open2Completed) {
-        throw 'Persistence attestation timestamps do not prove open1-complete < attestation < open2-start.'
+        $reportOpen1Completed -gt $attested -or $attested -gt $upperBound) {
+        throw "Persistence attestation timestamps do not prove open1-complete < attestation before the pre-open2 bound: start=$($open1Started.ToString('o')) completed=$($open1Completed.ToString('o')) reportCompleted=$($reportOpen1Completed.ToString('o')) attested=$($attested.ToString('o')) upper=$($upperBound.ToString('o'))."
     }
 
     $database = Get-Item -LiteralPath $DatabasePath
@@ -127,12 +129,67 @@ function Assert-L00CPersistenceAttestation {
 
     $reportCreated = [DateTimeOffset]$reportFile.CreationTimeUtc
     $reportWritten = [DateTimeOffset]$reportFile.LastWriteTimeUtc
-    $databaseCreated = [DateTimeOffset]$database.CreationTimeUtc
-    $databaseWritten = [DateTimeOffset]$database.LastWriteTimeUtc
-    if ($reportCreated -lt $open1Completed -or $reportCreated -ge $open2Started -or
-        $reportWritten -lt $open1Completed -or $reportWritten -ge $open2Started -or
-        $databaseCreated -ge $open2Started -or $databaseWritten -ge $open2Started) {
-        throw 'Persistence database/report was created, copied, or modified after primary open2 started.'
+    if ($reportCreated -lt $open1Completed -or $reportCreated -gt $upperBound -or
+        $reportWritten -lt $open1Completed -or $reportWritten -gt $upperBound -or
+        [DateTimeOffset]$database.CreationTimeUtc -gt $upperBound -or
+        [DateTimeOffset]$database.LastWriteTimeUtc -gt $upperBound) {
+        throw 'Persistence database/report falls outside the pre-open2 attestation interval.'
+    }
+
+    [ordered]@{
+        Status = 'PASS'
+        AttestationId = [string]$Report.AttestationId
+        Open1Sequence = [int]$Open1Session.EvidenceSequence
+        AttestedUtc = $attested.ToString('o')
+        ReportCreatedUtc = $reportCreated.ToString('o')
+        DatabaseSha256 = $databaseHash
+        Open1LogSha256 = $open1LogHash
+    }
+}
+
+function Assert-L00CPersistenceAttestation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Report,
+        [Parameter(Mandatory = $true)][string]$ReportPath,
+        [Parameter(Mandatory = $true)][string]$DatabasePath,
+        [Parameter(Mandatory = $true)][string]$Open1LogPath,
+        [Parameter(Mandatory = $true)]$Open1Session,
+        [Parameter(Mandatory = $true)]$Open2Session,
+        [Parameter(Mandatory = $true)][string]$CampaignId,
+        [Parameter(Mandatory = $true)][string]$TestedCommit,
+        [Parameter(Mandatory = $true)][string]$AssemblySha256
+    )
+
+    $open2Started = ConvertTo-L00CUtcInstant $Open2Session.StartedUtc 'Open2 StartedUtc'
+    $preOpen2 = Assert-L00CPreOpen2Attestation `
+        -Report $Report `
+        -ReportPath $ReportPath `
+        -DatabasePath $DatabasePath `
+        -Open1LogPath $Open1LogPath `
+        -Open1Session $Open1Session `
+        -CampaignId $CampaignId `
+        -TestedCommit $TestedCommit `
+        -AssemblySha256 $AssemblySha256 `
+        -UpperBoundUtc $open2Started.ToString('o')
+    if ([string]$Open2Session.SavegameIdentifier -ne [string]$Open1Session.SavegameIdentifier -or
+        [string]$Open2Session.MarkerId -ne [string]$Open1Session.MarkerId -or
+        [string]$Open2Session.InstanceId -eq [string]$Open1Session.InstanceId -or
+        [int]$Open1Session.OpenCount -ne 1 -or [int]$Open2Session.OpenCount -ne 2 -or
+        -not [bool]$Open1Session.IsNew -or [bool]$Open2Session.IsNew) {
+        throw 'Persistence attestation is not bounded to primary open1 followed by open2 of the same world.'
+    }
+    if ([int]$Open2Session.EvidenceSequence -ne [int]$Open1Session.EvidenceSequence + 1) {
+        throw 'Primary open2 is not the immediate monotonic successor of open1.'
+    }
+
+    $open1Completed = ConvertTo-L00CUtcInstant $Open1Session.CompletedUtc 'Open1 CompletedUtc'
+    $attested = ConvertTo-L00CUtcInstant $Report.AttestedUtc 'Report AttestedUtc'
+    $reportOpen1Completed = ConvertTo-L00CUtcInstant $Report.Open1CompletedUtc 'Report Open1CompletedUtc'
+    $open2Completed = ConvertTo-L00CUtcInstant $Open2Session.CompletedUtc 'Open2 CompletedUtc'
+    if ($open1Completed -ne $reportOpen1Completed -or $reportOpen1Completed -gt $attested -or
+        $attested -ge $open2Started -or $open2Started -ge $open2Completed) {
+        throw 'Persistence attestation timestamps do not prove open1-complete < attestation < open2-start.'
     }
 
     [ordered]@{
@@ -141,10 +198,10 @@ function Assert-L00CPersistenceAttestation {
         Open1Sequence = [int]$Open1Session.EvidenceSequence
         Open2Sequence = [int]$Open2Session.EvidenceSequence
         AttestedUtc = $attested.ToString('o')
-        ReportCreatedUtc = $reportCreated.ToString('o')
-        DatabaseSha256 = $databaseHash
-        Open1LogSha256 = $open1LogHash
+        ReportCreatedUtc = $preOpen2.ReportCreatedUtc
+        DatabaseSha256 = $preOpen2.DatabaseSha256
+        Open1LogSha256 = $preOpen2.Open1LogSha256
     }
 }
 
-Export-ModuleMember -Function Get-L00CAttestationId, Assert-L00CPersistenceAttestation
+Export-ModuleMember -Function Get-L00CAttestationId, Assert-L00CPreOpen2Attestation, Assert-L00CPersistenceAttestation
