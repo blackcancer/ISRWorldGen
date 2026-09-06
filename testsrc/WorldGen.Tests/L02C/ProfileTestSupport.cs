@@ -1,5 +1,6 @@
 using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
+using ISRWorldGen.Core.Foundation;
 
 namespace ISRWorldGen.Tests.L02C;
 
@@ -18,6 +19,14 @@ internal static class ProfileTestSupport
 
     internal static FrozenScaleProfile FreezeBalanced() =>
         Success(ScaleProfileValidator.ValidateAndFreeze(Balanced(), QualifiedNativeConstraints()));
+
+    internal static GenerationIdentity Identity() => new(
+        nativeSeed: 73,
+        GenerationIdentity.SupportedAlgorithmVersion,
+        GenerationIdentity.SupportedSchemaVersion,
+        Hash256.Parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        Hash256.Parse("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        "net10-x64-l02c-v1");
 
     internal static T Success<T>(GenerationResult<T> result)
         where T : class

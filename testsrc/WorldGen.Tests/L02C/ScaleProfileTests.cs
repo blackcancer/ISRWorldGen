@@ -1,5 +1,6 @@
 using System.Collections;
 using ISRWorldGen.Core.Atlas.Profiles;
+using ISRWorldGen.Core.Atlas.SpatialIndex;
 using ISRWorldGen.Core.Contracts;
 
 namespace ISRWorldGen.Tests.L02C;
@@ -45,6 +46,28 @@ public sealed class ScaleProfileTests
             Assert.AreEqual(proposal.RequestedSiteCount, frozen.AtlasIndexProfile.RequestedSiteCount);
             Assert.AreEqual(proposal.SiteQuota, frozen.AtlasIndexProfile.SiteQuota);
             Assert.AreEqual(proposal.AtlasMemoryBudgetBytes, frozen.AtlasIndexProfile.MemoryBudgetBytes);
+        }
+    }
+
+    [TestMethod]
+    public void ProposedProfiles_FitTheExistingL02BConservativeColdPlan()
+    {
+        NativeWorldConstraints constraints = ProfileTestSupport.QualifiedNativeConstraints();
+
+        foreach (ScaleProfileDefinition proposal in ScaleProfileCatalog.Proposals)
+        {
+            FrozenScaleProfile frozen = ProfileTestSupport.Success(
+                ScaleProfileValidator.ValidateAndFreeze(proposal, constraints));
+            AtlasMemoryEstimate estimate = ProfileTestSupport.Success(AtlasSpatialIndexPlanner.Estimate(
+                ProfileTestSupport.Identity(),
+                frozen.AtlasIndexProfile,
+                Array.Empty<SpatialPrimitiveDefinition>(),
+                new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold)));
+
+            Assert.IsLessThanOrEqualTo(
+                frozen.AtlasMemoryBudgetBytes,
+                estimate.EstimatedPeakBuildBytes,
+                $"Proposal {frozen.Id} must fit the conservative L02-B cold plan before it is offered.");
         }
     }
 
