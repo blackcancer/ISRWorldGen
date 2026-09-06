@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-06T18:48:38.9484095Z",
-  "integrated_commit": "48f477febe7665ba08ba0002ccd3f5026804f6bc",
+  "updated_utc": "2026-09-06T20:38:18.9537577Z",
+  "integrated_commit": "e5a61ab42004940c28952a52c64917b29667ebc9",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -109,13 +109,16 @@
       "base_commit": "88f11ae614407587d65dc285d92fbd629b3a1838",
       "evidence": [
         "worklogs/L02-C.md",
+        "worklogs/L02-C-native-adapter.md",
         "commit:48f477febe7665ba08ba0002ccd3f5026804f6bc",
+        "commit:b5eae16769e44dd7709cc94a4224143abd91466e",
+        "commit:e5a61ab42004940c28952a52c64917b29667ebc9",
         "local:.local/L02C-integrated/tests/L02C-integrated-targeted-release.trx",
         "local:.local/L02C-integrated/tests/L02C-integrated-global-release.trx",
         "local:.local/L02C/process/T02-05-analytical-06-process.json",
         "local:.local/L02C/qualitative-evidence/sensitivity-report.json"
       ],
-      "blocker": "T02-05 intégration moteur NOT_RUN : les contraintes de hauteur 1.22.7 doivent encore être lues par l'adaptateur et validées dans un processus Vintage Story lancé par le débogueur Visual Studio. Le cœur analytique et la revue qualitative T02-06 sont acceptés, mais NOT_RUN ne vaut pas DONE."
+      "blocker": "T02-05 moteur NOT_RUN : l'adaptateur natif, l'opt-in fail-closed, le gel versionné et le paquet à deux DLL sont intégrés et acceptés statiquement. Les scénarios valide/reload/refus doivent encore être exécutés dans Vintage Story 1.22.7 lancé par le débogueur Visual Studio ; NOT_RUN ne vaut pas DONE."
     },
     "L03-A": {
       "status": "BACKLOG",
