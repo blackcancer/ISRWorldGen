@@ -14,6 +14,14 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\WorldGen.Core\WorldGen.Core.csproj" />
     <ProjectReference Include="..\..\src\WorldGen.Runtime\WorldGen.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\WorldGen.VintageStory\WorldGen.VintageStory.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI">
+      <HintPath>$(VintageStoryPath)\VintagestoryAPI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>

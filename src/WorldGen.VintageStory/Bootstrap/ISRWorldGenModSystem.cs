@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading;
+using ISRWorldGen.ScaleProfiles;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
@@ -15,6 +16,7 @@ public sealed class ISRWorldGenModSystem : ModSystem
 {
     private static int nextInstanceId;
     private readonly int instanceId = Interlocked.Increment(ref nextInstanceId);
+    private VintageStoryNativeProfileBridge? nativeProfileBridge;
 
     /// <inheritdoc />
     public override void Start(ICoreAPI api)
@@ -38,6 +40,9 @@ public sealed class ISRWorldGenModSystem : ModSystem
     public override void StartServerSide(ICoreServerAPI api)
     {
         Mod.Logger.Notification("L00A_SERVER_READY modid=isrworldgen instance={0}", instanceId);
+        nativeProfileBridge = new VintageStoryNativeProfileBridge(
+            new VintageStoryNativeProfileHost(api, Mod.Logger));
+        nativeProfileBridge.Register();
     }
 
     /// <inheritdoc />

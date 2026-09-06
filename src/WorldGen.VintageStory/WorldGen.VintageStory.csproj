@@ -8,6 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\WorldGen.Core\WorldGen.Core.csproj" />
+
     <Reference Include="VintagestoryAPI">
       <HintPath>$(VintageStoryPath)\VintagestoryAPI.dll</HintPath>
       <Private>false</Private>
@@ -24,5 +26,10 @@
            Text="VintageStoryPath is not configured. Copy Directory.Build.local.props.example to Directory.Build.local.props or set VINTAGE_STORY." />
     <Error Condition="!Exists('$(VintageStoryPath)\VintagestoryAPI.dll')"
            Text="VintagestoryAPI.dll was not found under VintageStoryPath '$(VintageStoryPath)'." />
+  </Target>
+
+  <Target Name="ValidateRuntimePackage" AfterTargets="Build">
+    <Error Condition="!Exists('$(TargetDir)ISRWorldGen.Core.dll')"
+           Text="ISRWorldGen.Core.dll must be packaged beside ISRWorldGen.dll." />
   </Target>
 </Project>
