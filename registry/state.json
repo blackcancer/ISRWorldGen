@@ -46,7 +46,7 @@
     },
     "L01-B": {
       "status": "IN_PROGRESS",
-      "owner": "agent:l01_b",
+      "owner": "agent:l01_a",
       "branch": "agent/l01-b",
       "base_commit": "a7350eb7a2044e3318d430273be47f119ea87e78",
       "evidence": [],
