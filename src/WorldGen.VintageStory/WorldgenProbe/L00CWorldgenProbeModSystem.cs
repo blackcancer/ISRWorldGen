@@ -38,6 +38,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private long tickListenerId;
     private int stableTickCount;
     private int fixtureCallbackCount;
+    private int forwardedColumnCount;
+    private int forwardLogIssued;
     private int requestIssued;
     private int shutdownIssued;
     private bool active;
@@ -85,6 +87,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         requestIssued = 0;
         shutdownIssued = 0;
         stableTickCount = 0;
+        forwardedColumnCount = 0;
+        forwardLogIssued = 0;
         initialSnapshot = null;
 
         ISaveGame saveGame = serverApi.WorldManager.SaveGame;
@@ -326,7 +330,16 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
         if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
         {
-            throw new InvalidOperationException($"L00-C lab prototype refuses non-fixture column ({request.ChunkX},{request.ChunkZ}).");
+            foreach (RemovedHandler entry in removedHandlers.Where(item => item.Pass == EnumWorldGenPass.Terrain).OrderBy(item => item.Index))
+            {
+                entry.Handler(request);
+            }
+            Interlocked.Increment(ref forwardedColumnCount);
+            if (Interlocked.Exchange(ref forwardLogIssued, 1) == 0)
+            {
+                Log($"L00C_NATIVE_FORWARD instance={instanceId} marker={marker!.MarkerId} firstchunk=({request.ChunkX},{request.ChunkZ}) delegates={removedHandlers.Count(item => item.Pass == EnumWorldGenPass.Terrain)}");
+            }
+            return;
         }
         if (Interlocked.Increment(ref fixtureCallbackCount) != 1)
         {
@@ -686,7 +699,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 {
                     int nativeToRestore = removedHandlers.Count;
                     int removed = ResetOwnedHandlers(ownedHandlerSet, true);
-                    Log($"L00C_DISPOSED instance={instanceId} removedprobe={removed} restorednative={nativeToRestore} callbacks={fixtureCallbackCount}");
+                    Log($"L00C_DISPOSED instance={instanceId} removedprobe={removed} restorednative={nativeToRestore} callbacks={fixtureCallbackCount} forwarded={forwardedColumnCount}");
                 }
             }
             catch (Exception exception)
