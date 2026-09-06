@@ -24,11 +24,13 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenTerra"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenRockStrataNew"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenCaves"),
-        new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenBlockLayers")
+        new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenBlockLayers"),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenTerraPostProcess")
     ];
 
     private readonly string instanceId = Guid.NewGuid().ToString("N");
     private readonly ChunkColumnGenerationDelegate fixtureHandler;
+    private readonly ChunkColumnGenerationDelegate terrainFeaturesHandler;
     private readonly List<RemovedHandler> removedHandlers = [];
 
     private ICoreServerAPI? api;
@@ -39,8 +41,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private long tickListenerId;
     private int stableTickCount;
     private int fixtureCallbackCount;
-    private int forwardedColumnCount;
-    private int forwardLogIssued;
+    private readonly int[] forwardedColumnCounts = new int[6];
+    private readonly int[] forwardLogIssued = new int[6];
     private int requestIssued;
     private int shutdownIssued;
     private bool active;
@@ -49,6 +51,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     public L00CWorldgenProbeModSystem()
     {
         fixtureHandler = GenerateFixtureColumn;
+        terrainFeaturesHandler = FilterTerrainFeatures;
     }
 
     /// <inheritdoc />
@@ -88,8 +91,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         requestIssued = 0;
         shutdownIssued = 0;
         stableTickCount = 0;
-        forwardedColumnCount = 0;
-        forwardLogIssued = 0;
+        Array.Clear(forwardedColumnCounts);
+        Array.Clear(forwardLogIssued);
         initialSnapshot = null;
 
         ISaveGame saveGame = serverApi.WorldManager.SaveGame;
@@ -160,7 +163,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             for (int index = passHandlers.Count - 1; index >= 0; index--)
             {
                 ChunkColumnGenerationDelegate candidate = passHandlers[index];
-                if (ReferenceEquals(candidate.Target, this) && candidate.Method == fixtureHandler.Method)
+                if (IsOwnedProxy(candidate))
                 {
                     passHandlers.RemoveAt(index);
                     removedProbeCount++;
@@ -204,7 +207,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         foreach (ReplacementSpec spec in ReplacementSpecs)
         {
-            List<HandlerLocation> matches = FindHandlers(handlers, spec.TargetType, spec.Pass);
+            List<HandlerLocation> matches = FindHandlers(handlers, spec.TargetType, spec.Pass, spec.MethodName);
             if (matches.Count != 1)
             {
                 Fail("expected-handler-cardinality", $"Expected exactly one {spec.TargetType} handler in pass {spec.Pass}, found {matches.Count}; targeted replacement was not applied.");
@@ -215,21 +218,18 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private void ApplyTargetedReplacement(IWorldGenHandler handlers)
     {
         var unaffectedBefore = new Dictionary<EnumWorldGenPass, List<ChunkColumnGenerationDelegate>>();
-        int fixtureInsertionIndex = int.MaxValue;
-
         foreach (ReplacementSpec spec in ReplacementSpecs)
         {
             List<ChunkColumnGenerationDelegate> passHandlers = GetPassHandlers(handlers, spec.Pass);
             if (!unaffectedBefore.ContainsKey(spec.Pass))
             {
                 unaffectedBefore[spec.Pass] = passHandlers
-                    .Where(candidate => !ReplacementSpecs.Any(entry => entry.Pass == spec.Pass && TargetType(candidate) == entry.TargetType))
+                    .Where(candidate => !ReplacementSpecs.Any(entry => entry.Pass == spec.Pass && Matches(candidate, entry)))
                     .ToList();
             }
 
-            HandlerLocation location = FindHandlers(handlers, spec.TargetType, spec.Pass).Single();
+            HandlerLocation location = FindHandlers(handlers, spec.TargetType, spec.Pass, spec.MethodName).Single();
             removedHandlers.Add(new RemovedHandler(spec.Pass, location.Index, location.Handler));
-            fixtureInsertionIndex = Math.Min(fixtureInsertionIndex, location.Index);
         }
 
         foreach (IGrouping<EnumWorldGenPass, RemovedHandler> group in removedHandlers.GroupBy(entry => entry.Pass))
@@ -245,13 +245,17 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             }
         }
 
-        List<ChunkColumnGenerationDelegate> terrainHandlers = GetPassHandlers(handlers, EnumWorldGenPass.Terrain);
-        terrainHandlers.Insert(Math.Clamp(fixtureInsertionIndex, 0, terrainHandlers.Count), fixtureHandler);
+        foreach (IGrouping<EnumWorldGenPass, RemovedHandler> group in removedHandlers.GroupBy(entry => entry.Pass))
+        {
+            List<ChunkColumnGenerationDelegate> passHandlers = GetPassHandlers(handlers, group.Key);
+            int insertionIndex = group.Min(item => item.Index);
+            passHandlers.Insert(Math.Clamp(insertionIndex, 0, passHandlers.Count), ProxyForPass(group.Key));
+        }
 
         foreach (KeyValuePair<EnumWorldGenPass, List<ChunkColumnGenerationDelegate>> entry in unaffectedBefore)
         {
             List<ChunkColumnGenerationDelegate> actual = GetPassHandlers(handlers, entry.Key)
-                .Where(candidate => !ReferenceEquals(candidate, fixtureHandler))
+                .Where(candidate => !IsOwnedProxy(candidate))
                 .ToList();
             if (actual.Count != entry.Value.Count || actual.Where((candidate, index) => !ReferenceEquals(candidate, entry.Value[index])).Any())
             {
@@ -331,15 +335,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
         if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
         {
-            foreach (RemovedHandler entry in removedHandlers.Where(item => item.Pass == EnumWorldGenPass.Terrain).OrderBy(item => item.Index))
-            {
-                entry.Handler(request);
-            }
-            Interlocked.Increment(ref forwardedColumnCount);
-            if (Interlocked.Exchange(ref forwardLogIssued, 1) == 0)
-            {
-                Log($"L00C_NATIVE_FORWARD instance={instanceId} marker={marker!.MarkerId} firstchunk=({request.ChunkX},{request.ChunkZ}) delegates={removedHandlers.Count(item => item.Pass == EnumWorldGenPass.Terrain)}");
-            }
+            ForwardNative(EnumWorldGenPass.Terrain, request);
             return;
         }
         if (Interlocked.Increment(ref fixtureCallbackCount) != 1)
@@ -395,6 +391,32 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         mapChunk.MarkDirty();
 
         Log($"L00C_FIXTURE_WRITTEN instance={instanceId} marker={marker!.MarkerId} chunk=({request.ChunkX},{request.ChunkZ}) chunksize={chunkSize} worldheight={worldHeight} rock={config.RockBlockId} fresh={config.FreshWaterBlockId} salt={config.SaltWaterBlockId} rocksurface={geometry.RockSurface} watersurface={geometry.WaterSurface} thread={Environment.CurrentManagedThreadId}");
+    }
+
+    private void FilterTerrainFeatures(IChunkColumnGenerateRequest request)
+    {
+        if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
+        {
+            ForwardNative(EnumWorldGenPass.TerrainFeatures, request);
+            return;
+        }
+
+        Log($"L00C_PASS_SUPPRESSED instance={instanceId} marker={marker!.MarkerId} pass={EnumWorldGenPass.TerrainFeatures} chunk=({request.ChunkX},{request.ChunkZ}) delegates={removedHandlers.Count(item => item.Pass == EnumWorldGenPass.TerrainFeatures)}");
+    }
+
+    private void ForwardNative(EnumWorldGenPass pass, IChunkColumnGenerateRequest request)
+    {
+        foreach (RemovedHandler entry in removedHandlers.Where(item => item.Pass == pass).OrderBy(item => item.Index))
+        {
+            entry.Handler(request);
+        }
+
+        int passIndex = (int)pass;
+        Interlocked.Increment(ref forwardedColumnCounts[passIndex]);
+        if (Interlocked.Exchange(ref forwardLogIssued[passIndex], 1) == 0)
+        {
+            Log($"L00C_NATIVE_FORWARD instance={instanceId} marker={marker!.MarkerId} pass={pass} firstchunk=({request.ChunkX},{request.ChunkZ}) delegates={removedHandlers.Count(item => item.Pass == pass)}");
+        }
     }
 
     private static void SetSolid(IServerChunk[] chunks, int chunkSize, int x, int y, int z, int blockId)
@@ -632,7 +654,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         return handler.Target?.GetType().FullName ?? handler.Method.DeclaringType?.FullName ?? "static";
     }
 
-    private static List<HandlerLocation> FindHandlers(IWorldGenHandler handlers, string targetType, EnumWorldGenPass? pass = null)
+    private static List<HandlerLocation> FindHandlers(IWorldGenHandler handlers, string targetType, EnumWorldGenPass? pass = null, string? methodName = null)
     {
         var matches = new List<HandlerLocation>();
         IEnumerable<EnumWorldGenPass> passes = pass.HasValue
@@ -646,7 +668,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             List<ChunkColumnGenerationDelegate> passHandlers = GetPassHandlers(handlers, passValue);
             for (int index = 0; index < passHandlers.Count; index++)
             {
-                if (TargetType(passHandlers[index]) == targetType)
+                if (TargetType(passHandlers[index]) == targetType && (methodName is null || passHandlers[index].Method.Name == methodName))
                 {
                     matches.Add(new HandlerLocation(passValue, index, passHandlers[index]));
                 }
@@ -668,7 +690,25 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private int CountFixtureHandlers(IWorldGenHandler handlers)
     {
-        return handlers.OnChunkColumnGen.Sum(items => items?.Count(candidate => ReferenceEquals(candidate.Target, this) && candidate.Method == fixtureHandler.Method) ?? 0);
+        return handlers.OnChunkColumnGen.Sum(items => items?.Count(IsOwnedProxy) ?? 0);
+    }
+
+    private ChunkColumnGenerationDelegate ProxyForPass(EnumWorldGenPass pass) => pass switch
+    {
+        EnumWorldGenPass.Terrain => fixtureHandler,
+        EnumWorldGenPass.TerrainFeatures => terrainFeaturesHandler,
+        _ => throw new InvalidOperationException($"L00-C has no targeted proxy for pass {pass}.")
+    };
+
+    private bool IsOwnedProxy(ChunkColumnGenerationDelegate candidate)
+    {
+        return ReferenceEquals(candidate.Target, this) &&
+            (candidate.Method == fixtureHandler.Method || candidate.Method == terrainFeaturesHandler.Method);
+    }
+
+    private static bool Matches(ChunkColumnGenerationDelegate candidate, ReplacementSpec spec)
+    {
+        return TargetType(candidate) == spec.TargetType && (spec.MethodName is null || candidate.Method.Name == spec.MethodName);
     }
 
     private void Fail(string code, string message)
@@ -700,7 +740,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 {
                     int nativeToRestore = removedHandlers.Count;
                     int removed = ResetOwnedHandlers(ownedHandlerSet, true);
-                    Log($"L00C_DISPOSED instance={instanceId} removedprobe={removed} restorednative={nativeToRestore} callbacks={fixtureCallbackCount} forwarded={forwardedColumnCount}");
+                    Log($"L00C_DISPOSED instance={instanceId} removedprobe={removed} restorednative={nativeToRestore} callbacks={fixtureCallbackCount} forwarded={forwardedColumnCounts.Sum()}");
                 }
             }
             catch (Exception exception)
@@ -718,7 +758,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         base.Dispose();
     }
 
-    private sealed record ReplacementSpec(EnumWorldGenPass Pass, string TargetType);
+    private sealed record ReplacementSpec(EnumWorldGenPass Pass, string TargetType, string? MethodName = null);
     private sealed record HandlerLocation(EnumWorldGenPass Pass, int Index, ChunkColumnGenerationDelegate Handler);
     private sealed record RemovedHandler(EnumWorldGenPass Pass, int Index, ChunkColumnGenerationDelegate Handler);
     private sealed record FixtureSnapshot(string Hash, int SolidCount, int FluidCount, int FreshCount, int SaltCount, int UnexpectedCount, ushort YMax);

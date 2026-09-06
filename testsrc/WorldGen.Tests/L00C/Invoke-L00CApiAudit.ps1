@@ -99,7 +99,8 @@ $requiredNativeTypes = @(
     'Vintagestory.ServerMods.GenTerra',
     'Vintagestory.ServerMods.GenRockStrataNew',
     'Vintagestory.ServerMods.GenCaves',
-    'Vintagestory.ServerMods.GenBlockLayers'
+    'Vintagestory.ServerMods.GenBlockLayers',
+    'Vintagestory.ServerMods.GenTerraPostProcess'
 )
 
 $nativeTypeStatus = [ordered]@{}
