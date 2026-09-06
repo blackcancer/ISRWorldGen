@@ -372,7 +372,7 @@ if ($Phase -eq 'Finalize') {
     $open2Save = [regex]::Escape([string]$open2.SavegameIdentifier)
     $open2Run = [regex]::Escape([string]$open2.WorldRunId)
     if ($open2Log -notmatch "L00C_ACTIVATED instance=$open2Instance marker=$open2Marker run=$open2Run open=2 isnew=False save=$open2Save " -or
-        $open2Log -notmatch "L00C_PERSISTED_REOPEN_STABLE instance=$open2Instance marker=$open2Marker run=$open2Run open=2 ") {
+        $open2Log -notmatch "L00C_PERSISTED_REOPEN_STABLE instance=$open2Instance marker=$open2Marker run=$open2Run loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0 center=[0-9A-F]{64} halo=[0-9A-F]{64}") {
         throw 'Open2 log does not prove the bound persisted reopen session.'
     }
     $authorizationFile = Get-Item -LiteralPath $authorizePath

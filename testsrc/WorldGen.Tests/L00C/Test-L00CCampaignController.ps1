@@ -8,8 +8,42 @@ $ErrorActionPreference = 'Stop'
 
 $controllerPath = Join-Path $PSScriptRoot 'Invoke-L00CCampaignController.ps1'
 $evidenceValidatorPath = Join-Path $PSScriptRoot 'Test-L00CEvidence.ps1'
-foreach ($path in @($controllerPath, $evidenceValidatorPath)) {
+$probeSourcePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
+foreach ($path in @($controllerPath, $evidenceValidatorPath, $probeSourcePath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Campaign controller test input is missing: $path" }
+}
+$probeSourceLines = @(Get-Content -LiteralPath $probeSourcePath)
+$activatedSourceLine = @($probeSourceLines | Where-Object { $_.Contains('L00C_ACTIVATED') -and $_.Contains('isnew=False') })
+$stableSourceLine = @($probeSourceLines | Where-Object { $_.Contains('L00C_PERSISTED_REOPEN_STABLE') })
+if ($activatedSourceLine.Count -ne 1 -or $stableSourceLine.Count -ne 1) {
+    throw 'Production log format extraction requires one persisted activated line and one persisted stable line.'
+}
+function Get-ProductionTemplate([string]$SourceLine, [string]$Marker) {
+    $match = [regex]::Match($SourceLine, 'Log\(\$"(?<template>L00C_[^"]+)"\);')
+    if (-not $match.Success -or -not $match.Groups['template'].Value.StartsWith($Marker, [StringComparison]::Ordinal)) {
+        throw "Unable to extract production template for $Marker."
+    }
+    return $match.Groups['template'].Value
+}
+function Get-TemplateTokens([string]$Template) {
+    return @([regex]::Matches($Template, '\{(?<token>[^}]+)\}') | ForEach-Object { $_.Groups['token'].Value })
+}
+function Expand-ProductionTemplate([string]$Template, [hashtable]$Values) {
+    return [regex]::Replace($Template, '\{(?<token>[^}]+)\}', {
+        param($match)
+        $token = $match.Groups['token'].Value
+        if (-not $Values.ContainsKey($token)) { throw "Production log fixture lacks token value: $token" }
+        return [string]$Values[$token]
+    })
+}
+$activatedTemplate = Get-ProductionTemplate $activatedSourceLine[0] 'L00C_ACTIVATED'
+$stableTemplate = Get-ProductionTemplate $stableSourceLine[0] 'L00C_PERSISTED_REOPEN_STABLE'
+$expectedActivatedTokens = @('instanceId', 'marker!.MarkerId', 'runId', 'marker.OpenCount', 'saveGame.SavegameIdentifier', 'config.FixtureChunkX', 'config.FixtureChunkZ')
+$expectedStableTokens = @('instanceId', 'marker!.MarkerId', 'runId', 'priorityLoads', 'transientRequests', 'refreshPasses', 'refreshedMapChunks', 'fixtureWrites', 'fixtureCallbackCount', 'persistedSnapshot.Fixture.Hash', 'persistedSnapshot.Halo.Hash')
+if (((Get-TemplateTokens $activatedTemplate) -join '|') -ne ($expectedActivatedTokens -join '|') -or
+    ((Get-TemplateTokens $stableTemplate) -join '|') -ne ($expectedStableTokens -join '|') -or
+    $stableTemplate.Contains(' open=', [StringComparison]::Ordinal)) {
+    throw 'Campaign controller test fixture is not aligned with the production persisted-reopen log schema.'
 }
 $controllerSource = Get-Content -LiteralPath $controllerPath -Raw
 $validatorSource = Get-Content -LiteralPath $evidenceValidatorPath -Raw
@@ -165,7 +199,7 @@ function Authorize-Open2($Fixture) {
     $Fixture.Add('AuthorizeOpen2', ($json | ConvertFrom-Json))
 }
 
-function Complete-Open2($Fixture) {
+function Complete-Open2($Fixture, [bool]$UseFalseStableFormat = $false) {
     $authorized = [DateTimeOffset]::Parse([string]$Fixture.AuthorizeOpen2.AuthorizedUtc).ToUniversalTime()
     $authorizationReceiptPath = Join-Path $Fixture.Evidence 'campaign-control\03-authorize-open2.json'
     $authorizationWritten = [DateTimeOffset](Get-Item -LiteralPath $authorizationReceiptPath).LastWriteTimeUtc
@@ -189,10 +223,34 @@ function Complete-Open2($Fixture) {
     Write-NewJson $Fixture.Open2Session $session
     $logParent = Split-Path -Parent $Fixture.Open2Log
     if (-not (Test-Path -LiteralPath $logParent -PathType Container)) { [void](New-Item -ItemType Directory -Path $logParent) }
-    $open2Log = @(
-        "L00C_ACTIVATED instance=$($session.InstanceId) marker=$($session.MarkerId) run=$($session.WorldRunId) open=2 isnew=False save=$($session.SavegameIdentifier) fixture=31990,31990"
-        "L00C_PERSISTED_REOPEN_STABLE instance=$($session.InstanceId) marker=$($session.MarkerId) run=$($session.WorldRunId) open=2 snapshot=$('A' * 64)"
-    ) -join [Environment]::NewLine
+    $activatedLine = Expand-ProductionTemplate $activatedTemplate @{
+        'instanceId' = [string]$session.InstanceId
+        'marker!.MarkerId' = [string]$session.MarkerId
+        'runId' = [string]$session.WorldRunId
+        'marker.OpenCount' = '2'
+        'saveGame.SavegameIdentifier' = [string]$session.SavegameIdentifier
+        'config.FixtureChunkX' = '31990'
+        'config.FixtureChunkZ' = '31990'
+    }
+    $stableLine = if ($UseFalseStableFormat) {
+        "L00C_PERSISTED_REOPEN_STABLE instance=$($session.InstanceId) marker=$($session.MarkerId) run=$($session.WorldRunId) open=2 loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0 center=$('A' * 64) halo=$('B' * 64)"
+    }
+    else {
+        Expand-ProductionTemplate $stableTemplate @{
+            'instanceId' = [string]$session.InstanceId
+            'marker!.MarkerId' = [string]$session.MarkerId
+            'runId' = [string]$session.WorldRunId
+            'priorityLoads' = '0'
+            'transientRequests' = '0'
+            'refreshPasses' = '0'
+            'refreshedMapChunks' = '0'
+            'fixtureWrites' = '0'
+            'fixtureCallbackCount' = '0'
+            'persistedSnapshot.Fixture.Hash' = 'A' * 64
+            'persistedSnapshot.Halo.Hash' = 'B' * 64
+        }
+    }
+    $open2Log = @($activatedLine, $stableLine) -join [Environment]::NewLine
     [IO.File]::WriteAllText($Fixture.Open2Log, $open2Log, [Text.UTF8Encoding]::new($false))
     $json = (& $controllerPath -Phase Finalize -EvidenceDirectory $Fixture.Evidence -RepositoryRoot $RepositoryRoot) -join [Environment]::NewLine
     $Fixture.Add('Finalize', ($json | ConvertFrom-Json))
@@ -250,6 +308,11 @@ try {
     Write-NewJson $premature.Open2Session ([ordered]@{ EvidenceSequence = 4 })
     Assert-Rejected { & $controllerPath -Phase AuthorizeOpen2 -EvidenceDirectory $premature.Evidence -RepositoryRoot $RepositoryRoot } 'Open2 already exists'
 
+    $falseStable = New-Campaign 'false-stable-field'
+    Complete-Open1 $falseStable
+    Authorize-Open2 $falseStable
+    Assert-Rejected { Complete-Open2 $falseStable $true } 'Invented open field on persisted stable marker'
+
     $baseline = New-Campaign 'baseline'
     Complete-Open1 $baseline
     Authorize-Open2 $baseline
@@ -271,6 +334,8 @@ try {
         RewrittenAttestationRejected = $true
         Open2AlreadyExistsRejected = $true
         ReversedOrderRejected = $true
+        FalseStableOpenFieldRejected = $true
+        ProductionLogSchemaDerived = $true
         OperationalGuarantee = 'fresh tamper-evident chain, not attacker-resistant'
     } | ConvertTo-Json -Depth 5
 }
