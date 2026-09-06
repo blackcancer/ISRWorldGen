@@ -44,6 +44,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private readonly string instanceId = Guid.NewGuid().ToString("N");
     private readonly ChunkColumnGenerationDelegate lightingFinalizerHandler;
+    private readonly Queue<ChunkCoordinate> pendingHaloColumns = new();
 
     private ICoreServerAPI? api;
     private HandlerOwnershipState? ownershipState;
@@ -54,6 +55,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private HaloSnapshot? initialHaloSnapshot;
     private long tickListenerId;
     private int stableTickCount;
+    private int haloPreparedCount;
     private int fixtureCallbackCount;
     private int requestIssued;
     private int shutdownIssued;
@@ -103,6 +105,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         requestIssued = 0;
         shutdownIssued = 0;
         stableTickCount = 0;
+        haloPreparedCount = 0;
+        pendingHaloColumns.Clear();
         marker = null;
         preLightingSnapshot = null;
         initialSnapshot = null;
@@ -373,13 +377,63 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         ICoreServerAPI serverApi = RequireApi();
         ValidateFixtureCoordinate(serverApi);
+        if (active)
+        {
+            for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
+            {
+                for (int deltaZ = -FixtureProtectionRadius; deltaZ <= FixtureProtectionRadius; deltaZ++)
+                {
+                    if (deltaX != 0 || deltaZ != 0)
+                    {
+                        pendingHaloColumns.Enqueue(new ChunkCoordinate(config.FixtureChunkX + deltaX, config.FixtureChunkZ + deltaZ));
+                    }
+                }
+            }
+            Log($"L00C_HALO_PREPARE_BEGIN instance={instanceId} marker={marker!.MarkerId} radius={FixtureProtectionRadius} columns={pendingHaloColumns.Count}");
+            RequestNextHaloColumn();
+            return;
+        }
+
+        RequestFixtureCenter(serverApi);
+    }
+
+    private void RequestNextHaloColumn()
+    {
+        ICoreServerAPI serverApi = RequireApi();
+        if (!pendingHaloColumns.TryDequeue(out ChunkCoordinate coordinate))
+        {
+            Log($"L00C_HALO_PREPARE_COMPLETE instance={instanceId} marker={marker!.MarkerId} radius={FixtureProtectionRadius} columns={haloPreparedCount}");
+            RequestFixtureCenter(serverApi);
+            return;
+        }
+
+        Log($"L00C_HALO_COLUMN_REQUEST instance={instanceId} marker={marker!.MarkerId} chunk=({coordinate.X},{coordinate.Z}) remaining={pendingHaloColumns.Count}");
+        serverApi.WorldManager.LoadChunkColumnPriority(
+            coordinate.X,
+            coordinate.Z,
+            new ChunkLoadOptions
+            {
+                KeepLoaded = true,
+                OnLoaded = () => OnHaloColumnLoaded(coordinate)
+            });
+    }
+
+    private void OnHaloColumnLoaded(ChunkCoordinate coordinate)
+    {
+        int prepared = Interlocked.Increment(ref haloPreparedCount);
+        Log($"L00C_HALO_COLUMN_PREPARED instance={instanceId} marker={marker!.MarkerId} chunk=({coordinate.X},{coordinate.Z}) prepared={prepared}");
+        RequestNextHaloColumn();
+    }
+
+    private void RequestFixtureCenter(ICoreServerAPI serverApi)
+    {
         Log($"L00C_COLUMN_REQUEST instance={instanceId} active={active} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
         serverApi.WorldManager.LoadChunkColumnPriority(
             config.FixtureChunkX,
             config.FixtureChunkZ,
             new ChunkLoadOptions
             {
-                KeepLoaded = false,
+                KeepLoaded = true,
                 OnLoaded = OnProbeColumnLoaded
             });
     }
@@ -1062,6 +1116,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         int LightingAnchorIndex,
         ChunkColumnGenerationDelegate LightingFinalizer);
     private readonly record struct RestoreResult(int RemovedOwned, int RestoredNative, bool Exact);
+    private readonly record struct ChunkCoordinate(int X, int Z);
     private sealed record FixtureSnapshot(string Hash, int SolidCount, int FluidCount, int FreshCount, int SaltCount, int UnexpectedCount, ushort YMax);
     private sealed record HaloSnapshot(string Hash, int ColumnCount);
 

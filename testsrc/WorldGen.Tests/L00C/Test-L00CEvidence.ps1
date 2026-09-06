@@ -151,6 +151,7 @@ foreach ($session in @($evidence.Sessions)) {
             "L00C_HANDLERS phase=before instance=$instance ",
             "L00C_HANDLERS phase=after instance=$instance ",
             "L00C_ACTIVATED instance=$instance marker=$marker open=$open isnew=$isNew ",
+            "L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded ",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks ",
             "L00C_HALO_VALID instance=$instance marker=$marker phase=loaded radius=1 columns=8 ",
@@ -165,6 +166,11 @@ foreach ($session in @($evidence.Sessions)) {
             if ($log -notmatch $pattern) {
                 throw "Activated session $($session.Cycle) is missing log pattern: $pattern"
             }
+        }
+        $haloCompleteIndex = $log.IndexOf("L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8", [StringComparison]::Ordinal)
+        $centerRequestIndex = $log.IndexOf("L00C_COLUMN_REQUEST instance=$instance active=True", [StringComparison]::Ordinal)
+        if ($haloCompleteIndex -lt 0 -or $centerRequestIndex -le $haloCompleteIndex) {
+            throw "Activated session $($session.Cycle) did not prepare the full first ring before requesting the fixture center."
         }
         if ($log -notmatch "L00C_TICKS_STABLE instance=$instance .* unexpected=0") {
             throw "Activated session $($session.Cycle) did not preserve the exact fixture after bounded ticks."
