@@ -5,6 +5,13 @@ using ISRWorldGen.Core.Contracts;
 
 namespace ISRWorldGen.ScaleProfiles;
 
+internal enum NativeProfilePersistenceState : byte
+{
+    Pending = 1,
+    Committed = 2,
+    Rejected = 3
+}
+
 internal sealed class NativeFrozenProfileEnvelope
 {
     private readonly byte[] profileBytes;
@@ -20,6 +27,7 @@ internal sealed class NativeFrozenProfileEnvelope
         Hash256 geographyConfigHash,
         string profileCodecId,
         uint profileCodecVersion,
+        NativeProfilePersistenceState persistenceState,
         ReadOnlySpan<byte> profileBytes)
     {
         SavegameIdentifier = savegameIdentifier;
@@ -32,6 +40,7 @@ internal sealed class NativeFrozenProfileEnvelope
         GeographyConfigHash = geographyConfigHash;
         ProfileCodecId = profileCodecId;
         ProfileCodecVersion = profileCodecVersion;
+        PersistenceState = persistenceState;
         this.profileBytes = profileBytes.ToArray();
     }
 
@@ -55,6 +64,8 @@ internal sealed class NativeFrozenProfileEnvelope
 
     internal uint ProfileCodecVersion { get; }
 
+    internal NativeProfilePersistenceState PersistenceState { get; }
+
     internal byte[] GetProfileBytesCopy() => profileBytes.ToArray();
 }
 
@@ -69,7 +80,13 @@ internal static class NativeFrozenProfileEnvelopeCodec
     private static readonly byte[] Magic = "ISRNPF01"u8.ToArray();
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    internal static byte[] Encode(NativeWorldSnapshot world, FrozenScaleProfile profile)
+    internal static byte[] Encode(NativeWorldSnapshot world, FrozenScaleProfile profile) =>
+        Encode(world, profile, NativeProfilePersistenceState.Committed);
+
+    internal static byte[] Encode(
+        NativeWorldSnapshot world,
+        FrozenScaleProfile profile,
+        NativeProfilePersistenceState persistenceState)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(profile);
@@ -94,6 +111,7 @@ internal static class NativeFrozenProfileEnvelopeCodec
             profile.GeographyConfigHash,
             FrozenProfileCodecId,
             FrozenProfileCodecVersion,
+            persistenceState,
             profileBytes);
         return Encode(envelope);
     }
@@ -110,6 +128,7 @@ internal static class NativeFrozenProfileEnvelopeCodec
             envelope.GeographyConfigHash == Hash256.Zero ||
             !string.Equals(envelope.ProfileCodecId, FrozenProfileCodecId, StringComparison.Ordinal) ||
             envelope.ProfileCodecVersion != FrozenProfileCodecVersion ||
+            !Enum.IsDefined(envelope.PersistenceState) ||
             profileBytes.Length is < 1 or > MaximumProfileBytes)
         {
             throw new ArgumentException("Native profile envelope fields are invalid or unsupported.", nameof(envelope));
@@ -123,6 +142,7 @@ internal static class NativeFrozenProfileEnvelopeCodec
             Hash256.ByteWidth +
             4 + profileCodecIdentifier.Length +
             4 +
+            1 +
             4 + profileBytes.Length);
         int checksumOffset = checked(Magic.Length + 4 + 4 + payloadLength);
         int totalLength = checked(checksumOffset + Hash256.ByteWidth);
@@ -147,6 +167,7 @@ internal static class NativeFrozenProfileEnvelopeCodec
         offset += Hash256.ByteWidth;
         WriteLengthPrefixedBytes(encoded, ref offset, profileCodecIdentifier);
         WriteUInt32(encoded, ref offset, envelope.ProfileCodecVersion);
+        encoded[offset++] = (byte)envelope.PersistenceState;
         WriteLengthPrefixedBytes(encoded, ref offset, profileBytes);
         Hash256.Compute(encoded.AsSpan(0, offset)).WriteCanonicalBytes(encoded.AsSpan(offset, Hash256.ByteWidth));
         return encoded;
@@ -216,10 +237,12 @@ internal static class NativeFrozenProfileEnvelopeCodec
             Hash256 geographyConfigHash = Hash256.FromCanonicalBytes(reader.ReadBytes(Hash256.ByteWidth));
             string profileCodecIdentifier = reader.ReadIdentifier();
             uint profileCodecVersion = reader.ReadUInt32();
+            NativeProfilePersistenceState persistenceState = (NativeProfilePersistenceState)reader.ReadByte();
             byte[] profileBytes = reader.ReadBoundedBytes(MaximumProfileBytes);
             if (!reader.IsComplete ||
                 mapSizeX <= 0 || mapSizeY <= 0 || mapSizeZ <= 0 || chunkSize <= 0 ||
-                ruleSetVersion == 0 || geographyConfigHash == Hash256.Zero)
+                ruleSetVersion == 0 || geographyConfigHash == Hash256.Zero ||
+                !Enum.IsDefined(persistenceState))
             {
                 return FormatFailure("Native profile envelope payload is not canonical.");
             }
@@ -244,6 +267,7 @@ internal static class NativeFrozenProfileEnvelopeCodec
                 geographyConfigHash,
                 profileCodecIdentifier,
                 profileCodecVersion,
+                persistenceState,
                 profileBytes));
         }
         catch (Exception exception) when (exception is InvalidDataException or DecoderFallbackException or OverflowException)
@@ -362,5 +386,7 @@ internal static class NativeFrozenProfileEnvelopeCodec
         internal int ReadInt32() => BinaryPrimitives.ReadInt32BigEndian(ReadBytes(4));
 
         internal uint ReadUInt32() => BinaryPrimitives.ReadUInt32BigEndian(ReadBytes(4));
+
+        internal byte ReadByte() => ReadBytes(1)[0];
     }
 }

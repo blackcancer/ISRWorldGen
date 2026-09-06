@@ -37,6 +37,8 @@ internal sealed class MemoryFrozenProfileStore : IFrozenProfileStore
 
     internal bool ReturnDifferentBytesAfterWrite { get; set; }
 
+    internal int ThrowOnWriteNumber { get; set; }
+
     public byte[]? Read()
     {
         ReadCount++;
@@ -52,6 +54,11 @@ internal sealed class MemoryFrozenProfileStore : IFrozenProfileStore
     public void Write(ReadOnlySpan<byte> content)
     {
         WriteCount++;
+        if (WriteCount == ThrowOnWriteNumber)
+        {
+            throw new InvalidOperationException("Injected store write failure.");
+        }
+
         bytes = content.ToArray();
     }
 

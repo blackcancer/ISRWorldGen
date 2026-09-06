@@ -73,9 +73,13 @@ $requiredSourceFragments = @(
     'api.Server.ShutDown()',
     'internal const string StorageKey = "isrworldgen:l02c:frozen-profile:v1"',
     'internal const string FrozenProfileCodecId = "isrworldgen.core.frozen-scale-profile"',
-    'store.Write(encoded.AsSpan())',
+    'NativeProfilePersistenceState.Pending',
+    'NativeProfilePersistenceState.Committed',
+    'NativeProfilePersistenceState.Rejected',
+    'store.Write(pending.AsSpan())',
     'reread = store.Read()?.ToArray()',
-    'return Publish(strictReload.Value!)'
+    'return Publish(strictReload.Value!)',
+    'details={2} dimensions={3} chunk={4} rules={5}'
 )
 $allSources = $bridgeSource + $coordinatorSource + $envelopeSource
 foreach ($fragment in $requiredSourceFragments) {

@@ -23,7 +23,7 @@ public sealed class NativeProfileCoordinatorTests
         Assert.AreEqual(NativeProfileState.Frozen, preparation.State);
         Assert.IsNotNull(preparation.Profile);
         Assert.AreSame(preparation.Profile, coordinator.PublishedProfile);
-        Assert.AreEqual(1, store.WriteCount);
+        Assert.AreEqual(2, store.WriteCount, "Pending and Committed states are separate single-key writes.");
         Assert.AreEqual(2, store.ReadCount, "The initial absence check and post-write reread are both required.");
         Assert.IsTrue(gate.CanGenerate);
         Assert.AreEqual(NativeProfileState.Frozen, gate.State);
@@ -50,7 +50,7 @@ public sealed class NativeProfileCoordinatorTests
 
         Assert.AreEqual(NativeProfileState.Frozen, reopened.State);
         Assert.AreEqual(first.Profile, reopened.Profile);
-        Assert.AreEqual(1, store.WriteCount);
+        Assert.AreEqual(2, store.WriteCount);
         CollectionAssert.AreEqual(persisted, store.GetStoredCopy());
     }
 
@@ -92,6 +92,7 @@ public sealed class NativeProfileCoordinatorTests
             decoded.GeographyConfigHash,
             decoded.ProfileCodecId,
             decoded.ProfileCodecVersion,
+            decoded.PersistenceState,
             corruptProfile);
         store.Replace(NativeFrozenProfileEnvelopeCodec.Encode(rewrapped));
         var coordinator = new NativeProfileCoordinator();
@@ -118,7 +119,7 @@ public sealed class NativeProfileCoordinatorTests
             store);
 
         AssertRejected(preparation, coordinator, "native-profile.selection-mutation");
-        Assert.AreEqual(1, store.WriteCount);
+        Assert.AreEqual(2, store.WriteCount);
     }
 
     [TestMethod]
@@ -208,8 +209,51 @@ public sealed class NativeProfileCoordinatorTests
             store);
 
         AssertRejected(preparation, coordinator, "native-profile.store-reread");
-        Assert.AreEqual(1, store.WriteCount);
+        Assert.AreEqual(2, store.WriteCount, "The second write is the rejected tombstone.");
         Assert.IsNull(coordinator.PublishedProfile);
+
+        store.ReturnDifferentBytesAfterWrite = false;
+        NativeProfileResult<NativeFrozenProfileEnvelope> persisted =
+            NativeFrozenProfileEnvelopeCodec.Decode(store.GetStoredCopy());
+        Assert.IsTrue(persisted.IsSuccess);
+        Assert.AreEqual(NativeProfilePersistenceState.Rejected, persisted.Value!.PersistenceState);
+
+        NativeProfilePreparation reopened = new NativeProfileCoordinator().Prepare(
+            NativeProfileTestSupport.Existing(NativeProfileTestSupport.NewLaboratoryWorld()),
+            NativeProfileTestSupport.NoSelection(),
+            store);
+        Assert.AreEqual(NativeProfileState.Rejected, reopened.State);
+        Assert.AreEqual("native-profile.envelope-rejected", reopened.Error!.Stage);
+    }
+
+    [TestMethod]
+    public void TombstoneWriteFailure_LeavesPendingEnvelopeNonActivatableOnRestart()
+    {
+        var store = new MemoryFrozenProfileStore
+        {
+            ReturnDifferentBytesAfterWrite = true,
+            ThrowOnWriteNumber = 2
+        };
+        var coordinator = new NativeProfileCoordinator();
+
+        NativeProfilePreparation preparation = coordinator.Prepare(
+            NativeProfileTestSupport.NewLaboratoryWorld(),
+            NativeProfileTestSupport.LaboratorySelection(),
+            store);
+
+        AssertRejected(preparation, coordinator, "native-profile.store-reread");
+        store.ReturnDifferentBytesAfterWrite = false;
+        NativeProfileResult<NativeFrozenProfileEnvelope> persisted =
+            NativeFrozenProfileEnvelopeCodec.Decode(store.GetStoredCopy());
+        Assert.IsTrue(persisted.IsSuccess);
+        Assert.AreEqual(NativeProfilePersistenceState.Pending, persisted.Value!.PersistenceState);
+
+        NativeProfilePreparation reopened = new NativeProfileCoordinator().Prepare(
+            NativeProfileTestSupport.Existing(NativeProfileTestSupport.NewLaboratoryWorld()),
+            NativeProfileTestSupport.NoSelection(),
+            store);
+        Assert.AreEqual(NativeProfileState.Rejected, reopened.State);
+        Assert.AreEqual("native-profile.envelope-pending", reopened.Error!.Stage);
     }
 
     [TestMethod]

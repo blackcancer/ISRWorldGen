@@ -17,7 +17,8 @@ internal sealed class NativeProfileCoordinator
         NativeWorldSnapshot world,
         NativeProfileSelection selection,
         IFrozenProfileStore store,
-        Func<NativeWorldSnapshot>? recaptureWorld = null)
+        Func<NativeWorldSnapshot>? recaptureWorld = null,
+        Action? beforeCommit = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(store);
@@ -48,12 +49,29 @@ internal sealed class NativeProfileCoordinator
                 return Reject(
                     GenerationFailureCode.CorruptData,
                     "native-profile.store-read",
-                    $"Frozen profile store could not be read: {exception.Message}");
+                    $"Frozen profile store could not be read ({exception.GetType().Name}).");
             }
 
             return world.IsNew
-                ? PrepareNewWorld(world, selection, store, persisted, recaptureWorld)
+                ? PrepareNewWorld(world, selection, store, persisted, recaptureWorld, beforeCommit)
                 : PrepareExistingWorld(world, selection, persisted, recaptureWorld);
+        }
+    }
+
+    internal NativeProfilePreparation DeactivateUnmarked()
+    {
+        lock (synchronization)
+        {
+            if (state != NativeProfileState.Uninitialized)
+            {
+                return Reject(
+                    GenerationFailureCode.InvalidInput,
+                    "native-profile.prepare-once",
+                    "Native profile preparation may run only once per server instance.");
+            }
+
+            state = NativeProfileState.Inactive;
+            return new NativeProfilePreparation(state, null, null);
         }
     }
 
@@ -81,7 +99,8 @@ internal sealed class NativeProfileCoordinator
         NativeProfileSelection selection,
         IFrozenProfileStore store,
         byte[]? persisted,
-        Func<NativeWorldSnapshot>? recaptureWorld)
+        Func<NativeWorldSnapshot>? recaptureWorld,
+        Action? beforeCommit)
     {
         if (persisted is not null)
         {
@@ -141,18 +160,25 @@ internal sealed class NativeProfileCoordinator
             return Reject(preStoreMutation);
         }
 
-        byte[] encoded;
+        byte[] pending;
         try
         {
-            encoded = NativeFrozenProfileEnvelopeCodec.Encode(world, candidate);
-            store.Write(encoded.AsSpan());
+            pending = NativeFrozenProfileEnvelopeCodec.Encode(
+                world,
+                candidate,
+                NativeProfilePersistenceState.Pending);
+            store.Write(pending.AsSpan());
         }
         catch (Exception exception)
         {
-            return Reject(
+            return RejectAfterWrite(
+                world,
+                candidate,
+                store,
+                new NativeProfileError(
                 GenerationFailureCode.CorruptData,
                 "native-profile.store-write",
-                $"Frozen profile envelope could not be stored: {exception.Message}");
+                $"Pending profile envelope could not be stored ({exception.GetType().Name})."));
         }
 
         byte[]? reread;
@@ -162,30 +188,78 @@ internal sealed class NativeProfileCoordinator
         }
         catch (Exception exception)
         {
-            return Reject(
+            return RejectAfterWrite(
+                world,
+                candidate,
+                store,
+                new NativeProfileError(
                 GenerationFailureCode.CorruptData,
                 "native-profile.store-reread",
-                $"Stored native profile envelope could not be reread: {exception.Message}");
+                $"Pending profile envelope could not be reread ({exception.GetType().Name})."));
         }
 
-        if (reread is null || !encoded.AsSpan().SequenceEqual(reread))
+        if (reread is null || !pending.AsSpan().SequenceEqual(reread))
         {
-            return Reject(
+            return RejectAfterWrite(
+                world,
+                candidate,
+                store,
+                new NativeProfileError(
                 GenerationFailureCode.CorruptData,
                 "native-profile.store-reread",
-                "Stored native profile envelope differs from the bytes written in memory.");
+                "Pending profile envelope differs from the bytes written in memory."));
         }
 
-        NativeProfileResult<FrozenScaleProfile> strictReload = ReloadEnvelope(world, selection, reread);
+        NativeProfileResult<FrozenScaleProfile> strictReload = ReloadEnvelope(
+            world,
+            selection,
+            reread,
+            NativeProfilePersistenceState.Pending);
         if (!strictReload.IsSuccess)
         {
-            return Reject(strictReload.Error!);
+            return RejectAfterWrite(world, candidate, store, strictReload.Error!);
         }
 
         NativeProfileError? postStoreMutation = ValidateRecapturedWorld(world, recaptureWorld);
         if (postStoreMutation is not null)
         {
-            return Reject(postStoreMutation);
+            return RejectAfterWrite(world, candidate, store, postStoreMutation);
+        }
+
+        try
+        {
+            beforeCommit?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            return RejectAfterWrite(
+                world,
+                candidate,
+                store,
+                new NativeProfileError(
+                    GenerationFailureCode.InvalidInput,
+                    "native-profile.worldgen-registration",
+                    $"World generation gate could not be registered ({exception.GetType().Name})."));
+        }
+
+        try
+        {
+            byte[] committed = NativeFrozenProfileEnvelopeCodec.Encode(
+                world,
+                strictReload.Value!,
+                NativeProfilePersistenceState.Committed);
+            store.Write(committed.AsSpan());
+        }
+        catch (Exception exception)
+        {
+            return RejectAfterWrite(
+                world,
+                candidate,
+                store,
+                new NativeProfileError(
+                    GenerationFailureCode.CorruptData,
+                    "native-profile.store-commit",
+                    $"Committed profile envelope could not be stored ({exception.GetType().Name})."));
         }
 
         return Publish(strictReload.Value!);
@@ -211,7 +285,11 @@ internal sealed class NativeProfileCoordinator
             return new NativeProfilePreparation(state, null, null);
         }
 
-        NativeProfileResult<FrozenScaleProfile> reload = ReloadEnvelope(world, selection, persisted);
+        NativeProfileResult<FrozenScaleProfile> reload = ReloadEnvelope(
+            world,
+            selection,
+            persisted,
+            NativeProfilePersistenceState.Committed);
         if (!reload.IsSuccess)
         {
             return Reject(reload.Error!);
@@ -229,7 +307,8 @@ internal sealed class NativeProfileCoordinator
     private static NativeProfileResult<FrozenScaleProfile> ReloadEnvelope(
         NativeWorldSnapshot world,
         NativeProfileSelection selection,
-        ReadOnlySpan<byte> persisted)
+        ReadOnlySpan<byte> persisted,
+        NativeProfilePersistenceState requiredPersistenceState)
     {
         NativeProfileResult<NativeFrozenProfileEnvelope> decoded = NativeFrozenProfileEnvelopeCodec.Decode(persisted);
         if (!decoded.IsSuccess)
@@ -241,6 +320,20 @@ internal sealed class NativeProfileCoordinator
         }
 
         NativeFrozenProfileEnvelope envelope = decoded.Value!;
+        if (envelope.PersistenceState != requiredPersistenceState)
+        {
+            string stage = envelope.PersistenceState switch
+            {
+                NativeProfilePersistenceState.Pending => "native-profile.envelope-pending",
+                NativeProfilePersistenceState.Rejected => "native-profile.envelope-rejected",
+                _ => "native-profile.envelope-state"
+            };
+            return NativeProfileResult<FrozenScaleProfile>.Failure(
+                GenerationFailureCode.CorruptData,
+                stage,
+                $"Profile envelope state {envelope.PersistenceState} cannot activate this world.");
+        }
+
         if (!EnvelopeMatchesWorld(envelope, world))
         {
             return NativeProfileResult<FrozenScaleProfile>.Failure(
@@ -307,6 +400,33 @@ internal sealed class NativeProfileCoordinator
         return new NativeProfilePreparation(state, profile, null);
     }
 
+    private NativeProfilePreparation RejectAfterWrite(
+        NativeWorldSnapshot world,
+        FrozenScaleProfile candidate,
+        IFrozenProfileStore store,
+        NativeProfileError error)
+    {
+        string tombstoneStatus;
+        try
+        {
+            byte[] tombstone = NativeFrozenProfileEnvelopeCodec.Encode(
+                world,
+                candidate,
+                NativeProfilePersistenceState.Rejected);
+            store.Write(tombstone.AsSpan());
+            byte[]? reread = store.Read()?.ToArray();
+            tombstoneStatus = reread is not null && tombstone.AsSpan().SequenceEqual(reread)
+                ? "Rejected tombstone persisted and reread."
+                : "Rejected tombstone write returned but its readback could not be verified.";
+        }
+        catch (Exception exception)
+        {
+            tombstoneStatus = $"Rejected tombstone persistence failed ({exception.GetType().Name}); residual Pending state remains non-activatable unless the store violated atomic replacement.";
+        }
+
+        return Reject(error with { Details = $"{error.Details} {tombstoneStatus}" });
+    }
+
     private NativeProfilePreparation Reject(GenerationError error) => Reject(
         new NativeProfileError(error.Code, error.Stage, error.Details));
 
@@ -368,7 +488,7 @@ internal sealed class NativeProfileCoordinator
             return NativeProfileResult<NativeWorldConstraints>.Failure(
                 GenerationFailureCode.InvalidInput,
                 "native-profile.native-world",
-                $"Native constraints could not be constructed: {exception.Message}");
+                $"Native constraints could not be constructed ({exception.GetType().Name}).");
         }
     }
 
@@ -409,7 +529,7 @@ internal sealed class NativeProfileCoordinator
             return new NativeProfileError(
                 GenerationFailureCode.InvalidInput,
                 "native-profile.world-mutation",
-                $"Effective native world could not be recaptured: {exception.Message}");
+                $"Effective native world could not be recaptured ({exception.GetType().Name}).");
         }
 
         return SameWorldBinding(expected, actual)

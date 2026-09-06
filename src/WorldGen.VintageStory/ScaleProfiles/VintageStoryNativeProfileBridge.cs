@@ -19,9 +19,9 @@ internal interface INativeProfileHost
 
     void LogFrozen(NativeWorldSnapshot world, string profileId);
 
-    void LogInactive(NativeWorldSnapshot world);
+    void LogInactive();
 
-    void LogRejected(NativeProfileError error);
+    void LogRejected(NativeProfileError error, NativeWorldSnapshot? world);
 
     void LogFrozenGate(string profileId);
 
@@ -32,6 +32,7 @@ internal sealed class VintageStoryNativeProfileBridge
 {
     private readonly INativeProfileHost host;
     private readonly NativeProfileCoordinator coordinator = new();
+    private NativeWorldSnapshot? capturedWorld;
 
     internal VintageStoryNativeProfileBridge(INativeProfileHost host) =>
         this.host = host ?? throw new ArgumentNullException(nameof(host));
@@ -46,23 +47,33 @@ internal sealed class VintageStoryNativeProfileBridge
     {
         try
         {
+            NativeProfileSelection selection = host.ReadSelection();
+            IFrozenProfileStore store = host.CreateStore();
+            if (!selection.IsSpecified && store.Read() is null)
+            {
+                LastPreparation = coordinator.DeactivateUnmarked();
+                TryLogInactive();
+                return;
+            }
+
             NativeWorldSnapshot world = host.CaptureWorld();
+            capturedWorld = world;
             NativeProfilePreparation preparation = coordinator.Prepare(
                 world,
-                host.ReadSelection(),
-                host.CreateStore(),
-                host.CaptureWorld);
+                selection,
+                store,
+                host.CaptureWorld,
+                () => host.RegisterWorldgenGate(OnWorldgenGate));
             LastPreparation = preparation;
             if (preparation.State == NativeProfileState.Frozen)
             {
-                host.LogFrozen(world, preparation.Profile!.Id);
-                host.RegisterWorldgenGate(OnWorldgenGate);
+                TryLogFrozen(world, preparation.Profile!.Id);
                 return;
             }
 
             if (preparation.State == NativeProfileState.Inactive)
             {
-                host.LogInactive(world);
+                TryLogInactive();
                 return;
             }
 
@@ -84,7 +95,16 @@ internal sealed class VintageStoryNativeProfileBridge
         NativeWorldgenGateObservation gate = coordinator.ObserveWorldgenGate();
         if (gate.CanGenerate)
         {
-            host.LogFrozenGate(gate.ProfileId!);
+            try
+            {
+                host.LogFrozenGate(gate.ProfileId!);
+            }
+            catch (Exception)
+            {
+                // Logging cannot be allowed to turn a successfully frozen gate into
+                // an exception swallowed by Vintage Story's worldgen dispatcher.
+            }
+
             return;
         }
 
@@ -98,11 +118,37 @@ internal sealed class VintageStoryNativeProfileBridge
     {
         try
         {
-            host.LogRejected(error);
+            host.LogRejected(error, capturedWorld);
         }
         finally
         {
             host.ShutDown();
+        }
+    }
+
+    private void TryLogFrozen(NativeWorldSnapshot world, string profileId)
+    {
+        try
+        {
+            host.LogFrozen(world, profileId);
+        }
+        catch (Exception)
+        {
+            // The committed profile and registered gate are authoritative. A
+            // logger failure must not convert them into a persisted rejection.
+        }
+    }
+
+    private void TryLogInactive()
+    {
+        try
+        {
+            host.LogInactive();
+        }
+        catch (Exception)
+        {
+            // A non-participating world remains non-participating even if its
+            // informational log sink is unavailable.
         }
     }
 }
@@ -177,20 +223,40 @@ internal sealed class VintageStoryNativeProfileHost : INativeProfileHost
         world.NativeRuleSetId,
         world.NativeRuleSetVersion);
 
-    public void LogInactive(NativeWorldSnapshot world) => logger.Notification(
-        "L02C_NATIVE_PROFILE_INACTIVE save={0} reason=no-explicit-selection",
-        world.SavegameIdentifier);
+    public void LogInactive() => logger.Notification(
+        "L02C_NATIVE_PROFILE_INACTIVE reason=no-explicit-selection-and-no-envelope");
 
-    public void LogRejected(NativeProfileError error) => logger.Error(
-        "L02C_NATIVE_PROFILE_REJECTED code={0} stage={1}",
+    public void LogRejected(NativeProfileError error, NativeWorldSnapshot? world) => logger.Error(
+        "L02C_NATIVE_PROFILE_REJECTED code={0} stage={1} details={2} dimensions={3} chunk={4} rules={5}",
         error.Code,
-        error.Stage);
+        error.Stage,
+        SanitizeDiagnosticDetail(error.Details),
+        world is null ? "unavailable" : $"{world.MapSizeX}x{world.MapSizeY}x{world.MapSizeZ}",
+        world?.ChunkSize.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unavailable",
+        world is null ? "unavailable" : $"{world.NativeRuleSetId}:{world.NativeRuleSetVersion}");
 
     public void LogFrozenGate(string profileId) => logger.Notification(
         "L02C_NATIVE_GATE_FROZEN profile={0}",
         profileId);
 
     public void ShutDown() => api.Server.ShutDown();
+
+    internal static string SanitizeDiagnosticDetail(string details)
+    {
+        const int maximumLength = 256;
+        int length = Math.Min(details.Length, maximumLength);
+        char[] sanitized = new char[length];
+        for (int index = 0; index < length; index++)
+        {
+            char character = details[index];
+            sanitized[index] = char.IsLetterOrDigit(character) ||
+                character is ' ' or '.' or ',' or '_' or '-' or '=' or '(' or ')' or '[' or ']'
+                ? character
+                : '_';
+        }
+
+        return new string(sanitized);
+    }
 }
 
 internal sealed class VintageStoryFrozenProfileStore : IFrozenProfileStore

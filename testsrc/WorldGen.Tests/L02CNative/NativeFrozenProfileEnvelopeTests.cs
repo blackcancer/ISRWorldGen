@@ -27,6 +27,7 @@ public sealed class NativeFrozenProfileEnvelopeTests
         Assert.AreEqual(profile.GeographyConfigHash, decoded.Value.GeographyConfigHash);
         Assert.AreEqual(NativeFrozenProfileEnvelopeCodec.FrozenProfileCodecId, decoded.Value.ProfileCodecId);
         Assert.AreEqual(NativeFrozenProfileEnvelopeCodec.FrozenProfileCodecVersion, decoded.Value.ProfileCodecVersion);
+        Assert.AreEqual(NativeProfilePersistenceState.Committed, decoded.Value.PersistenceState);
         CollectionAssert.AreEqual(profileBytes, decoded.Value.GetProfileBytesCopy());
         CollectionAssert.AreEqual(first, NativeFrozenProfileEnvelopeCodec.Encode(decoded.Value));
     }
