@@ -1,0 +1,135 @@
+[CmdletBinding()]
+param(
+    [string]$GamePath = 'D:\Jeux\Vintagestory',
+    [string]$OutputPath
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$apiPath = Join-Path $GamePath 'VintagestoryAPI.dll'
+$essentialsPath = Join-Path $GamePath 'Mods\VSEssentials.dll'
+
+foreach ($path in @($apiPath, $essentialsPath)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Required local assembly is missing: $path"
+    }
+}
+
+$api = [Reflection.Assembly]::LoadFrom($apiPath)
+$essentials = [Reflection.Assembly]::LoadFrom($essentialsPath)
+
+function Require-Type {
+    param([Reflection.Assembly]$Assembly, [string]$Name)
+
+    $type = $Assembly.GetType($Name, $false)
+    if ($null -eq $type) {
+        throw "Required type is missing: $Name"
+    }
+
+    return $type
+}
+
+function Require-Method {
+    param([Type]$Type, [string]$Name, [string[]]$ParameterTypeNames)
+
+    $method = $Type.GetMethods() | Where-Object {
+        if ($_.Name -ne $Name) { return $false }
+        $actual = @($_.GetParameters() | ForEach-Object { $_.ParameterType.FullName })
+        return ([string]::Join('|', $actual) -eq [string]::Join('|', $ParameterTypeNames))
+    } | Select-Object -First 1
+
+    if ($null -eq $method) {
+        throw "Required method signature is missing: $($Type.FullName).$Name($([string]::Join(', ', $ParameterTypeNames)))"
+    }
+
+    return $method
+}
+
+$eventApi = Require-Type $api 'Vintagestory.API.Server.IServerEventAPI'
+$handler = Require-Type $api 'Vintagestory.API.Server.IWorldGenHandler'
+$request = Require-Type $api 'Vintagestory.API.Server.IChunkColumnGenerateRequest'
+$chunkBlocks = Require-Type $api 'Vintagestory.API.Common.IChunkBlocks'
+$mapChunk = Require-Type $api 'Vintagestory.API.Common.IMapChunk'
+$saveGame = Require-Type $api 'Vintagestory.API.Server.ISaveGame'
+$server = Require-Type $api 'Vintagestory.API.Server.IServerAPI'
+$passType = Require-Type $api 'Vintagestory.API.Server.EnumWorldGenPass'
+
+[void](Require-Method $eventApi 'GetRegisteredWorldGenHandlers' @('System.String'))
+[void](Require-Method $eventApi 'InitWorldGenerator' @('System.Action', 'System.String'))
+[void](Require-Method $eventApi 'ChunkColumnGeneration' @(
+    'Vintagestory.API.Common.ChunkColumnGenerationDelegate',
+    'Vintagestory.API.Server.EnumWorldGenPass',
+    'System.String'
+))
+[void](Require-Method $chunkBlocks 'SetBlockUnsafe' @('System.Int32', 'System.Int32'))
+[void](Require-Method $chunkBlocks 'SetFluid' @('System.Int32', 'System.Int32'))
+[void](Require-Method $saveGame 'GetData' @('System.String'))
+[void](Require-Method $saveGame 'StoreData' @('System.String', 'System.Byte[]'))
+[void](Require-Method $server 'ShutDown' @())
+
+$chunkHandlerProperty = $handler.GetProperty('OnChunkColumnGen')
+if ($null -eq $chunkHandlerProperty -or -not $chunkHandlerProperty.PropertyType.IsArray) {
+    throw 'IWorldGenHandler.OnChunkColumnGen must be an array of mutable handler lists.'
+}
+
+$elementType = $chunkHandlerProperty.PropertyType.GetElementType()
+if (-not $elementType.IsGenericType -or $elementType.GetGenericTypeDefinition().FullName -ne 'System.Collections.Generic.List`1') {
+    throw "Unexpected OnChunkColumnGen element type: $($elementType.FullName)"
+}
+
+$requiredRequestProperties = @('Chunks', 'ChunkX', 'ChunkZ')
+$missingRequestProperties = @($requiredRequestProperties | Where-Object { $null -eq $request.GetProperty($_) })
+if ($missingRequestProperties.Count -ne 0) {
+    throw "Missing request properties: $([string]::Join(', ', $missingRequestProperties))"
+}
+
+$requiredMapProperties = @('WorldGenTerrainHeightMap', 'RainHeightMap', 'TopRockIdMap', 'YMax')
+$missingMapProperties = @($requiredMapProperties | Where-Object { $null -eq $mapChunk.GetProperty($_) })
+if ($missingMapProperties.Count -ne 0) {
+    throw "Missing map properties: $([string]::Join(', ', $missingMapProperties))"
+}
+
+$terrainValue = [int][Enum]::Parse($passType, 'Terrain')
+if ($terrainValue -ne 1) {
+    throw "EnumWorldGenPass.Terrain expected 1 but was $terrainValue."
+}
+
+$requiredNativeTypes = @(
+    'Vintagestory.ServerMods.GenTerra',
+    'Vintagestory.ServerMods.GenRockStrataNew',
+    'Vintagestory.ServerMods.GenCaves'
+)
+
+$nativeTypeStatus = [ordered]@{}
+foreach ($name in $requiredNativeTypes) {
+    $nativeTypeStatus[$name] = ($null -ne $essentials.GetType($name, $false))
+    if (-not $nativeTypeStatus[$name]) {
+        throw "Expected native generator type is missing: $name"
+    }
+}
+
+$result = [ordered]@{
+    TestId = 'T00-04-API-AUDIT'
+    Status = 'PASS'
+    Utc = [DateTime]::UtcNow.ToString('o')
+    ApiAssemblyVersion = $api.GetName().Version.ToString()
+    ApiSha256 = (Get-FileHash -LiteralPath $apiPath -Algorithm SHA256).Hash
+    EssentialsSha256 = (Get-FileHash -LiteralPath $essentialsPath -Algorithm SHA256).Hash
+    TerrainPassValue = $terrainValue
+    HandlerListType = $chunkHandlerProperty.PropertyType.FullName
+    RequestProperties = $requiredRequestProperties
+    MapProperties = $requiredMapProperties
+    NativeTypes = $nativeTypeStatus
+}
+
+$json = $result | ConvertTo-Json -Depth 5
+if ($OutputPath) {
+    $directory = Split-Path -Parent $OutputPath
+    if ($directory -and -not (Test-Path -LiteralPath $directory)) {
+        [void](New-Item -ItemType Directory -Path $directory -Force)
+    }
+    Set-Content -LiteralPath $OutputPath -Value $json -Encoding UTF8
+}
+
+$json
