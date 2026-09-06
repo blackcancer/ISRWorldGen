@@ -29,6 +29,7 @@ public static class AtlasSpatialIndexBuilder
             identity,
             profile,
             primitives,
+            options,
             enforceBuildBudgetFloor: true);
         if (preflightResult is GenerationFailure<AtlasPreCapturePlan> preflightFailure)
         {

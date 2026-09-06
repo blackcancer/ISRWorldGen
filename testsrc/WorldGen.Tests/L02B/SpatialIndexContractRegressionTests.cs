@@ -292,6 +292,77 @@ public sealed class SpatialIndexContractRegressionTests
 
     [TestMethod]
     [DoNotParallelize]
+    public void FiftyThousandPrecomputedSites_WithLongMaxBudgetFailsTypedBeforeGeometryAllocation()
+    {
+        AtlasIndexProfile profile = SpatialIndexTestSupport.VastProfile(
+            memoryBudgetBytes: long.MaxValue,
+            requestedSites: 50_000,
+            siteQuota: 50_000);
+        var input = new OversizedReportedCountPrimitiveList(0);
+        var options = new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Precomputed);
+
+        long estimateBefore = GC.GetAllocatedBytesForCurrentThread();
+        GenerationResult<AtlasMemoryEstimate> estimateResult = AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), profile, input, options);
+        long estimateAllocation = GC.GetAllocatedBytesForCurrentThread() - estimateBefore;
+        long buildBefore = GC.GetAllocatedBytesForCurrentThread();
+        GenerationResult<AtlasIndexBuildOutcome> buildResult = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, input, options);
+        long buildAllocation = GC.GetAllocatedBytesForCurrentThread() - buildBefore;
+
+        AssertArrayCapacityFailure(estimateResult);
+        AssertArrayCapacityFailure(buildResult);
+        Assert.AreEqual(0, input.EnumerationCount);
+        Assert.IsLessThan(64 * 1024L, estimateAllocation);
+        Assert.IsLessThan(64 * 1024L, buildAllocation);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void FiftyThousandColdSites_WithLongMaxBudgetFailsTypedBeforeQuadraticWork()
+    {
+        AtlasIndexProfile profile = SpatialIndexTestSupport.VastProfile(
+            memoryBudgetBytes: long.MaxValue,
+            requestedSites: 50_000,
+            siteQuota: 50_000);
+        var input = new OversizedReportedCountPrimitiveList(0);
+        var options = new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold);
+
+        AssertGeometryWorkCapacityFailure(AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), profile, input, options));
+        AssertGeometryWorkCapacityFailure(AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, input, options));
+        Assert.AreEqual(0, input.EnumerationCount);
+    }
+
+    [TestMethod]
+    public void GeometryCacheMode_ChangesPlanButNotCanonicalContent()
+    {
+        AtlasIndexProfile profile = SpatialIndexTestSupport.VastProfile();
+        SpatialPrimitiveDefinition[] primitives = SpatialIndexTestSupport.CrossTileFixtures();
+        var coldOptions = new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold);
+        var precomputedOptions = new SpatialIndexBuildOptions(2, SpatialIndexCacheMode.Precomputed);
+
+        AtlasMemoryEstimate coldEstimate = ((GenerationSuccess<AtlasMemoryEstimate>)AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), profile, primitives, coldOptions)).Snapshot;
+        AtlasMemoryEstimate precomputedEstimate =
+            ((GenerationSuccess<AtlasMemoryEstimate>)AtlasSpatialIndexPlanner.Estimate(
+                SpatialIndexTestSupport.Identity(), profile, primitives, precomputedOptions)).Snapshot;
+        AtlasIndexBuildOutcome cold = SpatialIndexTestSupport.Success(AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, primitives, coldOptions));
+        AtlasIndexBuildOutcome precomputed = SpatialIndexTestSupport.Success(AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, primitives, precomputedOptions));
+
+        Assert.AreEqual(0, coldEstimate.EstimatedGeometryCacheBytes);
+        Assert.IsGreaterThan(0, precomputedEstimate.EstimatedGeometryCacheBytes);
+        Assert.AreEqual(
+            coldEstimate.EstimatedPeakBuildBytes + precomputedEstimate.EstimatedGeometryCacheBytes,
+            precomputedEstimate.EstimatedPeakBuildBytes);
+        Assert.AreEqual(cold.Snapshot.Header.ContentChecksum, precomputed.Snapshot.Header.ContentChecksum);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
     public void FiveHundredThousandPrimitives_With24MiBBudgetAvoidPerIdAllocationBeforeRefusal()
     {
         SpatialPrimitiveDefinition[] primitives = SpatialIndexTestSupport.ManyPrimitiveFixtures();
@@ -353,6 +424,15 @@ public sealed class SpatialIndexContractRegressionTests
         GenerationError error = ((GenerationFailure<T>)result).Error;
         Assert.AreEqual(GenerationFailureCode.BudgetExceeded, error.Code);
         Assert.AreEqual("atlas.spatial-index.index-capacity", error.Stage);
+    }
+
+    private static void AssertGeometryWorkCapacityFailure<T>(GenerationResult<T> result)
+        where T : class
+    {
+        Assert.IsInstanceOfType<GenerationFailure<T>>(result);
+        GenerationError error = ((GenerationFailure<T>)result).Error;
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, error.Code);
+        Assert.AreEqual("atlas.spatial-index.geometry-work-capacity", error.Stage);
     }
 
     private static void AssertDimensionFailure(GenerationResult<AtlasIndexBuildOutcome> result)

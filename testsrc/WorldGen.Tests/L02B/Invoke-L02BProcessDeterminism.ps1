@@ -90,6 +90,10 @@ try {
             manyPrimitiveBuildAllocatedBytes = $allocationReport.manyPrimitiveBuildAllocatedBytes
             maximumPrimitiveEstimateAllocatedBytes = $allocationReport.maximumPrimitiveEstimateAllocatedBytes
             maximumPrimitiveBuildAllocatedBytes = $allocationReport.maximumPrimitiveBuildAllocatedBytes
+            precomputedGeometryEstimateAllocatedBytes = $allocationReport.precomputedGeometryEstimateAllocatedBytes
+            precomputedGeometryBuildAllocatedBytes = $allocationReport.precomputedGeometryBuildAllocatedBytes
+            coldGeometryEstimateAllocatedBytes = $allocationReport.coldGeometryEstimateAllocatedBytes
+            coldGeometryBuildAllocatedBytes = $allocationReport.coldGeometryBuildAllocatedBytes
         }
     }
 }
@@ -109,7 +113,11 @@ $sameQualification =
 $samePlan =
     $reports[0].estimatedCanonicalCaptureBytes -eq $reports[1].estimatedCanonicalCaptureBytes -and
     $reports[0].estimatedSnapshotBytes -eq $reports[1].estimatedSnapshotBytes -and
-    $reports[0].estimatedPeakBuildBytes -eq $reports[1].estimatedPeakBuildBytes
+    $reports[0].estimatedPeakBuildBytes -eq $reports[1].estimatedPeakBuildBytes -and
+    $reports[0].estimatedGeometryCacheBytes -eq 0 -and
+    $reports[1].estimatedGeometryCacheBytes -eq 0 -and
+    $reports[0].parallelEstimatedGeometryCacheBytes -gt 0 -and
+    $reports[0].parallelEstimatedGeometryCacheBytes -eq $reports[1].parallelEstimatedGeometryCacheBytes
 $sameSnapshot = $reports[0].contentHash -eq $reports[1].contentHash
 $sameParallelSnapshot = $reports[0].parallelContentHash -eq $reports[1].parallelContentHash
 $sameOwnershipSnapshot =
@@ -198,6 +206,36 @@ $isolatedAllocation =
     $allocationReports[1].maximumPrimitiveBuildFailureStage -eq "atlas.spatial-index.array-capacity" -and
     $allocationReports[0].maximumPrimitiveEnumerationCount -eq 0 -and
     $allocationReports[1].maximumPrimitiveEnumerationCount -eq 0 -and
+    $allocationReports[0].geometryCapacitySiteCount -eq 50000 -and
+    $allocationReports[1].geometryCapacitySiteCount -eq 50000 -and
+    $allocationReports[0].geometryCapacityMemoryBudgetBytes -eq [long]::MaxValue -and
+    $allocationReports[1].geometryCapacityMemoryBudgetBytes -eq [long]::MaxValue -and
+    $allocationReports[0].precomputedGeometryEstimateAllocatedBytes -lt 65536 -and
+    $allocationReports[1].precomputedGeometryEstimateAllocatedBytes -lt 65536 -and
+    $allocationReports[0].precomputedGeometryBuildAllocatedBytes -lt 65536 -and
+    $allocationReports[1].precomputedGeometryBuildAllocatedBytes -lt 65536 -and
+    $allocationReports[0].coldGeometryEstimateAllocatedBytes -lt 65536 -and
+    $allocationReports[1].coldGeometryEstimateAllocatedBytes -lt 65536 -and
+    $allocationReports[0].coldGeometryBuildAllocatedBytes -lt 65536 -and
+    $allocationReports[1].coldGeometryBuildAllocatedBytes -lt 65536 -and
+    $allocationReports[0].precomputedGeometryEstimateFailureCode -eq "InvalidInput" -and
+    $allocationReports[1].precomputedGeometryEstimateFailureCode -eq "InvalidInput" -and
+    $allocationReports[0].precomputedGeometryBuildFailureCode -eq "InvalidInput" -and
+    $allocationReports[1].precomputedGeometryBuildFailureCode -eq "InvalidInput" -and
+    $allocationReports[0].precomputedGeometryEstimateFailureStage -eq "atlas.spatial-index.array-capacity" -and
+    $allocationReports[1].precomputedGeometryEstimateFailureStage -eq "atlas.spatial-index.array-capacity" -and
+    $allocationReports[0].precomputedGeometryBuildFailureStage -eq "atlas.spatial-index.array-capacity" -and
+    $allocationReports[1].precomputedGeometryBuildFailureStage -eq "atlas.spatial-index.array-capacity" -and
+    $allocationReports[0].coldGeometryEstimateFailureCode -eq "BudgetExceeded" -and
+    $allocationReports[1].coldGeometryEstimateFailureCode -eq "BudgetExceeded" -and
+    $allocationReports[0].coldGeometryBuildFailureCode -eq "BudgetExceeded" -and
+    $allocationReports[1].coldGeometryBuildFailureCode -eq "BudgetExceeded" -and
+    $allocationReports[0].coldGeometryEstimateFailureStage -eq "atlas.spatial-index.geometry-work-capacity" -and
+    $allocationReports[1].coldGeometryEstimateFailureStage -eq "atlas.spatial-index.geometry-work-capacity" -and
+    $allocationReports[0].coldGeometryBuildFailureStage -eq "atlas.spatial-index.geometry-work-capacity" -and
+    $allocationReports[1].coldGeometryBuildFailureStage -eq "atlas.spatial-index.geometry-work-capacity" -and
+    $allocationReports[0].geometryCapacityEnumerationCount -eq 0 -and
+    $allocationReports[1].geometryCapacityEnumerationCount -eq 0 -and
     -not $allocationReports[0].rejectedDenseSnapshotVisible -and
     -not $allocationReports[1].rejectedDenseSnapshotVisible -and
     -not $allocationReports[0].largeInputSnapshotVisible -and
@@ -205,7 +243,9 @@ $isolatedAllocation =
     -not $allocationReports[0].manyPrimitiveSnapshotVisible -and
     -not $allocationReports[1].manyPrimitiveSnapshotVisible -and
     -not $allocationReports[0].maximumPrimitiveSnapshotVisible -and
-    -not $allocationReports[1].maximumPrimitiveSnapshotVisible
+    -not $allocationReports[1].maximumPrimitiveSnapshotVisible -and
+    -not $allocationReports[0].geometryCapacitySnapshotVisible -and
+    -not $allocationReports[1].geometryCapacitySnapshotVisible
 $processIds = @(
     $reports[0].processId,
     $reports[1].processId,
@@ -279,6 +319,26 @@ $summary = [pscustomobject][ordered]@{
         minimumBytes = ($allocationReports.maximumPrimitiveBuildAllocatedBytes | Measure-Object -Minimum).Minimum
         maximumBytes = ($allocationReports.maximumPrimitiveBuildAllocatedBytes | Measure-Object -Maximum).Maximum
         scope = "reported Count=int.MaxValue; budget=long.MaxValue; Build structural refusal before enumeration"
+    }
+    precomputedGeometryEstimateAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.precomputedGeometryEstimateAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.precomputedGeometryEstimateAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "50,000 sites; budget=long.MaxValue; Precomputed Estimate refusal before primitive enumeration"
+    }
+    precomputedGeometryBuildAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.precomputedGeometryBuildAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.precomputedGeometryBuildAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "50,000 sites; budget=long.MaxValue; Precomputed Build refusal before site generation"
+    }
+    coldGeometryEstimateAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.coldGeometryEstimateAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.coldGeometryEstimateAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "50,000 sites; budget=long.MaxValue; Cold Estimate work-capacity refusal"
+    }
+    coldGeometryBuildAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.coldGeometryBuildAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.coldGeometryBuildAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "50,000 sites; budget=long.MaxValue; Cold Build refusal before quadratic work"
     }
     runs = $runs
 }

@@ -21,6 +21,7 @@ public sealed class AtlasMemoryEstimate
         long estimatedCompactGraphBytes,
         long estimatedSpatialIndexBytes,
         long estimatedGeometryWorkingBytes,
+        long estimatedGeometryCacheBytes,
         long estimatedSnapshotBytes,
         long estimatedPeakBuildBytes)
     {
@@ -35,6 +36,7 @@ public sealed class AtlasMemoryEstimate
         EstimatedCompactGraphBytes = estimatedCompactGraphBytes;
         EstimatedSpatialIndexBytes = estimatedSpatialIndexBytes;
         EstimatedGeometryWorkingBytes = estimatedGeometryWorkingBytes;
+        EstimatedGeometryCacheBytes = estimatedGeometryCacheBytes;
         EstimatedSnapshotBytes = estimatedSnapshotBytes;
         EstimatedPeakBuildBytes = estimatedPeakBuildBytes;
     }
@@ -61,6 +63,9 @@ public sealed class AtlasMemoryEstimate
 
     public long EstimatedGeometryWorkingBytes { get; }
 
+    /// <summary>Conservative additional storage for the selected geometry cache mode; zero for cold mode.</summary>
+    public long EstimatedGeometryCacheBytes { get; }
+
     public long EstimatedSnapshotBytes { get; }
 
     public long EstimatedPeakBuildBytes { get; }
@@ -76,20 +81,31 @@ public static class AtlasSpatialIndexPlanner
     // conservative for the qualified 64-bit coordinate profile; observed allocation remains reported separately.
     private const long GeometryWorkingBytesPerSitePair = 65_536;
     private const long GeometryFixedWorkingBytes = 16_777_216;
+    private const long RectangularArrayHeaderReserveBytes = 64;
+    private const long EstimatedHalfPlaneBytes = 64;
 
     public static GenerationResult<AtlasMemoryEstimate> Estimate(
         GenerationIdentity identity,
         AtlasIndexProfile profile,
-        IReadOnlyList<SpatialPrimitiveDefinition> primitives)
+        IReadOnlyList<SpatialPrimitiveDefinition> primitives) =>
+        Estimate(identity, profile, primitives, SpatialIndexBuildOptions.Default);
+
+    public static GenerationResult<AtlasMemoryEstimate> Estimate(
+        GenerationIdentity identity,
+        AtlasIndexProfile profile,
+        IReadOnlyList<SpatialPrimitiveDefinition> primitives,
+        SpatialIndexBuildOptions options)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(primitives);
+        ArgumentNullException.ThrowIfNull(options);
 
         GenerationResult<AtlasPreCapturePlan> preflightResult = Preflight(
             identity,
             profile,
             primitives,
+            options,
             enforceBuildBudgetFloor: false);
         if (preflightResult is GenerationFailure<AtlasPreCapturePlan> preflightFailure)
         {
@@ -204,12 +220,14 @@ public static class AtlasSpatialIndexPlanner
                 ArrayBytes(placementCount, 4));
             long geometryWorkingBytes = checked(
                 GeometryFixedWorkingBytes +
-                checked(GeometryWorkingBytesPerSitePair * checked((long)siteCount * siteCount)));
+                checked(GeometryWorkingBytesPerSitePair * preflight.GeometryPairCount));
+            long geometryCacheBytes = preflight.EstimatedGeometryCacheBytes;
             long snapshotBytes = checked(compactGraphBytes + spatialIndexBytes);
             long siteGenerationWorkingBytes = checked(65_536 + (SiteGenerationWorkingBytesPerSite * siteCount));
             long peakBuildBytes = checked(
                 snapshotBytes +
                 geometryWorkingBytes +
+                geometryCacheBytes +
                 siteGenerationWorkingBytes +
                 preflight.EstimatedCanonicalCaptureBytes);
             return GenerationResult<AtlasMemoryEstimate>.Success(new AtlasMemoryEstimate(
@@ -224,6 +242,7 @@ public static class AtlasSpatialIndexPlanner
                 compactGraphBytes,
                 spatialIndexBytes,
                 geometryWorkingBytes,
+                geometryCacheBytes,
                 snapshotBytes,
                 peakBuildBytes));
         }
@@ -241,6 +260,7 @@ public static class AtlasSpatialIndexPlanner
         GenerationIdentity identity,
         AtlasIndexProfile profile,
         IReadOnlyList<SpatialPrimitiveDefinition> primitives,
+        SpatialIndexBuildOptions options,
         bool enforceBuildBudgetFloor)
     {
         GenerationResult<ValidatedAtlasDimensions> dimensionsResult = ValidateDimensions(identity, profile);
@@ -275,6 +295,39 @@ public static class AtlasSpatialIndexPlanner
                 GenerationFailureCode.InvalidInput,
                 "atlas.spatial-index.array-capacity",
                 $"Requested site topology exceeds CLR array capacity {Array.MaxLength}: sites={siteCount}, edges={maximumEdges}, neighbor references={maximumNeighborReferences}.");
+        }
+
+        BigInteger geometryPairCount = (BigInteger)siteCount * siteCount;
+        if (options.CacheMode == SpatialIndexCacheMode.Precomputed && geometryPairCount > Array.MaxLength)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.InvalidInput,
+                "atlas.spatial-index.array-capacity",
+                $"Precomputed geometry cache requires a {siteCount} x {siteCount} rectangular array ({geometryPairCount} elements), exceeding CLR array capacity {Array.MaxLength}.");
+        }
+
+        if (options.CacheMode == SpatialIndexCacheMode.Cold && geometryPairCount > Array.MaxLength)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.spatial-index.geometry-work-capacity",
+                $"Cold exact geometry requires {geometryPairCount} ordered site-pair evaluations, exceeding deterministic work capacity {Array.MaxLength}.");
+        }
+
+        BigInteger geometryWorkingBytes =
+            GeometryFixedWorkingBytes + ((BigInteger)GeometryWorkingBytesPerSitePair * geometryPairCount);
+        BigInteger geometryCacheBytes = options.CacheMode == SpatialIndexCacheMode.Precomputed
+            ? RectangularArrayHeaderReserveBytes + ((BigInteger)EstimatedHalfPlaneBytes * geometryPairCount)
+            : BigInteger.Zero;
+        if (geometryWorkingBytes > long.MaxValue || geometryCacheBytes > long.MaxValue)
+        {
+            return Failure<AtlasPreCapturePlan>(
+                identity,
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.spatial-index.geometry-work-capacity",
+                $"Geometry plan cannot be represented in signed 64-bit bytes: work={geometryWorkingBytes}, cache={geometryCacheBytes}.");
         }
 
         int primitiveCount;
@@ -323,8 +376,8 @@ public static class AtlasSpatialIndexPlanner
         }
 
         BigInteger minimumWorkingBytes =
-            GeometryFixedWorkingBytes +
-            ((BigInteger)GeometryWorkingBytesPerSitePair * siteCount * siteCount) +
+            geometryWorkingBytes +
+            geometryCacheBytes +
             65_536 +
             ((BigInteger)SiteGenerationWorkingBytesPerSite * siteCount) +
             captureBytes +
@@ -341,7 +394,9 @@ public static class AtlasSpatialIndexPlanner
         return GenerationResult<AtlasPreCapturePlan>.Success(new AtlasPreCapturePlan(
             ((GenerationSuccess<ValidatedAtlasDimensions>)dimensionsResult).Snapshot,
             primitiveCount,
-            checked((long)captureBytes)));
+            checked((long)captureBytes),
+            checked((long)geometryPairCount),
+            checked((long)geometryCacheBytes)));
     }
 
     private static GenerationResult<ValidatedAtlasDimensions> ValidateDimensions(
@@ -480,7 +535,9 @@ internal sealed class CanonicalPrimitiveSet
 internal sealed record AtlasPreCapturePlan(
     ValidatedAtlasDimensions Dimensions,
     int PrimitiveCount,
-    long EstimatedCanonicalCaptureBytes);
+    long EstimatedCanonicalCaptureBytes,
+    long GeometryPairCount,
+    long EstimatedGeometryCacheBytes);
 
 internal sealed record ValidatedAtlasDimensions(
     long Width,

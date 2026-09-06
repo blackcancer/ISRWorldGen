@@ -102,6 +102,8 @@ public sealed class SpatialIndexProcessProbeTests
             estimatedCompactGraphBytes = measured.Estimate.EstimatedCompactGraphBytes,
             estimatedSpatialIndexBytes = measured.Estimate.EstimatedSpatialIndexBytes,
             estimatedGeometryWorkingBytes = measured.Estimate.EstimatedGeometryWorkingBytes,
+            estimatedGeometryCacheBytes = measured.Estimate.EstimatedGeometryCacheBytes,
+            parallelEstimatedGeometryCacheBytes = parallel.Estimate.EstimatedGeometryCacheBytes,
             estimatedSnapshotBytes = measured.Estimate.EstimatedSnapshotBytes,
             estimatedPeakBuildBytes = measured.Estimate.EstimatedPeakBuildBytes,
             contentHash = measured.Snapshot.Header.ContentChecksum.ToString(),
@@ -266,6 +268,53 @@ public sealed class SpatialIndexProcessProbeTests
         Assert.IsLessThan(64 * 1024L, maximumCountEstimateAllocation);
         Assert.IsLessThan(64 * 1024L, maximumCountBuildAllocation);
 
+        AtlasIndexProfile fiftyThousandProfile = SpatialIndexTestSupport.VastProfile(
+            memoryBudgetBytes: long.MaxValue,
+            requestedSites: 50_000,
+            siteQuota: 50_000);
+        var fiftyThousandInput = new ReportedCountPrimitiveList(0);
+        var precomputedOptions = new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Precomputed);
+        var coldOptions = new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold);
+        long precomputedEstimateBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasMemoryEstimate> precomputedEstimateResult = AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), fiftyThousandProfile, fiftyThousandInput, precomputedOptions);
+        long precomputedEstimateAllocation = GC.GetTotalAllocatedBytes(precise: true) - precomputedEstimateBefore;
+        long precomputedBuildBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasIndexBuildOutcome> precomputedBuildResult = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), fiftyThousandProfile, fiftyThousandInput, precomputedOptions);
+        long precomputedBuildAllocation = GC.GetTotalAllocatedBytes(precise: true) - precomputedBuildBefore;
+        long coldEstimateBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasMemoryEstimate> coldEstimateResult = AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), fiftyThousandProfile, fiftyThousandInput, coldOptions);
+        long coldEstimateAllocation = GC.GetTotalAllocatedBytes(precise: true) - coldEstimateBefore;
+        long coldBuildBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasIndexBuildOutcome> coldBuildResult = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), fiftyThousandProfile, fiftyThousandInput, coldOptions);
+        long coldBuildAllocation = GC.GetTotalAllocatedBytes(precise: true) - coldBuildBefore;
+        Assert.IsInstanceOfType<GenerationFailure<AtlasMemoryEstimate>>(precomputedEstimateResult);
+        Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(precomputedBuildResult);
+        Assert.IsInstanceOfType<GenerationFailure<AtlasMemoryEstimate>>(coldEstimateResult);
+        Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(coldBuildResult);
+        GenerationError precomputedEstimateError =
+            ((GenerationFailure<AtlasMemoryEstimate>)precomputedEstimateResult).Error;
+        GenerationError precomputedBuildError =
+            ((GenerationFailure<AtlasIndexBuildOutcome>)precomputedBuildResult).Error;
+        GenerationError coldEstimateError = ((GenerationFailure<AtlasMemoryEstimate>)coldEstimateResult).Error;
+        GenerationError coldBuildError = ((GenerationFailure<AtlasIndexBuildOutcome>)coldBuildResult).Error;
+        Assert.AreEqual(GenerationFailureCode.InvalidInput, precomputedEstimateError.Code);
+        Assert.AreEqual(GenerationFailureCode.InvalidInput, precomputedBuildError.Code);
+        Assert.AreEqual("atlas.spatial-index.array-capacity", precomputedEstimateError.Stage);
+        Assert.AreEqual("atlas.spatial-index.array-capacity", precomputedBuildError.Stage);
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, coldEstimateError.Code);
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, coldBuildError.Code);
+        Assert.AreEqual("atlas.spatial-index.geometry-work-capacity", coldEstimateError.Stage);
+        Assert.AreEqual("atlas.spatial-index.geometry-work-capacity", coldBuildError.Stage);
+        Assert.AreEqual(0, fiftyThousandInput.EnumerationCount);
+        Assert.IsLessThan(64 * 1024L, precomputedEstimateAllocation);
+        Assert.IsLessThan(64 * 1024L, precomputedBuildAllocation);
+        Assert.IsLessThan(64 * 1024L, coldEstimateAllocation);
+        Assert.IsLessThan(64 * 1024L, coldBuildAllocation);
+
         string commit = Environment.GetEnvironmentVariable("ISRW_L02B_COMMIT")
             ?? throw new InvalidOperationException("ISRW_L02B_COMMIT is required for a persisted allocation proof.");
         var report = new
@@ -317,6 +366,22 @@ public sealed class SpatialIndexProcessProbeTests
             maximumPrimitiveBuildFailureStage = maximumCountBuildError.Stage,
             maximumPrimitiveEnumerationCount = maximumCountInput.EnumerationCount,
             maximumPrimitiveSnapshotVisible = false,
+            geometryCapacitySiteCount = fiftyThousandProfile.RequestedSiteCount,
+            geometryCapacityMemoryBudgetBytes = fiftyThousandProfile.MemoryBudgetBytes,
+            precomputedGeometryEstimateAllocatedBytes = precomputedEstimateAllocation,
+            precomputedGeometryBuildAllocatedBytes = precomputedBuildAllocation,
+            precomputedGeometryEstimateFailureCode = precomputedEstimateError.Code.ToString(),
+            precomputedGeometryBuildFailureCode = precomputedBuildError.Code.ToString(),
+            precomputedGeometryEstimateFailureStage = precomputedEstimateError.Stage,
+            precomputedGeometryBuildFailureStage = precomputedBuildError.Stage,
+            coldGeometryEstimateAllocatedBytes = coldEstimateAllocation,
+            coldGeometryBuildAllocatedBytes = coldBuildAllocation,
+            coldGeometryEstimateFailureCode = coldEstimateError.Code.ToString(),
+            coldGeometryBuildFailureCode = coldBuildError.Code.ToString(),
+            coldGeometryEstimateFailureStage = coldEstimateError.Stage,
+            coldGeometryBuildFailureStage = coldBuildError.Stage,
+            geometryCapacityEnumerationCount = fiftyThousandInput.EnumerationCount,
+            geometryCapacitySnapshotVisible = false,
             processId = Environment.ProcessId,
             framework = RuntimeInformation.FrameworkDescription,
             architecture = RuntimeInformation.ProcessArchitecture.ToString(),
