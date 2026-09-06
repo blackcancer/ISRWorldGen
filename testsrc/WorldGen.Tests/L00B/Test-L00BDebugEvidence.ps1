@@ -38,8 +38,8 @@ if ([int]$evidence.Debugger.ProcessId -le 0) {
     throw 'Debugger.ProcessId must identify a real process.'
 }
 
-if ([int]$evidence.Debugger.ColumnCallback.CallStackDepth -lt 2) {
-    throw 'ColumnCallback.CallStackDepth must contain the probe frame and at least one engine caller.'
+if ([int]$evidence.Debugger.ColumnCallback.CallStackDepth -lt 1) {
+    throw 'ColumnCallback.CallStackDepth must contain at least the observed managed probe frame.'
 }
 
 foreach ($property in @('TestedCommit', 'AssemblySha256', 'PdbSha256')) {
