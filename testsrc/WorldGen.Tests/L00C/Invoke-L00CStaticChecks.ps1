@@ -88,6 +88,7 @@ $required = @(
     'BlockingLoadChunkColumn',
     'L00C_PERSISTED_REOPEN_STABLE',
     'MarkerPublicationGate',
+    'markerPublication.BeginWorldTransition()',
     'markerPublication.Begin(persistedMarker)',
     'markerPublication.Commit(',
     'markerPublication.SaveIfCommitted(',

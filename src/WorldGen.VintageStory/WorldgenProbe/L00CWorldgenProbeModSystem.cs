@@ -101,6 +101,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     {
         ICoreServerAPI serverApi = RequireApi();
         long runId = Interlocked.Increment(ref worldRunId);
+        BeginWorldTransition();
         ReleaseOwnedColumns("world-initialize");
         lock (ownedColumnsGate)
         {
@@ -111,7 +112,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         HandlerOwnershipState? previousOwnership = ownershipState;
         bool sameHandlerSet = previousOwnership is not null && ReferenceEquals(previousOwnership.HandlerSet, handlers);
-        active = false;
         RestoreResult priorRestore = RestoreOwnedHandlerSet("world-initialize");
         int staleProbeHandlersAfterReset = previousOwnership is null ? 0 : CountOwnedHandlers(handlers, previousOwnership);
         if (staleProbeHandlersAfterReset != 0)
@@ -128,11 +128,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         shutdownIssued = 0;
         stableTickCount = 0;
         haloPreparedCount = 0;
-        markerPublication.Reset();
-        marker = null;
-        preLightingSnapshot = null;
-        initialSnapshot = null;
-        initialHaloSnapshot = null;
 
         ISaveGame saveGame = serverApi.WorldManager.SaveGame;
         ProbeMarker? persistedMarker = ReadMarker(saveGame);
@@ -203,6 +198,16 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
         Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} open={marker.OpenCount} isnew={saveGame.IsNew} save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
         ScheduleProbeColumn(runId);
+    }
+
+    private void BeginWorldTransition()
+    {
+        markerPublication.BeginWorldTransition();
+        marker = null;
+        active = false;
+        preLightingSnapshot = null;
+        initialSnapshot = null;
+        initialHaloSnapshot = null;
     }
 
     private RestoreResult RestoreOwnedHandlerSet(string reason)
@@ -1864,6 +1869,11 @@ internal sealed class MarkerPublicationGate
     }
 
     public void Reset()
+    {
+        BeginWorldTransition();
+    }
+
+    public void BeginWorldTransition()
     {
         candidate = null;
         committedPayload = null;

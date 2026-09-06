@@ -23,11 +23,12 @@ if ($null -eq $gateType -or $null -eq $markerType) {
 }
 
 $beginMethod = $gateType.GetMethod('Begin')
+$beginWorldTransitionMethod = $gateType.GetMethod('BeginWorldTransition')
 $resetMethod = $gateType.GetMethod('Reset')
 $commitMethod = $gateType.GetMethod('Commit')
 $saveMethod = $gateType.GetMethod('SaveIfCommitted')
 $committedProperty = $gateType.GetProperty('IsCommitted')
-foreach ($member in @($beginMethod, $resetMethod, $commitMethod, $saveMethod, $committedProperty)) {
+foreach ($member in @($beginMethod, $beginWorldTransitionMethod, $resetMethod, $commitMethod, $saveMethod, $committedProperty)) {
     if ($null -eq $member) { throw 'The production marker publication component contract is incomplete.' }
 }
 
@@ -141,6 +142,35 @@ if ([bool]$committedProperty.GetValue($successGate)) {
     throw 'Reset retained a committed marker across world initialization.'
 }
 
+$transitionGate = [Activator]::CreateInstance($gateType)
+$transitionSource = New-Marker 7
+$transitionCandidate = $beginMethod.Invoke($transitionGate, @($transitionSource))
+$markerType.GetProperty('OpenCount').SetValue($transitionCandidate, 8)
+$script:priorWorldStoreCalls = 0
+$priorWorldStore = [Action[byte[]]]{
+    param([byte[]]$Payload)
+    $script:priorWorldStoreCalls++
+}
+[void]$commitMethod.Invoke($transitionGate, @($priorWorldStore))
+$beginWorldTransitionMethod.Invoke($transitionGate, @())
+$cleanupThrew = $false
+try {
+    throw [InvalidOperationException]::new('synthetic-world-cleanup-failure')
+}
+catch {
+    $cleanupThrew = $_.Exception.Message -eq 'synthetic-world-cleanup-failure'
+}
+$script:currentWorldStoreCalls = 0
+$currentWorldStore = [Action[byte[]]]{
+    param([byte[]]$Payload)
+    $script:currentWorldStoreCalls++
+}
+$currentWorldSaved = [bool]$saveMethod.Invoke($transitionGate, @($currentWorldStore))
+if (-not $cleanupThrew -or $currentWorldSaved -or $script:currentWorldStoreCalls -ne 0 -or
+    $script:priorWorldStoreCalls -ne 1 -or [bool]$committedProperty.GetValue($transitionGate)) {
+    throw 'A cleanup failure after world transition republished the prior world marker payload.'
+}
+
 [ordered]@{
     TestId = 'L00-C-MARKER-PUBLICATION'
     Status = 'PASS'
@@ -153,4 +183,6 @@ if ([bool]$committedProperty.GetValue($successGate)) {
     PreviousMarkerOpenCount = Get-OpenCount $successSource
     CommittedMarkerOpenCount = 5
     SuccessfulStoreCalls = $storedPayloads.Count
+    PriorWorldInitialStoreCalls = $script:priorWorldStoreCalls
+    CurrentWorldStoreCallsAfterCleanupFailure = $script:currentWorldStoreCalls
 } | ConvertTo-Json -Depth 4
