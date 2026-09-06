@@ -19,7 +19,7 @@ if ($activatedSourceLine.Count -ne 1 -or $stableSourceLine.Count -ne 1) {
     throw 'Production log format extraction requires one persisted activated line and one persisted stable line.'
 }
 function Get-ProductionTemplate([string]$SourceLine, [string]$Marker) {
-    $match = [regex]::Match($SourceLine, 'Log\(\$"(?<template>L00C_[^"]+)"\);')
+    $match = [regex]::Match($SourceLine, 'Log\(\$"(?<template>L00C_[^"]+)"\)(?:;|,)')
     if (-not $match.Success -or -not $match.Groups['template'].Value.StartsWith($Marker, [StringComparison]::Ordinal)) {
         throw "Unable to extract production template for $Marker."
     }
