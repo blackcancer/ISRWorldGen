@@ -68,6 +68,20 @@ public sealed class ScaleProfileTests
                 frozen.AtlasMemoryBudgetBytes,
                 estimate.EstimatedPeakBuildBytes,
                 $"Proposal {frozen.Id} must fit the conservative L02-B cold plan before it is offered.");
+            Assert.IsLessThanOrEqualTo(
+                frozen.AtlasMemoryBudgetBytes - (frozen.AtlasMemoryBudgetBytes / 4),
+                estimate.EstimatedPeakBuildBytes,
+                $"Proposal {frozen.Id} must retain at least 25% explicit budget headroom.");
+            double nominalResolution = Math.Sqrt(
+                ((double)frozen.WidthBlocks * frozen.LengthBlocks) / frozen.RequestedSiteCount);
+            Assert.IsLessThanOrEqualTo(
+                nominalResolution * 0.01,
+                Math.Abs(frozen.AtlasResolutionBlocks - nominalResolution),
+                $"Proposal {frozen.Id} must expose a resolution consistent with its explicit site count.");
+            Console.WriteLine(
+                $"L02C_PROFILE_PLAN id={frozen.Id} sites={frozen.RequestedSiteCount} " +
+                $"resolution={frozen.AtlasResolutionBlocks} budget={frozen.AtlasMemoryBudgetBytes} " +
+                $"estimatedPeak={estimate.EstimatedPeakBuildBytes}");
         }
     }
 

@@ -629,6 +629,42 @@ public static class InspectionMapRenderer
 
         return output;
     }
+
+    public static byte[] RenderBitmap24(InspectionRaster raster)
+    {
+        ArgumentNullException.ThrowIfNull(raster);
+        int rowBytes = checked(raster.Width * 3);
+        int paddedRowBytes = checked((rowBytes + 3) & ~3);
+        int pixelBytes = checked(paddedRowBytes * raster.Height);
+        const int pixelOffset = 54;
+        byte[] output = new byte[checked(pixelOffset + pixelBytes)];
+        output[0] = (byte)'B';
+        output[1] = (byte)'M';
+        BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(2, 4), output.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(10, 4), pixelOffset);
+        BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(14, 4), 40);
+        BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(18, 4), raster.Width);
+        BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(22, 4), raster.Height);
+        BinaryPrimitives.WriteInt16LittleEndian(output.AsSpan(26, 2), 1);
+        BinaryPrimitives.WriteInt16LittleEndian(output.AsSpan(28, 2), 24);
+        BinaryPrimitives.WriteInt32LittleEndian(output.AsSpan(34, 4), pixelBytes);
+
+        for (int outputRow = 0; outputRow < raster.Height; outputRow++)
+        {
+            int sourceZ = raster.Height - outputRow - 1;
+            int rowOffset = pixelOffset + (outputRow * paddedRowBytes);
+            for (int x = 0; x < raster.Width; x++)
+            {
+                byte gray = checked((byte)(raster[x, sourceZ] >> 8));
+                int pixel = rowOffset + (x * 3);
+                output[pixel] = gray;
+                output[pixel + 1] = gray;
+                output[pixel + 2] = gray;
+            }
+        }
+
+        return output;
+    }
 }
 
 internal static class PatternCanonical

@@ -182,11 +182,11 @@ public sealed class PatternDiagnosticsTests
             new PatternCorpusCase("low-contrast-voronoi", true, PatternTestSupport.LowContrastWitness()),
         ], policy));
 
-        string finalPath = Path.Combine(outputDirectory, "visible-voronoi-final.pgm");
-        string edgesPath = Path.Combine(outputDirectory, "visible-voronoi-edges.pgm");
+        string finalPath = Path.Combine(outputDirectory, "visible-voronoi-final.bmp");
+        string edgesPath = Path.Combine(outputDirectory, "visible-voronoi-edges.bmp");
         string reportPath = Path.Combine(outputDirectory, "sensitivity-report.json");
-        File.WriteAllBytes(finalPath, InspectionMapRenderer.RenderPortableGraymap(witness.FinalOutput));
-        File.WriteAllBytes(edgesPath, InspectionMapRenderer.RenderPortableGraymap(witness.AtlasEdges));
+        File.WriteAllBytes(finalPath, InspectionMapRenderer.RenderBitmap24(witness.FinalOutput));
+        File.WriteAllBytes(edgesPath, InspectionMapRenderer.RenderBitmap24(witness.AtlasEdges));
         File.WriteAllText(reportPath, JsonSerializer.Serialize(new
         {
             schemaVersion = 1,
@@ -211,6 +211,8 @@ public sealed class PatternDiagnosticsTests
         Assert.IsTrue(File.Exists(finalPath));
         Assert.IsTrue(File.Exists(edgesPath));
         Assert.IsTrue(File.Exists(reportPath));
+        CollectionAssert.AreEqual(new byte[] { (byte)'B', (byte)'M' }, File.ReadAllBytes(finalPath)[..2]);
+        CollectionAssert.AreEqual(new byte[] { (byte)'B', (byte)'M' }, File.ReadAllBytes(edgesPath)[..2]);
         CollectionAssert.AreNotEqual(File.ReadAllBytes(finalPath), File.ReadAllBytes(edgesPath));
         using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(reportPath));
         Assert.AreEqual("REVIEW_REQUIRED", document.RootElement.GetProperty("status").GetString());

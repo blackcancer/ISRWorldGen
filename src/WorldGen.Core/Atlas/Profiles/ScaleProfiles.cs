@@ -122,6 +122,10 @@ public static class ScaleProfileCatalog
 {
     public const uint SupportedProfileVersion = 1;
 
+    // L02-B's qualified cold planner reserves 16 MiB plus 65,536 bytes per ordered
+    // site pair. Counts 16/64/128 are the largest lower powers of two that keep at
+    // least 25% of each declared budget available for graph/index/caller headroom.
+    // AtlasResolutionBlocks is the rounded nominal sqrt(world area / site count).
     private static readonly ReadOnlyCollection<ScaleProfileDefinition> Catalog = Array.AsReadOnly(
     new[]
     {
