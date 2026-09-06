@@ -101,6 +101,7 @@ $requiredNativeTypes = @(
     'Vintagestory.ServerMods.GenTerra',
     'Vintagestory.ServerMods.GenRockStrataNew',
     'Vintagestory.ServerMods.GenCaves',
+    'Vintagestory.ServerMods.GenDevastationLayer',
     'Vintagestory.ServerMods.GenBlockLayers',
     'Vintagestory.ServerMods.GenTerraPostProcess',
     'Vintagestory.ServerMods.GenHotSprings',

@@ -24,6 +24,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenTerra"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenRockStrataNew"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenCaves"),
+        new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenDevastationLayer"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenBlockLayers"),
         new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenTerraPostProcess"),
         new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenHotSprings"),
