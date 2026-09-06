@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "gates": [
+    {
+      "id": "G0",
+      "title": "Environnement et intégration prouvés",
+      "tasks": [
+        "L00-A",
+        "L00-B",
+        "L00-C"
+      ],
+      "decision": "Version locale verrouillée, breakpoint réel MCP, preuve de remplacement sélectif et fluides/heightmaps. Sans cela, aucune prétention de compatibilité au jeu."
+    },
+    {
+      "id": "G1",
+      "title": "Socle reproductible et atlas borné",
+      "tasks": [
+        "L01-A",
+        "L01-B",
+        "L01-C",
+        "L02-A",
+        "L02-B",
+        "L02-C",
+        "L10-A",
+        "L11-A"
+      ],
+      "decision": "Contrats gelés, atlas échantillonné, quotas, stockage abstrait et premiers codecs natifs éprouvés."
+    },
+    {
+      "id": "G2",
+      "title": "Bassin complet des sources à la mer",
+      "tasks": [
+        "L03-A",
+        "L03-B",
+        "L03-C",
+        "L04-A",
+        "L04-B",
+        "L04-C",
+        "L05-A",
+        "L05-B",
+        "L05-C",
+        "L06-A",
+        "L06-B",
+        "L06-C",
+        "L07-A",
+        "L07-B",
+        "L07-C",
+        "L10-B"
+      ],
+      "decision": "Bilan et raffinement conservés, profils fluviaux corrects et eau stable sur le moteur réel. Prototype interne de surface, pas V1."
+    },
+    {
+      "id": "G3",
+      "title": "Sous-sol et catalogue intégrés",
+      "tasks": [
+        "L08-A",
+        "L08-B",
+        "L08-C",
+        "L09-A",
+        "L09-B",
+        "L12-A",
+        "L11-B"
+      ],
+      "decision": "Réseaux naturels, cinq familles fantastiques matérialisées et colonne complète ; certification finale reste à G4."
+    },
+    {
+      "id": "G4",
+      "title": "Toutes les fonctions prévues raccordées",
+      "tasks": [
+        "L09-C",
+        "L10-C",
+        "L11-C",
+        "L12-B",
+        "L12-C"
+      ],
+      "decision": "Accès finaux certifiés, reprise après crash, contenu vanilla, configuration et diagnostics prêts. Candidat de recette, non encore version validée."
+    },
+    {
+      "id": "G5",
+      "title": "V1 qualifiée et distribuable",
+      "tasks": [
+        "L13-A",
+        "L13-B",
+        "L13-C"
+      ],
+      "decision": "Corpus, revue, endurance, jeu/serveur et installation propre validés. Tous les tests bloquants effectivement exécutés."
+    }
+  ]
+}

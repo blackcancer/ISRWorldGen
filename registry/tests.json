@@ -1,0 +1,929 @@
+{
+  "schema_version": 1,
+  "tests": [
+    {
+      "id": "T00-01",
+      "module": "S00",
+      "title": "Cible locale et références",
+      "requirements": [
+        "R00-01"
+      ],
+      "level": "Audit + compilation",
+      "state": "NOT_RUN",
+      "source": "tests/T00.md"
+    },
+    {
+      "id": "T00-02",
+      "module": "S00",
+      "title": "Chargement du template",
+      "requirements": [
+        "R00-02"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T00.md"
+    },
+    {
+      "id": "T00-03",
+      "module": "S00",
+      "title": "MCP et symboles",
+      "requirements": [
+        "R00-03"
+      ],
+      "level": "Débogage réel",
+      "state": "NOT_RUN",
+      "source": "tests/T00.md"
+    },
+    {
+      "id": "T00-04",
+      "module": "S00",
+      "title": "Remplacement sélectif",
+      "requirements": [
+        "R00-04"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T00.md"
+    },
+    {
+      "id": "T00-05",
+      "module": "S00",
+      "title": "Colonne solide et fluide",
+      "requirements": [
+        "R00-05"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T00.md"
+    },
+    {
+      "id": "T00-06",
+      "module": "S00",
+      "title": "Cycle de vie",
+      "requirements": [
+        "R00-06"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T00.md"
+    },
+    {
+      "id": "T01-01",
+      "module": "S01",
+      "title": "Coordonnées extrêmes",
+      "requirements": [
+        "R01-01"
+      ],
+      "level": "Unitaire + propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T01.md"
+    },
+    {
+      "id": "T01-02",
+      "module": "S01",
+      "title": "RNG par domaine",
+      "requirements": [
+        "R01-02"
+      ],
+      "level": "Unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T01.md"
+    },
+    {
+      "id": "T01-03",
+      "module": "S01",
+      "title": "Sérialisation canonique",
+      "requirements": [
+        "R01-03"
+      ],
+      "level": "Unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T01.md"
+    },
+    {
+      "id": "T01-04",
+      "module": "S01",
+      "title": "Déterminisme concurrent",
+      "requirements": [
+        "R01-04"
+      ],
+      "level": "Propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T01.md"
+    },
+    {
+      "id": "T01-05",
+      "module": "S01",
+      "title": "Indépendance Core",
+      "requirements": [
+        "R01-05"
+      ],
+      "level": "Architecture + unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T01.md"
+    },
+    {
+      "id": "T01-06",
+      "module": "S01",
+      "title": "Échec atomique",
+      "requirements": [
+        "R01-06"
+      ],
+      "level": "Injection de fautes",
+      "state": "NOT_RUN",
+      "source": "tests/T01.md"
+    },
+    {
+      "id": "T02-01",
+      "module": "S02",
+      "title": "Maillage dégénéré",
+      "requirements": [
+        "R02-01"
+      ],
+      "level": "Unitaire + propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T02.md"
+    },
+    {
+      "id": "T02-02",
+      "module": "S02",
+      "title": "Continuité globale",
+      "requirements": [
+        "R02-02"
+      ],
+      "level": "Unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T02.md"
+    },
+    {
+      "id": "T02-03",
+      "module": "S02",
+      "title": "Atlas vaste monde",
+      "requirements": [
+        "R02-03"
+      ],
+      "level": "Performance + architecture",
+      "state": "NOT_RUN",
+      "source": "tests/T02.md"
+    },
+    {
+      "id": "T02-04",
+      "module": "S02",
+      "title": "Propriété canonique",
+      "requirements": [
+        "R02-04"
+      ],
+      "level": "Unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T02.md"
+    },
+    {
+      "id": "T02-05",
+      "module": "S02",
+      "title": "Presets et hauteur",
+      "requirements": [
+        "R02-05"
+      ],
+      "level": "Unitaire + intégration",
+      "state": "NOT_RUN",
+      "source": "tests/T02.md"
+    },
+    {
+      "id": "T02-06",
+      "module": "S02",
+      "title": "Pavage invisible",
+      "requirements": [
+        "R02-06"
+      ],
+      "level": "Analyse + revue",
+      "state": "NOT_RUN",
+      "source": "tests/T02.md"
+    },
+    {
+      "id": "T03-01",
+      "module": "S03",
+      "title": "Limites tectoniques",
+      "requirements": [
+        "R03-01"
+      ],
+      "level": "Unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T03.md"
+    },
+    {
+      "id": "T03-02",
+      "module": "S03",
+      "title": "Continents multiscales",
+      "requirements": [
+        "R03-02"
+      ],
+      "level": "Propriétés + revue",
+      "state": "NOT_RUN",
+      "source": "tests/T03.md"
+    },
+    {
+      "id": "T03-03",
+      "module": "S03",
+      "title": "Propriétés géologiques",
+      "requirements": [
+        "R03-03"
+      ],
+      "level": "Unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T03.md"
+    },
+    {
+      "id": "T03-04",
+      "module": "S03",
+      "title": "Couches après excavation",
+      "requirements": [
+        "R03-04"
+      ],
+      "level": "Intégration Core",
+      "state": "NOT_RUN",
+      "source": "tests/T03.md"
+    },
+    {
+      "id": "T03-05",
+      "module": "S03",
+      "title": "Enveloppe verticale",
+      "requirements": [
+        "R03-05"
+      ],
+      "level": "Unitaire + propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T03.md"
+    },
+    {
+      "id": "T03-06",
+      "module": "S03",
+      "title": "Diversité des reliefs",
+      "requirements": [
+        "R03-06"
+      ],
+      "level": "Revue + mesures",
+      "state": "NOT_RUN",
+      "source": "tests/T03.md"
+    },
+    {
+      "id": "T04-01",
+      "module": "S04",
+      "title": "Gradient thermique",
+      "requirements": [
+        "R04-01"
+      ],
+      "level": "Unitaire + intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T04.md"
+    },
+    {
+      "id": "T04-02",
+      "module": "S04",
+      "title": "Saisons et axe",
+      "requirements": [
+        "R04-02"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T04.md"
+    },
+    {
+      "id": "T04-03",
+      "module": "S04",
+      "title": "Ombre pluviométrique",
+      "requirements": [
+        "R04-03"
+      ],
+      "level": "Métamorphique",
+      "state": "NOT_RUN",
+      "source": "tests/T04.md"
+    },
+    {
+      "id": "T04-04",
+      "module": "S04",
+      "title": "Champs séparés",
+      "requirements": [
+        "R04-04"
+      ],
+      "level": "Unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T04.md"
+    },
+    {
+      "id": "T04-05",
+      "module": "S04",
+      "title": "Bilan hydrique",
+      "requirements": [
+        "R04-05"
+      ],
+      "level": "Unitaire + bilan",
+      "state": "NOT_RUN",
+      "source": "tests/T04.md"
+    },
+    {
+      "id": "T04-06",
+      "module": "S04",
+      "title": "Boucle bornée",
+      "requirements": [
+        "R04-06"
+      ],
+      "level": "Intégration Core",
+      "state": "NOT_RUN",
+      "source": "tests/T04.md"
+    },
+    {
+      "id": "T05-01",
+      "module": "S05",
+      "title": "Dépressions emboîtées",
+      "requirements": [
+        "R05-01"
+      ],
+      "level": "Unitaire analytique",
+      "state": "NOT_RUN",
+      "source": "tests/T05.md"
+    },
+    {
+      "id": "T05-02",
+      "module": "S05",
+      "title": "Drainage plat et acyclique",
+      "requirements": [
+        "R05-02"
+      ],
+      "level": "Propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T05.md"
+    },
+    {
+      "id": "T05-03",
+      "module": "S05",
+      "title": "Conservation des débits",
+      "requirements": [
+        "R05-03"
+      ],
+      "level": "Unitaire + bilan",
+      "state": "NOT_RUN",
+      "source": "tests/T05.md"
+    },
+    {
+      "id": "T05-04",
+      "module": "S05",
+      "title": "Mer versus bassin sous-marin",
+      "requirements": [
+        "R05-04"
+      ],
+      "level": "Unitaire",
+      "state": "NOT_RUN",
+      "source": "tests/T05.md"
+    },
+    {
+      "id": "T05-05",
+      "module": "S05",
+      "title": "Fleuve transrégional",
+      "requirements": [
+        "R05-05"
+      ],
+      "level": "Intégration Core",
+      "state": "NOT_RUN",
+      "source": "tests/T05.md"
+    },
+    {
+      "id": "T05-06",
+      "module": "S05",
+      "title": "Affluents fins",
+      "requirements": [
+        "R05-06"
+      ],
+      "level": "Métamorphique",
+      "state": "NOT_RUN",
+      "source": "tests/T05.md"
+    },
+    {
+      "id": "T06-01",
+      "module": "S06",
+      "title": "Incision analytique",
+      "requirements": [
+        "R06-01"
+      ],
+      "level": "Unitaire analytique",
+      "state": "NOT_RUN",
+      "source": "tests/T06.md"
+    },
+    {
+      "id": "T06-02",
+      "module": "S06",
+      "title": "Bilan sédimentaire",
+      "requirements": [
+        "R06-02"
+      ],
+      "level": "Bilan",
+      "state": "NOT_RUN",
+      "source": "tests/T06.md"
+    },
+    {
+      "id": "T06-03",
+      "module": "S06",
+      "title": "Ordre du solveur",
+      "requirements": [
+        "R06-03"
+      ],
+      "level": "Métamorphique",
+      "state": "NOT_RUN",
+      "source": "tests/T06.md"
+    },
+    {
+      "id": "T06-04",
+      "module": "S06",
+      "title": "Convergence et refus",
+      "requirements": [
+        "R06-04"
+      ],
+      "level": "Intégration Core",
+      "state": "NOT_RUN",
+      "source": "tests/T06.md"
+    },
+    {
+      "id": "T06-05",
+      "module": "S06",
+      "title": "Raffinement contraint",
+      "requirements": [
+        "R06-05"
+      ],
+      "level": "Intégration Core",
+      "state": "NOT_RUN",
+      "source": "tests/T06.md"
+    },
+    {
+      "id": "T06-06",
+      "module": "S06",
+      "title": "Détail protégé",
+      "requirements": [
+        "R06-06"
+      ],
+      "level": "Propriétés + revue",
+      "state": "NOT_RUN",
+      "source": "tests/T06.md"
+    },
+    {
+      "id": "T07-01",
+      "module": "S07",
+      "title": "Morphologie et confluences",
+      "requirements": [
+        "R07-01"
+      ],
+      "level": "Intégration Core + revue",
+      "state": "NOT_RUN",
+      "source": "tests/T07.md"
+    },
+    {
+      "id": "T07-02",
+      "module": "S07",
+      "title": "Quantification des pentes",
+      "requirements": [
+        "R07-02"
+      ],
+      "level": "Propriétés + intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T07.md"
+    },
+    {
+      "id": "T07-03",
+      "module": "S07",
+      "title": "Lac multirégional",
+      "requirements": [
+        "R07-03"
+      ],
+      "level": "Intégration",
+      "state": "NOT_RUN",
+      "source": "tests/T07.md"
+    },
+    {
+      "id": "T07-04",
+      "module": "S07",
+      "title": "Littoral et salinité",
+      "requirements": [
+        "R07-04"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T07.md"
+    },
+    {
+      "id": "T07-05",
+      "module": "S07",
+      "title": "Delta conservatif",
+      "requirements": [
+        "R07-05"
+      ],
+      "level": "Bilan + revue",
+      "state": "NOT_RUN",
+      "source": "tests/T07.md"
+    },
+    {
+      "id": "T07-06",
+      "module": "S07",
+      "title": "Stabilité fluide en jeu",
+      "requirements": [
+        "R07-06"
+      ],
+      "level": "Intégration VS longue",
+      "state": "NOT_RUN",
+      "source": "tests/T07.md"
+    },
+    {
+      "id": "T08-01",
+      "module": "S08",
+      "title": "Familles géologiques",
+      "requirements": [
+        "R08-01"
+      ],
+      "level": "Unitaire + revue",
+      "state": "NOT_RUN",
+      "source": "tests/T08.md"
+    },
+    {
+      "id": "T08-02",
+      "module": "S08",
+      "title": "Réseau et volumes",
+      "requirements": [
+        "R08-02"
+      ],
+      "level": "Intégration Core",
+      "state": "NOT_RUN",
+      "source": "tests/T08.md"
+    },
+    {
+      "id": "T08-03",
+      "module": "S08",
+      "title": "Raccord 3D",
+      "requirements": [
+        "R08-03"
+      ],
+      "level": "Propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T08.md"
+    },
+    {
+      "id": "T08-04",
+      "module": "S08",
+      "title": "Gabarit joueur",
+      "requirements": [
+        "R08-04"
+      ],
+      "level": "Navigation + intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T08.md"
+    },
+    {
+      "id": "T08-05",
+      "module": "S08",
+      "title": "Perte et résurgence",
+      "requirements": [
+        "R08-05"
+      ],
+      "level": "Bilan + intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T08.md"
+    },
+    {
+      "id": "T08-06",
+      "module": "S08",
+      "title": "Réservations souterraines",
+      "requirements": [
+        "R08-06"
+      ],
+      "level": "Propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T08.md"
+    },
+    {
+      "id": "T09-01",
+      "module": "S09",
+      "title": "Catalogue complet",
+      "requirements": [
+        "R09-01"
+      ],
+      "level": "Intégration VS + revue",
+      "state": "NOT_RUN",
+      "source": "tests/T09.md"
+    },
+    {
+      "id": "T09-02",
+      "module": "S09",
+      "title": "Rareté et espacement",
+      "requirements": [
+        "R09-02"
+      ],
+      "level": "Statistique + propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T09.md"
+    },
+    {
+      "id": "T09-03",
+      "module": "S09",
+      "title": "Connexion topologique universelle",
+      "requirements": [
+        "R09-03"
+      ],
+      "level": "Propriétés bloquantes",
+      "state": "NOT_RUN",
+      "source": "tests/T09.md"
+    },
+    {
+      "id": "T09-04",
+      "module": "S09",
+      "title": "Accès voxel après décor",
+      "requirements": [
+        "R09-04"
+      ],
+      "level": "Navigation + intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T09.md"
+    },
+    {
+      "id": "T09-05",
+      "module": "S09",
+      "title": "Conflits et rejets",
+      "requirements": [
+        "R09-05"
+      ],
+      "level": "Injection de contraintes",
+      "state": "NOT_RUN",
+      "source": "tests/T09.md"
+    },
+    {
+      "id": "T09-06",
+      "module": "S09",
+      "title": "Découverte et économie",
+      "requirements": [
+        "R09-06"
+      ],
+      "level": "Revue de jeu",
+      "state": "NOT_RUN",
+      "source": "tests/T09.md"
+    },
+    {
+      "id": "T10-01",
+      "module": "S10",
+      "title": "Sauvegarde portable",
+      "requirements": [
+        "R10-01"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T10.md"
+    },
+    {
+      "id": "T10-02",
+      "module": "S10",
+      "title": "Version/configuration/corruption",
+      "requirements": [
+        "R10-02"
+      ],
+      "level": "Injection de fautes",
+      "state": "NOT_RUN",
+      "source": "tests/T10.md"
+    },
+    {
+      "id": "T10-03",
+      "module": "S10",
+      "title": "Crash de publication",
+      "requirements": [
+        "R10-03"
+      ],
+      "level": "Injection de crash",
+      "state": "NOT_RUN",
+      "source": "tests/T10.md"
+    },
+    {
+      "id": "T10-04",
+      "module": "S10",
+      "title": "Cache sous pression",
+      "requirements": [
+        "R10-04"
+      ],
+      "level": "Stress + propriétés",
+      "state": "NOT_RUN",
+      "source": "tests/T10.md"
+    },
+    {
+      "id": "T10-05",
+      "module": "S10",
+      "title": "Single-flight et DAG",
+      "requirements": [
+        "R10-05"
+      ],
+      "level": "Concurrence",
+      "state": "NOT_RUN",
+      "source": "tests/T10.md"
+    },
+    {
+      "id": "T10-06",
+      "module": "S10",
+      "title": "Annulation et constructions",
+      "requirements": [
+        "R10-06"
+      ],
+      "level": "Stress + intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T10.md"
+    },
+    {
+      "id": "T11-01",
+      "module": "S11",
+      "title": "Cycle et propriété des passes",
+      "requirements": [
+        "R11-01"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T11.md"
+    },
+    {
+      "id": "T11-02",
+      "module": "S11",
+      "title": "Maps natives",
+      "requirements": [
+        "R11-02"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T11.md"
+    },
+    {
+      "id": "T11-03",
+      "module": "S11",
+      "title": "Heightmaps et couches",
+      "requirements": [
+        "R11-03"
+      ],
+      "level": "Intégration VS",
+      "state": "NOT_RUN",
+      "source": "tests/T11.md"
+    },
+    {
+      "id": "T11-04",
+      "module": "S11",
+      "title": "Structures et réservations",
+      "requirements": [
+        "R11-04"
+      ],
+      "level": "Intégration VS + revue",
+      "state": "NOT_RUN",
+      "source": "tests/T11.md"
+    },
+    {
+      "id": "T11-05",
+      "module": "S11",
+      "title": "Spawn et progression",
+      "requirements": [
+        "R11-05"
+      ],
+      "level": "Intégration VS + jeu",
+      "state": "NOT_RUN",
+      "source": "tests/T11.md"
+    },
+    {
+      "id": "T11-06",
+      "module": "S11",
+      "title": "Serveur sans rendu",
+      "requirements": [
+        "R11-06"
+      ],
+      "level": "Multijoueur",
+      "state": "NOT_RUN",
+      "source": "tests/T11.md"
+    },
+    {
+      "id": "T12-01",
+      "module": "S12",
+      "title": "Assets et collisions",
+      "requirements": [
+        "R12-01"
+      ],
+      "level": "Intégration VS + audit",
+      "state": "NOT_RUN",
+      "source": "tests/T12.md"
+    },
+    {
+      "id": "T12-02",
+      "module": "S12",
+      "title": "Configuration gelée",
+      "requirements": [
+        "R12-02"
+      ],
+      "level": "Intégration",
+      "state": "NOT_RUN",
+      "source": "tests/T12.md"
+    },
+    {
+      "id": "T12-03",
+      "module": "S12",
+      "title": "Erreurs utilisateur",
+      "requirements": [
+        "R12-03"
+      ],
+      "level": "Fonctionnel",
+      "state": "NOT_RUN",
+      "source": "tests/T12.md"
+    },
+    {
+      "id": "T12-04",
+      "module": "S12",
+      "title": "Parité aperçu/jeu",
+      "requirements": [
+        "R12-04"
+      ],
+      "level": "Intégration",
+      "state": "NOT_RUN",
+      "source": "tests/T12.md"
+    },
+    {
+      "id": "T12-05",
+      "module": "S12",
+      "title": "Télémétrie exploitable",
+      "requirements": [
+        "R12-05"
+      ],
+      "level": "Observabilité",
+      "state": "NOT_RUN",
+      "source": "tests/T12.md"
+    },
+    {
+      "id": "T12-06",
+      "module": "S12",
+      "title": "Autorisations et non-destruction",
+      "requirements": [
+        "R12-06"
+      ],
+      "level": "Sécurité fonctionnelle",
+      "state": "NOT_RUN",
+      "source": "tests/T12.md"
+    },
+    {
+      "id": "T13-01",
+      "module": "S13",
+      "title": "Corpus et témoins négatifs",
+      "requirements": [
+        "R13-01"
+      ],
+      "level": "Campagne automatique",
+      "state": "NOT_RUN",
+      "source": "tests/T13.md"
+    },
+    {
+      "id": "T13-02",
+      "module": "S13",
+      "title": "Recette visuelle",
+      "requirements": [
+        "R13-02"
+      ],
+      "level": "Mesures + revue humaine",
+      "state": "NOT_RUN",
+      "source": "tests/T13.md"
+    },
+    {
+      "id": "T13-03",
+      "module": "S13",
+      "title": "RAM, latence et endurance",
+      "requirements": [
+        "R13-03"
+      ],
+      "level": "Performance + endurance",
+      "state": "NOT_RUN",
+      "source": "tests/T13.md"
+    },
+    {
+      "id": "T13-04",
+      "module": "S13",
+      "title": "Parcours de survie",
+      "requirements": [
+        "R13-04"
+      ],
+      "level": "Jeu + multijoueur",
+      "state": "NOT_RUN",
+      "source": "tests/T13.md"
+    },
+    {
+      "id": "T13-05",
+      "module": "S13",
+      "title": "Matrice de compatibilité",
+      "requirements": [
+        "R13-05"
+      ],
+      "level": "Audit de release",
+      "state": "NOT_RUN",
+      "source": "tests/T13.md"
+    },
+    {
+      "id": "T13-06",
+      "module": "S13",
+      "title": "Installation propre",
+      "requirements": [
+        "R13-06"
+      ],
+      "level": "Packaging + intégration",
+      "state": "NOT_RUN",
+      "source": "tests/T13.md"
+    }
+  ]
+}

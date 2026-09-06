@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "verified_date": "2026-09-06",
+  "sources": [
+    {
+      "id": "API-00",
+      "title": "Documentation Vintage Story — version de référence",
+      "url": "https://apidocs.vintagestory.at/",
+      "scope": "Page consultée ; indique 1.22.7. Ne prouve pas la version locale."
+    },
+    {
+      "id": "API-01",
+      "title": "IServerEventAPI",
+      "url": "https://apidocs.vintagestory.at/api/Vintagestory.API.Server.IServerEventAPI.html",
+      "scope": "Signatures worldgen ; recoupées avec Server/API/IServerEventAPI.cs dans vsapi, blob 13519acf4db98b73d0d3a9e60b81197401e0f09f."
+    },
+    {
+      "id": "API-02",
+      "title": "IWorldGenHandler",
+      "url": "https://github.com/anegostudios/vsapi/blob/master/Server/Worldgen/IWorldGenHandler.cs",
+      "scope": "Source lue ; listes de handlers, WipeAllHandlers. Blob observé fee190d3e9e1e9e28241b87230fefeba465aea42 ; master est mobile."
+    },
+    {
+      "id": "API-03",
+      "title": "EnumWorldGenPass",
+      "url": "https://apidocs.vintagestory.at/api/Vintagestory.API.Server.EnumWorldGenPass.html",
+      "scope": "Enums et description des passes observés ; ordre effectif à relever dans le jeu."
+    },
+    {
+      "id": "API-04",
+      "title": "GenTerra — source 1.22.7",
+      "url": "https://github.com/anegostudios/vsessentialsmod/blob/06673b67318e002332b6aa8b3d0308f11d2aba99/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs",
+      "scope": "Début de source lu : AssetsFinalize, niveau marin, inscription Terrain/standard. Commit identifié par lecture de la branche master, message version 1.22.7."
+    },
+    {
+      "id": "API-05",
+      "title": "IMapRegion",
+      "url": "https://apidocs.vintagestory.at/api/Vintagestory.API.Common.IMapRegion.html",
+      "scope": "Propriétés de cartes et moddata ; ne fournit pas à elle seule un codec complet de toutes les cartes."
+    },
+    {
+      "id": "API-06",
+      "title": "IMapChunk",
+      "url": "https://apidocs.vintagestory.at/api/Vintagestory.API.Common.IMapChunk.html",
+      "scope": "Sémantique des heightmaps et des données de colonne."
+    },
+    {
+      "id": "API-07",
+      "title": "ISaveGame",
+      "url": "https://apidocs.vintagestory.at/api/Vintagestory.API.Server.ISaveGame.html",
+      "scope": "Seed int, WorldType, GetData/StoreData ; garanties transactionnelles non déduites."
+    },
+    {
+      "id": "API-08",
+      "title": "Projet VintagestoryAPI",
+      "url": "https://github.com/anegostudios/vsapi/blob/master/VintagestoryAPI.csproj",
+      "scope": "Source lue ; TargetFramework référencé par $(FrameworkVersion). Blob observé 512c916c1e7742d537d97da9d4ba8512d12ddde4 ; versions locales à auditer."
+    },
+    {
+      "id": "DEV-01",
+      "title": "OpenAI — instructions AGENTS.md",
+      "url": "https://developers.openai.com/codex/guides/agents-md",
+      "scope": "Page officielle consultée, redirigée vers learn.chatgpt.com/docs/agent-configuration/agents-md ; découverte hiérarchique et limite propre aux instructions."
+    },
+    {
+      "id": "DEV-02",
+      "title": "OpenAI — sous-agents",
+      "url": "https://developers.openai.com/codex/subagents",
+      "scope": "Page officielle consultée, redirigée vers learn.chatgpt.com/docs/agent-configuration/subagents ; délégation et coût des contextes indépendants."
+    },
+    {
+      "id": "DEV-03",
+      "title": "Microsoft — dotnet test et VSTest",
+      "url": "https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-vstest",
+      "scope": "Exemples TRX ; compléter par la page dotnet-test pour choisir VSTest/MTP sur le SDK réel."
+    },
+    {
+      "id": "ALG-01",
+      "title": "Amit Patel — Mapgen4",
+      "url": "https://www.redblobgames.com/maps/mapgen4/",
+      "scope": "Présentation consultée ; maillage, évaporation, vent, pluie et rivières. Référence d’approche, pas une librairie C# imposée."
+    },
+    {
+      "id": "ALG-02",
+      "title": "Cordonnier et al. — Large Scale Terrain Generation from Tectonic Uplift and Fluvial Erosion (2016)",
+      "url": "https://inria.hal.science/hal-01262376",
+      "scope": "Notice/résumé de publication consultés ; choix du couplage, pas reprise intégrale ni promesse de performances."
+    },
+    {
+      "id": "ALG-03",
+      "title": "Barnes et al. — Priority-Flood (article 2014, dépôt arXiv 2015)",
+      "url": "https://arxiv.org/abs/1511.04463",
+      "scope": "Résumé consulté ; traitement des dépressions et applicabilité aux maillages irréguliers. Aucun PDF intégré à ce dossier."
+    },
+    {
+      "id": "ALG-04",
+      "title": "Barnes et al. — Fill–Spill–Merge (2021)",
+      "url": "https://esurf.copernicus.org/articles/9/105/2021/",
+      "scope": "Page de publication consultée ; hiérarchie des dépressions et bilan du remplissage/débordement."
+    },
+    {
+      "id": "ALG-05",
+      "title": "Schott et al. — Terrain Amplification using Multi-scale Erosion (2024)",
+      "url": "https://research.adobe.com/publication/terrain-amplification-using-multi-scale-erosion/",
+      "scope": "Présentation de recherche consultée ; raffinement conservant une cohérence hydrologique."
+    },
+    {
+      "id": "ALG-06",
+      "title": "Peytavie et al. — Procedural Riverscapes (2019)",
+      "url": "https://www.cs.purdue.edu/cgvlab/www/publications/Peytavie19CGF/",
+      "scope": "Notice et résumé éditeur consultés ; morphologie fluviale. Les shaders/animations de la publication ne sont pas des dépendances obligatoires."
+    },
+    {
+      "id": "ALG-07",
+      "title": "NPS — How Mammoth Cave Formed",
+      "url": "https://www.nps.gov/maca/learn/nature/how-mammoth-cave-formed.htm",
+      "scope": "Page consultée ; inspiration pour galeries actives/fossiles et diversité des passages, non preuve d’un simulateur complet."
+    }
+  ]
+}

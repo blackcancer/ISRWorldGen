@@ -1,0 +1,509 @@
+{
+  "schema_version": 1,
+  "requirements": [
+    {
+      "id": "R00-01",
+      "module": "S00",
+      "text": "La cible exacte du jeu, du runtime et des assemblages doit être relevée et verrouillée avant tout code dépendant de l’API.",
+      "source": "specs/S00.md"
+    },
+    {
+      "id": "R00-02",
+      "module": "S00",
+      "text": "Le template doit compiler en Debug et Release et le package doit charger une seule instance du mod sans double DLL.",
+      "source": "specs/S00.md"
+    },
+    {
+      "id": "R00-03",
+      "module": "S00",
+      "text": "Codex doit pouvoir atteindre un breakpoint C# dans le processus réel du jeu via le MCP, avec symboles correspondant au commit.",
+      "source": "specs/S00.md"
+    },
+    {
+      "id": "R00-04",
+      "module": "S00",
+      "text": "La prise de contrôle de worldgen doit être ciblée, traçable et limitée aux nouveaux mondes explicitement activés.",
+      "source": "specs/S00.md"
+    },
+    {
+      "id": "R00-05",
+      "module": "S00",
+      "text": "La preuve initiale doit valider blocs solides, fluides et métadonnées sur la même colonne réelle.",
+      "source": "specs/S00.md"
+    },
+    {
+      "id": "R00-06",
+      "module": "S00",
+      "text": "L’initialisation, la sauvegarde, la fermeture et le rechargement doivent libérer les handlers/ressources sans duplication.",
+      "source": "specs/S00.md"
+    },
+    {
+      "id": "R01-01",
+      "module": "S01",
+      "text": "Les conversions d’unités, coordonnées, indices, tailles et niveaux doivent être centralisées et sans débordement silencieux.",
+      "source": "specs/S01.md"
+    },
+    {
+      "id": "R01-02",
+      "module": "S01",
+      "text": "Le RNG et les identifiants doivent être stables, séparés par domaine et indépendants de l’ordre d’évaluation.",
+      "source": "specs/S01.md"
+    },
+    {
+      "id": "R01-03",
+      "module": "S01",
+      "text": "Les contrats et snapshots doivent être immuables, versionnés et sérialisés de manière canonique.",
+      "source": "specs/S01.md"
+    },
+    {
+      "id": "R01-04",
+      "module": "S01",
+      "text": "La génération doit reproduire les mêmes données sur les configurations machine/runtime qualifiées, indépendamment du parallélisme et du cache.",
+      "source": "specs/S01.md"
+    },
+    {
+      "id": "R01-05",
+      "module": "S01",
+      "text": "Le cœur doit être testable hors jeu, avec fixtures analytiques et sans dépendance Vintage Story/MCP/GPU.",
+      "source": "specs/S01.md"
+    },
+    {
+      "id": "R01-06",
+      "module": "S01",
+      "text": "Les erreurs, annulations et valeurs invalides doivent être explicites et ne publier aucun résultat partiellement valide.",
+      "source": "specs/S01.md"
+    },
+    {
+      "id": "R02-01",
+      "module": "S02",
+      "text": "Le maillage doit être robuste, déterministe et valide pour les configurations dégénérées admises.",
+      "source": "specs/S02.md"
+    },
+    {
+      "id": "R02-02",
+      "module": "S02",
+      "text": "Les frontières de calcul ne doivent produire ni trous ni discontinuités de champs ou de primitives.",
+      "source": "specs/S02.md"
+    },
+    {
+      "id": "R02-03",
+      "module": "S02",
+      "text": "L’atlas doit avoir un budget borné indépendant du nombre de colonnes détaillées du monde.",
+      "source": "specs/S02.md"
+    },
+    {
+      "id": "R02-04",
+      "module": "S02",
+      "text": "Les structures partagées doivent avoir un propriétaire et des IDs stables avec index spatial local.",
+      "source": "specs/S02.md"
+    },
+    {
+      "id": "R02-05",
+      "module": "S02",
+      "text": "Les profils d’échelle et le budget vertical doivent être explicites, validés et gelés par monde.",
+      "source": "specs/S02.md"
+    },
+    {
+      "id": "R02-06",
+      "module": "S02",
+      "text": "Le générateur ne doit pas rendre visuellement le pavage Voronoï comme motif systématique de terrain ou de biome.",
+      "source": "specs/S02.md"
+    },
+    {
+      "id": "R03-01",
+      "module": "S03",
+      "text": "Les types de limites de plaques et leurs champs de soulèvement doivent respecter des conventions testées et produire des effets distincts.",
+      "source": "specs/S03.md"
+    },
+    {
+      "id": "R03-02",
+      "module": "S03",
+      "text": "Continents, océans et reliefs doivent présenter plusieurs échelles sans reproduire une cellule par paysage.",
+      "source": "specs/S03.md"
+    },
+    {
+      "id": "R03-03",
+      "module": "S03",
+      "text": "Le modèle géologique doit fournir des propriétés continues ou stratifiées utilisables par l’érosion, les cavernes et les ressources.",
+      "source": "specs/S03.md"
+    },
+    {
+      "id": "R03-04",
+      "module": "S03",
+      "text": "Les formations rocheuses doivent rester cohérentes après érosion, découpe de vallée et excavation.",
+      "source": "specs/S03.md"
+    },
+    {
+      "id": "R03-05",
+      "module": "S03",
+      "text": "Le budget vertical doit préserver relief, océan, plancher et cavernes sans clipping silencieux.",
+      "source": "specs/S03.md"
+    },
+    {
+      "id": "R03-06",
+      "module": "S03",
+      "text": "Le catalogue doit proposer plusieurs familles de reliefs avec paramètres et signatures distincts.",
+      "source": "specs/S03.md"
+    },
+    {
+      "id": "R04-01",
+      "module": "S04",
+      "text": "La température doit dépendre de latitude, altitude et continentalité avec unités explicites et sans double correction native.",
+      "source": "specs/S04.md"
+    },
+    {
+      "id": "R04-02",
+      "module": "S04",
+      "text": "Le climat personnalisé doit rester cohérent avec saisons, gel et latitude du jeu pour les options déclarées supportées.",
+      "source": "specs/S04.md"
+    },
+    {
+      "id": "R04-03",
+      "module": "S04",
+      "text": "Le transport d’humidité et les précipitations doivent répondre aux vents et aux reliefs sans artefacts de bord.",
+      "source": "specs/S04.md"
+    },
+    {
+      "id": "R04-04",
+      "module": "S04",
+      "text": "Les champs de pluie, humidité du sol, ruissellement et recharge doivent rester distincts et bornés.",
+      "source": "specs/S04.md"
+    },
+    {
+      "id": "R04-05",
+      "module": "S04",
+      "text": "Le bilan de l’eau doit compter chaque apport une seule fois, y compris les échanges souterrains.",
+      "source": "specs/S04.md"
+    },
+    {
+      "id": "R04-06",
+      "module": "S04",
+      "text": "Les modifications de climat pendant le calcul préparatoire doivent converger ou terminer de manière bornée avant publication.",
+      "source": "specs/S04.md"
+    },
+    {
+      "id": "R05-01",
+      "module": "S05",
+      "text": "Les dépressions, seuils et capacités doivent être explicitement modélisés sans aplanir systématiquement le relief physique.",
+      "source": "specs/S05.md"
+    },
+    {
+      "id": "R05-02",
+      "module": "S05",
+      "text": "Le drainage principal doit être acyclique, déterministe sur terrains plats et aboutir à une sortie ou un bassin terminal identifié.",
+      "source": "specs/S05.md"
+    },
+    {
+      "id": "R05-03",
+      "module": "S05",
+      "text": "Les débits doivent respecter les apports, pertes et stockages à chaque confluence et sur un bassin complet.",
+      "source": "specs/S05.md"
+    },
+    {
+      "id": "R05-04",
+      "module": "S05",
+      "text": "L’océan, les lacs ouverts, les lacs fermés et les bassins secs doivent être distingués par connectivité et bilan.",
+      "source": "specs/S05.md"
+    },
+    {
+      "id": "R05-05",
+      "module": "S05",
+      "text": "Les conditions aux limites doivent assurer le raccordement d’un fleuve à travers des régions non explorées.",
+      "source": "specs/S05.md"
+    },
+    {
+      "id": "R05-06",
+      "module": "S05",
+      "text": "Le raffinement des affluents doit conserver le budget hydrologique du niveau supérieur et les exutoires publiés.",
+      "source": "specs/S05.md"
+    },
+    {
+      "id": "R06-01",
+      "module": "S06",
+      "text": "Le solveur doit combiner soulèvement et érosion avec unités, stabilité et cas analytiques vérifiables.",
+      "source": "specs/S06.md"
+    },
+    {
+      "id": "R06-02",
+      "module": "S06",
+      "text": "Les processus de transport/dépôt doivent conserver la matière à la précision déclarée ou comptabiliser explicitement ses sorties.",
+      "source": "specs/S06.md"
+    },
+    {
+      "id": "R06-03",
+      "module": "S06",
+      "text": "Le résultat du solveur doit être indépendant de l’ordre des cellules et du nombre de workers.",
+      "source": "specs/S06.md"
+    },
+    {
+      "id": "R06-04",
+      "module": "S06",
+      "text": "Le couplage climat–drainage–relief doit terminer de manière bornée et publier un snapshot cohérent unique.",
+      "source": "specs/S06.md"
+    },
+    {
+      "id": "R06-05",
+      "module": "S06",
+      "text": "Le raffinement doit conserver les contraintes parentales, exutoires et profils d’écoulement.",
+      "source": "specs/S06.md"
+    },
+    {
+      "id": "R06-06",
+      "module": "S06",
+      "text": "Le détail local ne doit pas fermer un cours d’eau, créer de couture technique ou effacer une structure géographique.",
+      "source": "specs/S06.md"
+    },
+    {
+      "id": "R07-01",
+      "module": "S07",
+      "text": "Chaque cours d’eau doit posséder une géométrie cohérente avec son débit, sa pente et son contexte, avec de vraies confluences.",
+      "source": "specs/S07.md"
+    },
+    {
+      "id": "R07-02",
+      "module": "S07",
+      "text": "Le profil d’eau et le lit doivent rester continus et non montants après quantification voxel et passage des décorations.",
+      "source": "specs/S07.md"
+    },
+    {
+      "id": "R07-03",
+      "module": "S07",
+      "text": "Les lacs doivent partager un niveau unique, un masque cohérent et des entrées/sorties explicites.",
+      "source": "specs/S07.md"
+    },
+    {
+      "id": "R07-04",
+      "module": "S07",
+      "text": "Les océans et littoraux doivent posséder une bathymétrie continue et une distinction salinité/connexion correcte.",
+      "source": "specs/S07.md"
+    },
+    {
+      "id": "R07-05",
+      "module": "S07",
+      "text": "Les deltas et distributaires doivent conserver les débits et être réservés aux contextes appropriés.",
+      "source": "specs/S07.md"
+    },
+    {
+      "id": "R07-06",
+      "module": "S07",
+      "text": "L’eau produite doit rester stable dans le moteur réel sans destruction automatique des modifications du joueur.",
+      "source": "specs/S07.md"
+    },
+    {
+      "id": "R08-01",
+      "module": "S08",
+      "text": "Les cavernes doivent posséder un réseau et une famille géologique avant génération de leurs volumes.",
+      "source": "specs/S08.md"
+    },
+    {
+      "id": "R08-02",
+      "module": "S08",
+      "text": "Leur géométrie doit proposer des sections, boucles, niveaux et salles variés sans répétition systématique.",
+      "source": "specs/S08.md"
+    },
+    {
+      "id": "R08-03",
+      "module": "S08",
+      "text": "Les réseaux transfrontaliers doivent être continus avec enveloppes bornées et sans dépendance aux chunks chargés.",
+      "source": "specs/S08.md"
+    },
+    {
+      "id": "R08-04",
+      "module": "S08",
+      "text": "La praticabilité doit être mesurée sur les voxels avec un gabarit et des transitions de joueur explicites.",
+      "source": "specs/S08.md"
+    },
+    {
+      "id": "R08-05",
+      "module": "S08",
+      "text": "Les écoulements souterrains doivent respecter les bilans et les domaines d’eau sans remplissage automatique sous le niveau marin.",
+      "source": "specs/S08.md"
+    },
+    {
+      "id": "R08-06",
+      "module": "S08",
+      "text": "La génération de cavernes doit respecter plancher, couverture et réservations, avec sorties intentionnelles identifiées.",
+      "source": "specs/S08.md"
+    },
+    {
+      "id": "R09-01",
+      "module": "S09",
+      "text": "Les cinq familles du catalogue doivent être réalisées avec variantes et identité dominante, sans dépendance à un rendu personnalisé obligatoire.",
+      "source": "specs/S09.md"
+    },
+    {
+      "id": "R09-02",
+      "module": "S09",
+      "text": "La rareté doit être déterministe, spatiale, paramétrable et mesurée sans quota fixe par chunk/région ni placement selon le joueur.",
+      "source": "specs/S09.md"
+    },
+    {
+      "id": "R09-03",
+      "module": "S09",
+      "text": "Tout site publié doit être connecté topologiquement à une galerie naturelle, et au réseau d’accès défini par son profil.",
+      "source": "specs/S09.md"
+    },
+    {
+      "id": "R09-04",
+      "module": "S09",
+      "text": "Tout site publié doit rester réellement accessible après voxelisation et toutes les décorations via un chemin certifié pour le gabarit joueur.",
+      "source": "specs/S09.md"
+    },
+    {
+      "id": "R09-05",
+      "module": "S09",
+      "text": "Les sites doivent respecter eau, couverture, plancher et réservations ; un placement impossible doit être rejeté proprement.",
+      "source": "specs/S09.md"
+    },
+    {
+      "id": "R09-06",
+      "module": "S09",
+      "text": "Les ambiances, indices, tailles et ressources doivent encourager la découverte sans rendre le fantastique banal ou économiquement obligatoire.",
+      "source": "specs/S09.md"
+    },
+    {
+      "id": "R10-01",
+      "module": "S10",
+      "text": "Le manifeste et les décisions canoniques doivent être persistants, versionnés et transférables avec la sauvegarde.",
+      "source": "specs/S10.md"
+    },
+    {
+      "id": "R10-02",
+      "module": "S10",
+      "text": "Une sauvegarde incompatible, ancienne non activée ou corrompue doit être refusée sans changement silencieux de terrain.",
+      "source": "specs/S10.md"
+    },
+    {
+      "id": "R10-03",
+      "module": "S10",
+      "text": "La publication des snapshots doit être cohérente et récupérable après interruption de chaque phase d’écriture.",
+      "source": "specs/S10.md"
+    },
+    {
+      "id": "R10-04",
+      "module": "S10",
+      "text": "Le cache doit être borné et reconstructible sans modifier les résultats, avec ownership sûr des tampons.",
+      "source": "specs/S10.md"
+    },
+    {
+      "id": "R10-05",
+      "module": "S10",
+      "text": "Le scheduler doit éviter travaux doublonnés, interblocages et appels API depuis un thread non autorisé.",
+      "source": "specs/S10.md"
+    },
+    {
+      "id": "R10-06",
+      "module": "S10",
+      "text": "Arrêt, annulation et éviction doivent terminer proprement sans perte de données ni modification des blocs joués.",
+      "source": "specs/S10.md"
+    },
+    {
+      "id": "R11-01",
+      "module": "S11",
+      "text": "L’adaptateur doit isoler l’API du cœur et s’enregistrer dans les bons événements/contextes avec propriété des passes vérifiée.",
+      "source": "specs/S11.md"
+    },
+    {
+      "id": "R11-02",
+      "module": "S11",
+      "text": "Les cartes natives de région doivent respecter leur encodage et leurs consommateurs ; aucune carte supposée générique ne doit être inventée.",
+      "source": "specs/S11.md"
+    },
+    {
+      "id": "R11-03",
+      "module": "S11",
+      "text": "Les blocs, fluides et métadonnées des colonnes doivent être cohérents avec les sémantiques natives.",
+      "source": "specs/S11.md"
+    },
+    {
+      "id": "R11-04",
+      "module": "S11",
+      "text": "Les passes de décor, minerais et structures conservées doivent respecter les contraintes du monde et les accès souterrains certifiés.",
+      "source": "specs/S11.md"
+    },
+    {
+      "id": "R11-05",
+      "module": "S11",
+      "text": "Le spawn et la progression vanilla doivent rester praticables et ne pas dépendre d’une merveille obligatoire.",
+      "source": "specs/S11.md"
+    },
+    {
+      "id": "R11-06",
+      "module": "S11",
+      "text": "La génération doit fonctionner en solo et serveur dédié qualifiés sans dépendre d’un client graphique ni divulguer l’atlas caché.",
+      "source": "specs/S11.md"
+    },
+    {
+      "id": "R12-01",
+      "module": "S12",
+      "text": "Les assets fantastiques doivent être complets, licenciés, localisés et compatibles collision/lumière/drops sans dépendance graphique obligatoire.",
+      "source": "specs/S12.md"
+    },
+    {
+      "id": "R12-02",
+      "module": "S12",
+      "text": "Les paramètres géographiques doivent être validés puis gelés par monde ; les réglages runtime ne doivent pas changer la géographie.",
+      "source": "specs/S12.md"
+    },
+    {
+      "id": "R12-03",
+      "module": "S12",
+      "text": "La configuration utilisateur doit présenter clairement profils, limites et erreurs sans exiger une nouvelle application externe.",
+      "source": "specs/S12.md"
+    },
+    {
+      "id": "R12-04",
+      "module": "S12",
+      "text": "Le banc d’essai doit utiliser le même cœur que le mod et exporter des données reproductibles et inspectables.",
+      "source": "specs/S12.md"
+    },
+    {
+      "id": "R12-05",
+      "module": "S12",
+      "text": "Les diagnostics doivent fournir des métriques par étape et des preuves liées à seed/config/commit sans révéler de secrets.",
+      "source": "specs/S12.md"
+    },
+    {
+      "id": "R12-06",
+      "module": "S12",
+      "text": "Les commandes et exports sensibles doivent être limités aux administrateurs et ne jamais régénérer implicitement une partie jouée.",
+      "source": "specs/S12.md"
+    },
+    {
+      "id": "R13-01",
+      "module": "S13",
+      "text": "La campagne finale doit couvrir un corpus déterministe non filtré et des cas négatifs prouvant la sensibilité des tests.",
+      "source": "specs/S13.md"
+    },
+    {
+      "id": "R13-02",
+      "module": "S13",
+      "text": "La qualité des reliefs, des eaux, des grottes et des merveilles doit être validée aux échelles carte et jeu par métriques et revue humaine.",
+      "source": "specs/S13.md"
+    },
+    {
+      "id": "R13-03",
+      "module": "S13",
+      "text": "Les budgets de temps, mémoire et concurrence doivent être mesurés sur un matériel qualifié sans débogueur et respecter les seuils gelés.",
+      "source": "specs/S13.md"
+    },
+    {
+      "id": "R13-04",
+      "module": "S13",
+      "text": "La survie, l’exploration et le multijoueur doivent fonctionner sur des parcours complets avec sauvegarde/reprise.",
+      "source": "specs/S13.md"
+    },
+    {
+      "id": "R13-05",
+      "module": "S13",
+      "text": "Les versions, dépendances, compatibilités et risques de sauvegarde doivent être publiés avec preuves et limites explicites.",
+      "source": "specs/S13.md"
+    },
+    {
+      "id": "R13-06",
+      "module": "S13",
+      "text": "Le package final doit s’installer proprement, ne contenir aucun fichier interdit et permettre de reproduire la recette.",
+      "source": "specs/S13.md"
+    }
+  ]
+}

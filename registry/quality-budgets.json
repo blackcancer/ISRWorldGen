@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "status": "PROPOSED_NOT_FROZEN",
+  "reference_hardware": null,
+  "freeze_required_before": [
+    "T09-02",
+    "T13-03"
+  ],
+  "policy": "Valeurs de départ proposées, jamais performances promises. Geler matériel/profils par ADR avant recette. Modifier les seuils après un échec exige une décision tracée et une nouvelle campagne.",
+  "hard_invariants": {
+    "published_wonders_without_final_access_certificate": 0,
+    "unaccounted_hydrology_cycles": 0,
+    "cross_tile_port_mismatches": 0,
+    "silent_save_fallbacks": 0,
+    "world_modification_on_cache_reload": 0
+  },
+  "candidate_budgets": {
+    "atlas_max_sites": 262144,
+    "atlas_peak_additional_mib": 256,
+    "derived_cache_mib": 512,
+    "total_mod_additional_peak_mib": 1024,
+    "atlas_initialization_max_seconds": 120,
+    "cold_region_p95_max_ms": 2500,
+    "warm_column_p95_ratio_to_vanilla_max": 2.0,
+    "default_core_workers": 2,
+    "endurance_minutes": 120,
+    "repeat_performance_runs": 3
+  },
+  "candidate_rarity": {
+    "basis": "100000 blocs cumulés de galeries praticables, mesurés hors branches de la merveille elle-même",
+    "large_sites_count_band": [
+      1,
+      4
+    ],
+    "monumental_max_fraction_of_sites": 0.1,
+    "minimum_distance_between_large_site_envelopes_blocks": 1500,
+    "minimum_accepted_sites_for_statistical_campaign": 100,
+    "density_zero_disables_all_wonders": true,
+    "note": "Réglages initiaux à calibrer selon échelle ; pas une décision esthétique définitive de l’utilisateur. Estimer incertitude par groupes de seeds, pas en supposant les candidats spatialement indépendants."
+  }
+}

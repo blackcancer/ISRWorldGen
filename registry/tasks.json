@@ -1,0 +1,1415 @@
+{
+  "schema_version": 1,
+  "spec_version": "1.0",
+  "tasks": [
+    {
+      "id": "L00-A",
+      "lot": "L00",
+      "title": "Auditer et verrouiller la cible locale",
+      "document": "tasks/L00/L00-A.md",
+      "depends_on": [],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L00/L00-A.md",
+        "specs/S00.md",
+        "contracts/C06.md",
+        "contracts/C07.md",
+        "tests/T00.md",
+        "docs/04-AUDIT-API.md",
+        "docs/05-VISUAL-STUDIO-MCP.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Bootstrap/",
+        "testsrc/WorldGen.Tests/L00A/",
+        "worklogs/L00-A.md"
+      ],
+      "requirements": [
+        "R00-01",
+        "R00-02"
+      ],
+      "tests": [
+        "T00-01",
+        "T00-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L00-B",
+      "lot": "L00",
+      "title": "Prouver le débogage C# par le MCP",
+      "document": "tasks/L00/L00-B.md",
+      "depends_on": [
+        "L00-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L00/L00-B.md",
+        "specs/S00.md",
+        "contracts/C06.md",
+        "contracts/C07.md",
+        "tests/T00.md",
+        "docs/04-AUDIT-API.md",
+        "docs/05-VISUAL-STUDIO-MCP.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/DebugProbe/",
+        "testsrc/WorldGen.Tests/L00B/",
+        "worklogs/L00-B.md"
+      ],
+      "requirements": [
+        "R00-03"
+      ],
+      "tests": [
+        "T00-03"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L00-C",
+      "lot": "L00",
+      "title": "Valider un remplacement de terrain minimal",
+      "document": "tasks/L00/L00-C.md",
+      "depends_on": [
+        "L00-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L00/L00-C.md",
+        "specs/S00.md",
+        "contracts/C06.md",
+        "contracts/C07.md",
+        "tests/T00.md",
+        "docs/04-AUDIT-API.md",
+        "docs/05-VISUAL-STUDIO-MCP.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/WorldgenProbe/",
+        "testsrc/WorldGen.Tests/L00C/",
+        "worklogs/L00-C.md"
+      ],
+      "requirements": [
+        "R00-04",
+        "R00-05",
+        "R00-06"
+      ],
+      "tests": [
+        "T00-04",
+        "T00-05",
+        "T00-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L01-A",
+      "lot": "L01",
+      "title": "Construire coordonnées, RNG et IDs",
+      "document": "tasks/L01/L01-A.md",
+      "depends_on": [
+        "L00-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L01/L01-A.md",
+        "specs/S01.md",
+        "contracts/C00.md",
+        "tests/T01.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Foundation/",
+        "testsrc/WorldGen.Tests/L01A/",
+        "worklogs/L01-A.md"
+      ],
+      "requirements": [
+        "R01-01",
+        "R01-02"
+      ],
+      "tests": [
+        "T01-01",
+        "T01-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L01-B",
+      "lot": "L01",
+      "title": "Geler contrats C# et snapshots",
+      "document": "tasks/L01/L01-B.md",
+      "depends_on": [
+        "L01-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L01/L01-B.md",
+        "specs/S01.md",
+        "contracts/C00.md",
+        "tests/T01.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Contracts/",
+        "testsrc/WorldGen.Tests/L01B/",
+        "worklogs/L01-B.md"
+      ],
+      "requirements": [
+        "R01-03",
+        "R01-04"
+      ],
+      "tests": [
+        "T01-03",
+        "T01-04"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L01-C",
+      "lot": "L01",
+      "title": "Établir banc analytique et harnais de tests",
+      "document": "tasks/L01/L01-C.md",
+      "depends_on": [
+        "L01-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L01/L01-C.md",
+        "specs/S01.md",
+        "contracts/C00.md",
+        "tests/T01.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Tools/TestHarness/",
+        "testsrc/WorldGen.Tests/L01C/",
+        "worklogs/L01-C.md"
+      ],
+      "requirements": [
+        "R01-05",
+        "R01-06"
+      ],
+      "tests": [
+        "T01-05",
+        "T01-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L02-A",
+      "lot": "L02",
+      "title": "Construire la géométrie robuste de l’atlas",
+      "document": "tasks/L02/L02-A.md",
+      "depends_on": [
+        "L01-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L02/L02-A.md",
+        "specs/S02.md",
+        "contracts/C00.md",
+        "contracts/C01.md",
+        "tests/T02.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Atlas/Geometry/",
+        "testsrc/WorldGen.Tests/L02A/",
+        "worklogs/L02-A.md"
+      ],
+      "requirements": [
+        "R02-01",
+        "R02-02"
+      ],
+      "tests": [
+        "T02-01",
+        "T02-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L02-B",
+      "lot": "L02",
+      "title": "Indexer et borner les descriptions globales",
+      "document": "tasks/L02/L02-B.md",
+      "depends_on": [
+        "L02-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L02/L02-B.md",
+        "specs/S02.md",
+        "contracts/C00.md",
+        "contracts/C01.md",
+        "tests/T02.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Atlas/SpatialIndex/",
+        "testsrc/WorldGen.Tests/L02B/",
+        "worklogs/L02-B.md"
+      ],
+      "requirements": [
+        "R02-03",
+        "R02-04"
+      ],
+      "tests": [
+        "T02-03",
+        "T02-04"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L02-C",
+      "lot": "L02",
+      "title": "Définir profils d’échelle et contrôle des motifs",
+      "document": "tasks/L02/L02-C.md",
+      "depends_on": [
+        "L02-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L02/L02-C.md",
+        "specs/S02.md",
+        "contracts/C00.md",
+        "contracts/C01.md",
+        "tests/T02.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Atlas/Profiles/",
+        "testsrc/WorldGen.Tests/L02C/",
+        "worklogs/L02-C.md"
+      ],
+      "requirements": [
+        "R02-05",
+        "R02-06"
+      ],
+      "tests": [
+        "T02-05",
+        "T02-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L03-A",
+      "lot": "L03",
+      "title": "Produire plaques et masses continentales",
+      "document": "tasks/L03/L03-A.md",
+      "depends_on": [
+        "L02-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L03/L03-A.md",
+        "specs/S03.md",
+        "contracts/C01.md",
+        "tests/T03.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Geology/Plates/",
+        "testsrc/WorldGen.Tests/L03A/",
+        "worklogs/L03-A.md"
+      ],
+      "requirements": [
+        "R03-01",
+        "R03-02"
+      ],
+      "tests": [
+        "T03-01",
+        "T03-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L03-B",
+      "lot": "L03",
+      "title": "Composer reliefs et enveloppe verticale",
+      "document": "tasks/L03/L03-B.md",
+      "depends_on": [
+        "L03-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L03/L03-B.md",
+        "specs/S03.md",
+        "contracts/C01.md",
+        "tests/T03.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Geology/Landscapes/",
+        "testsrc/WorldGen.Tests/L03B/",
+        "worklogs/L03-B.md"
+      ],
+      "requirements": [
+        "R03-05",
+        "R03-06"
+      ],
+      "tests": [
+        "T03-05",
+        "T03-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L03-C",
+      "lot": "L03",
+      "title": "Décrire strates et propriétés des roches",
+      "document": "tasks/L03/L03-C.md",
+      "depends_on": [
+        "L03-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L03/L03-C.md",
+        "specs/S03.md",
+        "contracts/C01.md",
+        "tests/T03.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Geology/Materials/",
+        "testsrc/WorldGen.Tests/L03C/",
+        "worklogs/L03-C.md"
+      ],
+      "requirements": [
+        "R03-03",
+        "R03-04"
+      ],
+      "tests": [
+        "T03-03",
+        "T03-04"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L04-A",
+      "lot": "L04",
+      "title": "Calculer température et latitude cohérentes",
+      "document": "tasks/L04/L04-A.md",
+      "depends_on": [
+        "L03-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L04/L04-A.md",
+        "specs/S04.md",
+        "contracts/C02.md",
+        "tests/T04.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Climate/Temperature/",
+        "testsrc/WorldGen.Tests/L04A/",
+        "worklogs/L04-A.md"
+      ],
+      "requirements": [
+        "R04-01",
+        "R04-02"
+      ],
+      "tests": [
+        "T04-01",
+        "T04-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L04-B",
+      "lot": "L04",
+      "title": "Transporter humidité et précipitations",
+      "document": "tasks/L04/L04-B.md",
+      "depends_on": [
+        "L04-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L04/L04-B.md",
+        "specs/S04.md",
+        "contracts/C02.md",
+        "tests/T04.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Climate/Precipitation/",
+        "testsrc/WorldGen.Tests/L04B/",
+        "worklogs/L04-B.md"
+      ],
+      "requirements": [
+        "R04-03",
+        "R04-04"
+      ],
+      "tests": [
+        "T04-03",
+        "T04-04"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L04-C",
+      "lot": "L04",
+      "title": "Établir budgets de ruissellement et recharge",
+      "document": "tasks/L04/L04-C.md",
+      "depends_on": [
+        "L04-B",
+        "L03-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L04/L04-C.md",
+        "specs/S04.md",
+        "contracts/C02.md",
+        "tests/T04.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Climate/WaterBudget/",
+        "testsrc/WorldGen.Tests/L04C/",
+        "worklogs/L04-C.md"
+      ],
+      "requirements": [
+        "R04-05",
+        "R04-06"
+      ],
+      "tests": [
+        "T04-05",
+        "T04-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L05-A",
+      "lot": "L05",
+      "title": "Résoudre dépressions et topologie de drainage",
+      "document": "tasks/L05/L05-A.md",
+      "depends_on": [
+        "L03-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L05/L05-A.md",
+        "specs/S05.md",
+        "contracts/C02.md",
+        "contracts/C03.md",
+        "tests/T05.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Hydrology/Depressions/",
+        "testsrc/WorldGen.Tests/L05A/",
+        "worklogs/L05-A.md"
+      ],
+      "requirements": [
+        "R05-01",
+        "R05-02",
+        "R05-04"
+      ],
+      "tests": [
+        "T05-01",
+        "T05-02",
+        "T05-04"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L05-B",
+      "lot": "L05",
+      "title": "Accumuler débits et transferts",
+      "document": "tasks/L05/L05-B.md",
+      "depends_on": [
+        "L05-A",
+        "L04-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L05/L05-B.md",
+        "specs/S05.md",
+        "contracts/C02.md",
+        "contracts/C03.md",
+        "tests/T05.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Hydrology/Discharge/",
+        "testsrc/WorldGen.Tests/L05B/",
+        "worklogs/L05-B.md"
+      ],
+      "requirements": [
+        "R05-03"
+      ],
+      "tests": [
+        "T05-03"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L05-C",
+      "lot": "L05",
+      "title": "Publier exutoires et budgets de raffinement",
+      "document": "tasks/L05/L05-C.md",
+      "depends_on": [
+        "L05-B",
+        "L02-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L05/L05-C.md",
+        "specs/S05.md",
+        "contracts/C02.md",
+        "contracts/C03.md",
+        "tests/T05.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Hydrology/Boundaries/",
+        "testsrc/WorldGen.Tests/L05C/",
+        "worklogs/L05-C.md"
+      ],
+      "requirements": [
+        "R05-05",
+        "R05-06"
+      ],
+      "tests": [
+        "T05-05",
+        "T05-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L06-A",
+      "lot": "L06",
+      "title": "Implémenter incision et uplift déterministes",
+      "document": "tasks/L06/L06-A.md",
+      "depends_on": [
+        "L05-C",
+        "L03-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L06/L06-A.md",
+        "specs/S06.md",
+        "contracts/C03.md",
+        "tests/T06.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Erosion/Incision/",
+        "testsrc/WorldGen.Tests/L06A/",
+        "worklogs/L06-A.md"
+      ],
+      "requirements": [
+        "R06-01",
+        "R06-03"
+      ],
+      "tests": [
+        "T06-01",
+        "T06-03"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L06-B",
+      "lot": "L06",
+      "title": "Ajouter transport, dépôts et boucle couplée",
+      "document": "tasks/L06/L06-B.md",
+      "depends_on": [
+        "L06-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L06/L06-B.md",
+        "specs/S06.md",
+        "contracts/C03.md",
+        "tests/T06.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Erosion/Evolution/",
+        "testsrc/WorldGen.Tests/L06B/",
+        "worklogs/L06-B.md"
+      ],
+      "requirements": [
+        "R06-02",
+        "R06-04"
+      ],
+      "tests": [
+        "T06-02",
+        "T06-04"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L06-C",
+      "lot": "L06",
+      "title": "Raffiner sans détruire les contraintes",
+      "document": "tasks/L06/L06-C.md",
+      "depends_on": [
+        "L06-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L06/L06-C.md",
+        "specs/S06.md",
+        "contracts/C03.md",
+        "tests/T06.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Erosion/Refinement/",
+        "testsrc/WorldGen.Tests/L06C/",
+        "worklogs/L06-C.md"
+      ],
+      "requirements": [
+        "R06-05",
+        "R06-06"
+      ],
+      "tests": [
+        "T06-05",
+        "T06-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L07-A",
+      "lot": "L07",
+      "title": "Construire trajectoires et sections fluviales",
+      "document": "tasks/L07/L07-A.md",
+      "depends_on": [
+        "L06-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L07/L07-A.md",
+        "specs/S07.md",
+        "contracts/C03.md",
+        "contracts/C06.md",
+        "tests/T07.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Waters/Rivers/",
+        "testsrc/WorldGen.Tests/L07A/",
+        "worklogs/L07-A.md"
+      ],
+      "requirements": [
+        "R07-01",
+        "R07-02"
+      ],
+      "tests": [
+        "T07-01",
+        "T07-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L07-B",
+      "lot": "L07",
+      "title": "Construire lacs, côtes et deltas",
+      "document": "tasks/L07/L07-B.md",
+      "depends_on": [
+        "L07-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L07/L07-B.md",
+        "specs/S07.md",
+        "contracts/C03.md",
+        "contracts/C06.md",
+        "tests/T07.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Waters/WaterBodies/",
+        "testsrc/WorldGen.Tests/L07B/",
+        "worklogs/L07-B.md"
+      ],
+      "requirements": [
+        "R07-03",
+        "R07-04",
+        "R07-05"
+      ],
+      "tests": [
+        "T07-03",
+        "T07-04",
+        "T07-05"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L07-C",
+      "lot": "L07",
+      "title": "Qualifier la matérialisation des fluides",
+      "document": "tasks/L07/L07-C.md",
+      "depends_on": [
+        "L07-B",
+        "L11-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L07/L07-C.md",
+        "specs/S07.md",
+        "contracts/C03.md",
+        "contracts/C06.md",
+        "tests/T07.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Fluids/",
+        "testsrc/WorldGen.Tests/L07C/",
+        "worklogs/L07-C.md"
+      ],
+      "requirements": [
+        "R07-06"
+      ],
+      "tests": [
+        "T07-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L08-A",
+      "lot": "L08",
+      "title": "Planifier les réseaux de cavernes",
+      "document": "tasks/L08/L08-A.md",
+      "depends_on": [
+        "L03-C",
+        "L05-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L08/L08-A.md",
+        "specs/S08.md",
+        "contracts/C04.md",
+        "tests/T08.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Caves/Networks/",
+        "testsrc/WorldGen.Tests/L08A/",
+        "worklogs/L08-A.md"
+      ],
+      "requirements": [
+        "R08-01",
+        "R08-03"
+      ],
+      "tests": [
+        "T08-01",
+        "T08-03"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L08-B",
+      "lot": "L08",
+      "title": "Composer les volumes souterrains",
+      "document": "tasks/L08/L08-B.md",
+      "depends_on": [
+        "L08-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L08/L08-B.md",
+        "specs/S08.md",
+        "contracts/C04.md",
+        "tests/T08.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Caves/Volumes/",
+        "testsrc/WorldGen.Tests/L08B/",
+        "worklogs/L08-B.md"
+      ],
+      "requirements": [
+        "R08-02",
+        "R08-06"
+      ],
+      "tests": [
+        "T08-02",
+        "T08-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L08-C",
+      "lot": "L08",
+      "title": "Valider navigation et eau souterraine",
+      "document": "tasks/L08/L08-C.md",
+      "depends_on": [
+        "L08-B",
+        "L07-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L08/L08-C.md",
+        "specs/S08.md",
+        "contracts/C04.md",
+        "tests/T08.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Caves/Traversal/",
+        "testsrc/WorldGen.Tests/L08C/",
+        "worklogs/L08-C.md"
+      ],
+      "requirements": [
+        "R08-04",
+        "R08-05"
+      ],
+      "tests": [
+        "T08-04",
+        "T08-05"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L09-A",
+      "lot": "L09",
+      "title": "Sélectionner des sites rares connectés",
+      "document": "tasks/L09/L09-A.md",
+      "depends_on": [
+        "L08-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L09/L09-A.md",
+        "specs/S09.md",
+        "contracts/C04.md",
+        "tests/T09.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Wonders/Placement/",
+        "testsrc/WorldGen.Tests/L09A/",
+        "worklogs/L09-A.md"
+      ],
+      "requirements": [
+        "R09-02",
+        "R09-03"
+      ],
+      "tests": [
+        "T09-02",
+        "T09-03"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L09-B",
+      "lot": "L09",
+      "title": "Composer les cinq familles fantastiques",
+      "document": "tasks/L09/L09-B.md",
+      "depends_on": [
+        "L09-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L09/L09-B.md",
+        "specs/S09.md",
+        "contracts/C04.md",
+        "tests/T09.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Wonders/Themes/",
+        "testsrc/WorldGen.Tests/L09B/",
+        "worklogs/L09-B.md"
+      ],
+      "requirements": [
+        "R09-01",
+        "R09-06"
+      ],
+      "tests": [
+        "T09-01",
+        "T09-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L09-C",
+      "lot": "L09",
+      "title": "Certifier les accès après toutes les passes",
+      "document": "tasks/L09/L09-C.md",
+      "depends_on": [
+        "L09-B",
+        "L11-C",
+        "L12-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L09/L09-C.md",
+        "specs/S09.md",
+        "contracts/C04.md",
+        "tests/T09.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/WonderValidation/",
+        "testsrc/WorldGen.Tests/L09C/",
+        "worklogs/L09-C.md"
+      ],
+      "requirements": [
+        "R09-04",
+        "R09-05"
+      ],
+      "tests": [
+        "T09-04",
+        "T09-05"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L10-A",
+      "lot": "L10",
+      "title": "Écrire manifeste et stockage versionné",
+      "document": "tasks/L10/L10-A.md",
+      "depends_on": [
+        "L01-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L10/L10-A.md",
+        "specs/S10.md",
+        "contracts/C00.md",
+        "contracts/C05.md",
+        "tests/T10.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Runtime/Persistence/",
+        "testsrc/WorldGen.Tests/L10A/",
+        "worklogs/L10-A.md"
+      ],
+      "requirements": [
+        "R10-01",
+        "R10-02"
+      ],
+      "tests": [
+        "T10-01",
+        "T10-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L10-B",
+      "lot": "L10",
+      "title": "Construire scheduler et caches bornés",
+      "document": "tasks/L10/L10-B.md",
+      "depends_on": [
+        "L10-A",
+        "L01-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L10/L10-B.md",
+        "specs/S10.md",
+        "contracts/C00.md",
+        "contracts/C05.md",
+        "tests/T10.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Runtime/Scheduling/",
+        "testsrc/WorldGen.Tests/L10B/",
+        "worklogs/L10-B.md"
+      ],
+      "requirements": [
+        "R10-04",
+        "R10-05"
+      ],
+      "tests": [
+        "T10-04",
+        "T10-05"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L10-C",
+      "lot": "L10",
+      "title": "Qualifier reprise après crash et arrêt",
+      "document": "tasks/L10/L10-C.md",
+      "depends_on": [
+        "L10-B",
+        "L11-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L10/L10-C.md",
+        "specs/S10.md",
+        "contracts/C00.md",
+        "contracts/C05.md",
+        "tests/T10.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Runtime/Recovery/",
+        "testsrc/WorldGen.Tests/L10C/",
+        "worklogs/L10-C.md"
+      ],
+      "requirements": [
+        "R10-03",
+        "R10-06"
+      ],
+      "tests": [
+        "T10-03",
+        "T10-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L11-A",
+      "lot": "L11",
+      "title": "Brancher les hooks et cartes natives",
+      "document": "tasks/L11/L11-A.md",
+      "depends_on": [
+        "L00-C",
+        "L02-C",
+        "L01-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L11/L11-A.md",
+        "specs/S11.md",
+        "contracts/C05.md",
+        "contracts/C06.md",
+        "tests/T11.md",
+        "docs/04-AUDIT-API.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Adapters/",
+        "testsrc/WorldGen.Tests/L11A/",
+        "worklogs/L11-A.md"
+      ],
+      "requirements": [
+        "R11-01",
+        "R11-02"
+      ],
+      "tests": [
+        "T11-01",
+        "T11-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L11-B",
+      "lot": "L11",
+      "title": "Assembler la colonne complète",
+      "document": "tasks/L11/L11-B.md",
+      "depends_on": [
+        "L11-A",
+        "L07-C",
+        "L08-C",
+        "L09-B",
+        "L10-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L11/L11-B.md",
+        "specs/S11.md",
+        "contracts/C05.md",
+        "contracts/C06.md",
+        "tests/T11.md",
+        "docs/04-AUDIT-API.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/ColumnGeneration/",
+        "testsrc/WorldGen.Tests/L11B/",
+        "worklogs/L11-B.md"
+      ],
+      "requirements": [
+        "R11-03"
+      ],
+      "tests": [
+        "T11-03"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L11-C",
+      "lot": "L11",
+      "title": "Qualifier contenu vanilla, spawn et serveur",
+      "document": "tasks/L11/L11-C.md",
+      "depends_on": [
+        "L11-B",
+        "L12-A",
+        "L10-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L11/L11-C.md",
+        "specs/S11.md",
+        "contracts/C05.md",
+        "contracts/C06.md",
+        "tests/T11.md",
+        "docs/04-AUDIT-API.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Compatibility/",
+        "testsrc/WorldGen.Tests/L11C/",
+        "worklogs/L11-C.md"
+      ],
+      "requirements": [
+        "R11-04",
+        "R11-05",
+        "R11-06"
+      ],
+      "tests": [
+        "T11-04",
+        "T11-05",
+        "T11-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L12-A",
+      "lot": "L12",
+      "title": "Réaliser assets et palettes fantastiques",
+      "document": "tasks/L12/L12-A.md",
+      "depends_on": [
+        "L09-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L12/L12-A.md",
+        "specs/S12.md",
+        "contracts/C06.md",
+        "contracts/C07.md",
+        "tests/T12.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Assets/",
+        "testsrc/WorldGen.Tests/L12A/",
+        "worklogs/L12-A.md",
+        "assets/worldgen/"
+      ],
+      "requirements": [
+        "R12-01"
+      ],
+      "tests": [
+        "T12-01"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L12-B",
+      "lot": "L12",
+      "title": "Exposer profils et configuration validée",
+      "document": "tasks/L12/L12-B.md",
+      "depends_on": [
+        "L02-C",
+        "L10-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L12/L12-B.md",
+        "specs/S12.md",
+        "contracts/C06.md",
+        "contracts/C07.md",
+        "tests/T12.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Configuration/",
+        "testsrc/WorldGen.Tests/L12B/",
+        "worklogs/L12-B.md"
+      ],
+      "requirements": [
+        "R12-02",
+        "R12-03"
+      ],
+      "tests": [
+        "T12-02",
+        "T12-03"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L12-C",
+      "lot": "L12",
+      "title": "Finaliser aperçu, diagnostics et preuves",
+      "document": "tasks/L12/L12-C.md",
+      "depends_on": [
+        "L01-C",
+        "L06-C",
+        "L08-B",
+        "L09-B",
+        "L11-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L12/L12-C.md",
+        "specs/S12.md",
+        "contracts/C06.md",
+        "contracts/C07.md",
+        "tests/T12.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Tools/Diagnostics/",
+        "testsrc/WorldGen.Tests/L12C/",
+        "worklogs/L12-C.md",
+        "src/WorldGen.VintageStory/Diagnostics/"
+      ],
+      "requirements": [
+        "R12-04",
+        "R12-05",
+        "R12-06"
+      ],
+      "tests": [
+        "T12-04",
+        "T12-05",
+        "T12-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L13-A",
+      "lot": "L13",
+      "title": "Exécuter la campagne et la revue des paysages",
+      "document": "tasks/L13/L13-A.md",
+      "depends_on": [
+        "L09-C",
+        "L11-C",
+        "L12-C",
+        "L10-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L13/L13-A.md",
+        "specs/S13.md",
+        "contracts/C07.md",
+        "tests/T13.md",
+        "tests/00-RECETTE.md",
+        "registry/quality-budgets.json"
+      ],
+      "allowed_write_paths": [
+        "testsrc/WorldGen.AcceptanceTests/Campaigns/",
+        "testsrc/WorldGen.Tests/L13A/",
+        "worklogs/L13-A.md"
+      ],
+      "requirements": [
+        "R13-01",
+        "R13-02"
+      ],
+      "tests": [
+        "T13-01",
+        "T13-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L13-B",
+      "lot": "L13",
+      "title": "Qualifier performances et parties complètes",
+      "document": "tasks/L13/L13-B.md",
+      "depends_on": [
+        "L13-A",
+        "L12-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L13/L13-B.md",
+        "specs/S13.md",
+        "contracts/C07.md",
+        "tests/T13.md",
+        "tests/00-RECETTE.md",
+        "registry/quality-budgets.json"
+      ],
+      "allowed_write_paths": [
+        "testsrc/WorldGen.AcceptanceTests/Endurance/",
+        "testsrc/WorldGen.Tests/L13B/",
+        "worklogs/L13-B.md"
+      ],
+      "requirements": [
+        "R13-03",
+        "R13-04"
+      ],
+      "tests": [
+        "T13-03",
+        "T13-04"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    },
+    {
+      "id": "L13-C",
+      "lot": "L13",
+      "title": "Préparer et auditer la distribution V1",
+      "document": "tasks/L13/L13-C.md",
+      "depends_on": [
+        "L13-B",
+        "L12-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L13/L13-C.md",
+        "specs/S13.md",
+        "contracts/C07.md",
+        "tests/T13.md",
+        "tests/00-RECETTE.md",
+        "registry/quality-budgets.json"
+      ],
+      "allowed_write_paths": [
+        "distribution/",
+        "testsrc/WorldGen.Tests/L13C/",
+        "worklogs/L13-C.md"
+      ],
+      "requirements": [
+        "R13-05",
+        "R13-06"
+      ],
+      "tests": [
+        "T13-05",
+        "T13-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG"
+    }
+  ]
+}
