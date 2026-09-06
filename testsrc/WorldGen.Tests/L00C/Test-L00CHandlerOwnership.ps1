@@ -14,6 +14,9 @@ foreach ($fragment in @(
     'BlockingLoadChunkColumn',
     'L00C_PERSISTED_REOPEN_STABLE',
     'loadpriority={priorityLoads}',
+    'transientrequests={transientRequests}',
+    'refreshpasses={refreshPasses}',
+    'refreshedmapchunks={refreshedMapChunks}',
     'fixturewrites={fixtureWrites}',
     'callbacks={fixtureCallbackCount}',
     'MarkerPublicationGate',
@@ -29,16 +32,17 @@ $initializeEnd = $source.IndexOf('private RestoreResult RestoreOwnedHandlerSet('
 $initializeMethod = $source.Substring($initializeStart, $initializeEnd - $initializeStart)
 $runInvalidation = $initializeMethod.IndexOf('Interlocked.Increment(ref worldRunId)', [StringComparison]::Ordinal)
 $worldTransition = $initializeMethod.IndexOf('BeginWorldTransition()', $runInvalidation, [StringComparison]::Ordinal)
-$columnCleanup = $initializeMethod.IndexOf('ReleaseOwnedColumns("world-initialize")', $worldTransition, [StringComparison]::Ordinal)
-if ($runInvalidation -lt 0 -or $worldTransition -le $runInvalidation -or $columnCleanup -le $worldTransition) {
-    throw 'World initialization must invalidate callbacks and disengage marker publication before fallible owned-column cleanup.'
+$handlerCleanup = $initializeMethod.IndexOf('RestoreOwnedHandlerSet("world-initialize")', $worldTransition, [StringComparison]::Ordinal)
+if ($runInvalidation -lt 0 -or $worldTransition -le $runInvalidation -or $handlerCleanup -le $worldTransition) {
+    throw 'World initialization must invalidate callbacks and disengage transient state before fallible handler cleanup.'
 }
 $transitionStart = $source.IndexOf('private void BeginWorldTransition()', [StringComparison]::Ordinal)
 $transitionEnd = $source.IndexOf('private RestoreResult RestoreOwnedHandlerSet(', $transitionStart, [StringComparison]::Ordinal)
 $transitionMethod = $source.Substring($transitionStart, $transitionEnd - $transitionStart)
 if ($transitionMethod.IndexOf('markerPublication.BeginWorldTransition()', [StringComparison]::Ordinal) -lt 0 -or
-    $transitionMethod.IndexOf('marker = null', [StringComparison]::Ordinal) -lt 0) {
-    throw 'The production world-transition boundary does not atomically disengage the gate and owner marker under runGate.'
+    $transitionMethod.IndexOf('marker = null', [StringComparison]::Ordinal) -lt 0 -or
+    $transitionMethod.IndexOf('ResetTransientLoadCallbacks("world-initialize")', [StringComparison]::Ordinal) -lt 0) {
+    throw 'The production world-transition boundary does not atomically disengage marker and transient callback state under runGate.'
 }
 $reopenStart = $initializeMethod.IndexOf('if (!saveGame.IsNew)', [StringComparison]::Ordinal)
 $reopenInspect = $initializeMethod.IndexOf('InspectPersistedFootprintBlocking()', $reopenStart, [StringComparison]::Ordinal)

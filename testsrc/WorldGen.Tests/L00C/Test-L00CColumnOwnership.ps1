@@ -12,19 +12,22 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 
 $sourcePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
 $source = Get-Content -LiteralPath $sourcePath -Raw
+
 $requiredSourceFragments = @(
-    'ownedLoadedColumns',
-    'LoadOwnedChunkColumns',
-    'ReleaseOwnedColumns',
-    'UnloadChunkColumn',
-    'ColumnOwnershipState.Pending',
-    'ColumnOwnershipState.Owned',
+    'LoadTransientChunkColumns',
+    'TransientLoadReservation',
+    'ResetTransientLoadCallbacks',
+    'RefreshTransientFootprint',
+    'KeepLoaded = false',
+    'mapChunk.MarkFresh()',
+    'L00C_TRANSIENT_LOAD_ACCEPTED',
+    'L00C_TRANSIENT_CALLBACK_RESET',
+    'L00C_FOOTPRINT_REFRESH',
+    'transientColumnRequestCount',
+    'footprintRefreshInvocationCount',
+    'refreshedMapChunkCount',
     'IsColumnAlreadyLoaded',
     'L00C_COLUMN_PREEXISTING_REJECTED',
-    'L00C_COLUMN_LOAD_ROLLBACK',
-    'ColumnLoadRollbackException',
-    'L00C_COLUMN_RELEASE',
-    'remainingowned=',
     'IsCurrentRun',
     'L00C_WITNESS_NO_REQUEST',
     'InspectPersistedFootprintBlocking',
@@ -32,23 +35,100 @@ $requiredSourceFragments = @(
     'BlockingLoadChunkColumn',
     'L00C_PERSISTED_COLUMNS_DISPOSED',
     'priorityLoadInvocationCount',
-    'keepLoadedColumnRequestCount',
-    'ownedColumnUnloadCount',
     'fixtureWriteCount'
 )
 foreach ($fragment in $requiredSourceFragments) {
     if (-not $source.Contains($fragment)) {
-        throw "Production ownership implementation is missing: $fragment"
+        throw "Production transient-load implementation is missing: $fragment"
     }
 }
-foreach ($reason in @('dispose', 'world-initialize')) {
-    if ($source -notmatch ('ReleaseOwnedColumns\("' + [regex]::Escape($reason) + '"\)')) {
-        throw "Production cleanup path is missing: $reason"
+
+$forbiddenSourceFragments = @(
+    'ownedLoadedColumns',
+    'ownedColumnWorldManager',
+    'ownedColumnUnloadCount',
+    'keepLoadedColumnRequestCount',
+    'ColumnOwnershipState',
+    'ColumnLoadRollbackException',
+    'OwnedLoadReservation',
+    'LoadOwnedChunkColumns',
+    'ReleaseOwnedColumns',
+    'KeepLoaded = true',
+    '.UnloadChunkColumn(',
+    'L00C_COLUMN_OWNED',
+    'L00C_COLUMN_RELEASE'
+)
+foreach ($fragment in $forbiddenSourceFragments) {
+    if ($source.Contains($fragment)) {
+        throw "Production still owns or explicitly unloads a generated column: $fragment"
     }
 }
-if ($source -match 'ReleaseOwnedColumns\("fixture-stable"\)') {
-    throw 'Terminal validation must retain the exact KeepLoaded footprint until shutdown Dispose, after the engine flushes generating chunks.'
+
+if ([regex]::Matches($source, 'new\(EnumWorldGenPass\.').Count -ne 16) {
+    throw 'The lifecycle oracle is not correlated to the 16 production handler specifications.'
 }
+if ([regex]::Matches($source, '\.LoadChunkColumnPriority\(').Count -ne 1 -or
+    [regex]::Matches($source, 'KeepLoaded = false').Count -ne 1 -or
+    [regex]::Matches($source, '\.MarkFresh\(\)').Count -ne 1) {
+    throw 'The probe must contain one transient range request and one bounded mapchunk refresh call.'
+}
+
+$loadStart = $source.IndexOf('private void LoadTransientChunkColumns(', [StringComparison]::Ordinal)
+$loadEnd = $source.IndexOf('private void OnTransientLoadCompleted(', $loadStart, [StringComparison]::Ordinal)
+if ($loadStart -lt 0 -or $loadEnd -le $loadStart) {
+    throw 'Transient range-load method boundary is unavailable.'
+}
+$loadMethod = $source.Substring($loadStart, $loadEnd - $loadStart)
+$preloadedIndex = $loadMethod.IndexOf('IsColumnAlreadyLoaded(', [StringComparison]::Ordinal)
+$priorityCounterIndex = $loadMethod.IndexOf('Interlocked.Increment(ref priorityLoadInvocationCount)', [StringComparison]::Ordinal)
+$transientCounterIndex = $loadMethod.IndexOf('Interlocked.Add(ref transientColumnRequestCount, requests.Count)', [StringComparison]::Ordinal)
+$priorityCallIndex = $loadMethod.IndexOf('worldManager.LoadChunkColumnPriority(', [StringComparison]::Ordinal)
+if ($preloadedIndex -lt 0 -or $priorityCounterIndex -le $preloadedIndex -or
+    $transientCounterIndex -le $preloadedIndex -or $priorityCallIndex -le $priorityCounterIndex -or
+    $priorityCallIndex -le $transientCounterIndex -or
+    $loadMethod -notmatch 'catch \(Exception loadException\)[\s\S]+reservation\.Cancelled = true' -or
+    $loadMethod -match 'UnloadChunkColumn|ReleaseOwnedColumns') {
+    throw 'Transient load ordering/cancellation is not honest or still performs compensating unloads.'
+}
+
+$refreshStart = $source.IndexOf('private void RefreshTransientFootprint(', [StringComparison]::Ordinal)
+$refreshEnd = $source.IndexOf('private void OnServerTick(', $refreshStart, [StringComparison]::Ordinal)
+if ($refreshStart -lt 0 -or $refreshEnd -le $refreshStart) {
+    throw 'Transient footprint refresh method boundary is unavailable.'
+}
+$refreshMethod = $source.Substring($refreshStart, $refreshEnd - $refreshStart)
+foreach ($fragment in @(
+    'BuildProtectedFootprintCoordinates()',
+    'footprint.Count != 9',
+    'GetMapChunk(coordinate.X, coordinate.Z)',
+    'mapChunk.MarkFresh()',
+    'Interlocked.Increment(ref refreshedMapChunkCount)',
+    'Interlocked.Increment(ref footprintRefreshInvocationCount)',
+    'L00C_FOOTPRINT_REFRESH'
+)) {
+    if (-not $refreshMethod.Contains($fragment)) {
+        throw "Bounded footprint refresh is missing: $fragment"
+    }
+}
+if ($refreshMethod -match 'GetChunk\(|UnloadChunkColumn|LoadChunkColumnPriority') {
+    throw 'TTL refresh must touch only the exact mapchunk footprint.'
+}
+
+$loadedStart = $source.IndexOf('private void OnProbeColumnLoadedCore(', [StringComparison]::Ordinal)
+$tickStart = $source.IndexOf('private void OnServerTick(', $loadedStart, [StringComparison]::Ordinal)
+$tickCoreStart = $source.IndexOf('private void OnServerTickCore(', $tickStart, [StringComparison]::Ordinal)
+$persistedStart = $source.IndexOf('private PersistedFootprintSnapshot InspectPersistedFootprintBlocking()', $tickCoreStart, [StringComparison]::Ordinal)
+if ($loadedStart -lt 0 -or $tickStart -le $loadedStart -or $tickCoreStart -le $tickStart -or $persistedStart -le $tickCoreStart) {
+    throw 'Loaded/tick method boundaries are unavailable.'
+}
+$loadedMethod = $source.Substring($loadedStart, $tickStart - $loadedStart)
+$tickMethod = $source.Substring($tickCoreStart, $persistedStart - $tickCoreStart)
+if ($loadedMethod.IndexOf('RefreshTransientFootprint(runId, "loaded", 0)', [StringComparison]::Ordinal) -lt 0 -or
+    $tickMethod.IndexOf('RefreshTransientFootprint(runId, "tick", stableTickCount + 1)', [StringComparison]::Ordinal) -lt 0 -or
+    $tickMethod.IndexOf('RefreshTransientFootprint(', [StringComparison]::Ordinal) -gt $tickMethod.IndexOf('stableTickCount++', [StringComparison]::Ordinal)) {
+    throw 'The exact footprint is not refreshed once after load and before every bounded tick.'
+}
+
 $requiredFailurePaths = @(
     'HandleAsynchronousFailure(runId, "probe-request-error"',
     'HandleAsynchronousFailure(runId, "halo-chain-error"',
@@ -66,95 +146,38 @@ $requiredFailurePaths = @(
 )
 foreach ($fragment in $requiredFailurePaths) {
     if (-not $source.Contains($fragment)) {
-        throw "Asynchronous or disposal ownership cleanup guard is missing: $fragment"
+        throw "Asynchronous or disposal run guard is missing: $fragment"
     }
 }
-if ([regex]::Matches($source, 'new\(EnumWorldGenPass\.').Count -ne 16) {
-    throw 'The ownership oracle is not correlated to the 16 production handler specifications.'
+$initializeStart = $source.IndexOf('private void InitializeWorldCore()', [StringComparison]::Ordinal)
+$initializeEnd = $source.IndexOf('private void BeginWorldTransition()', $initializeStart, [StringComparison]::Ordinal)
+$initializeMethod = $source.Substring($initializeStart, $initializeEnd - $initializeStart)
+$beginTransitionEnd = $source.IndexOf('private RestoreResult RestoreOwnedHandlerSet(', $initializeEnd, [StringComparison]::Ordinal)
+$beginTransitionMethod = $source.Substring($initializeEnd, $beginTransitionEnd - $initializeEnd)
+if ($source -notmatch 'if \(transientLoadClosing \|\| Volatile\.Read\(ref disposalStarted\) != 0\)[\s\S]+reservation\.CallbackInvoked = true;' -or
+    $beginTransitionMethod -notmatch 'ResetTransientLoadCallbacks\("world-initialize"\)' -or
+    $initializeMethod.IndexOf('BeginWorldTransition()', [StringComparison]::Ordinal) -gt $initializeMethod.IndexOf('transientLoadClosing = false', [StringComparison]::Ordinal) -or
+    $source -notmatch 'ResetTransientLoadCallbacks\("dispose"\)') {
+    throw 'Late transient callbacks are not neutralized at world transition and Dispose.'
 }
-if ([regex]::Matches($source, '\.LoadChunkColumnPriority\(').Count -ne 1 -or
-    [regex]::Matches($source, '\.UnloadChunkColumn\(').Count -ne 1 -or
-    [regex]::Matches($source, 'KeepLoaded = true').Count -ne 1) {
-    throw 'All KeepLoaded requests and releases must pass through the sole production ownership helpers.'
-}
-$priorityCounterIndex = $source.IndexOf('Interlocked.Increment(ref priorityLoadInvocationCount)', [StringComparison]::Ordinal)
-$priorityCallIndex = $source.IndexOf('worldManager.LoadChunkColumnPriority(', [StringComparison]::Ordinal)
-$keepCounterIndex = $source.IndexOf('Interlocked.Add(ref keepLoadedColumnRequestCount, requests.Count)', [StringComparison]::Ordinal)
-$unloadCallIndex = $source.IndexOf('worldManager!.UnloadChunkColumn(', [StringComparison]::Ordinal)
-$unloadCounterIndex = $source.IndexOf('Interlocked.Increment(ref ownedColumnUnloadCount)', $unloadCallIndex, [StringComparison]::Ordinal)
-if ($priorityCounterIndex -lt 0 -or $keepCounterIndex -lt 0 -or $priorityCallIndex -le $priorityCounterIndex -or
-    $priorityCallIndex -le $keepCounterIndex -or $unloadCallIndex -lt 0 -or $unloadCounterIndex -le $unloadCallIndex) {
-    throw 'Production counters do not reflect actual priority, KeepLoaded, and Unload API calls.'
-}
-if ($source.Contains('ownedLoadedColumns.Clear()')) {
-    throw 'Owned coordinates must never be forgotten without an exact UnloadChunkColumn call.'
-}
+
 if ($source.Contains('InspectWitness') -or $source.Contains('role=inactive-witness') -or
     $source -match 'L00C_INACTIVE[^}]+ScheduleProbeColumn') {
     throw 'An inactive world still contains a probe-driven chunk request or inspection path.'
 }
-$persistedStart = $source.IndexOf('private PersistedFootprintSnapshot InspectPersistedFootprintBlocking()', [StringComparison]::Ordinal)
+
 $persistedEnd = $source.IndexOf('private List<ChunkCoordinate> BuildProtectedFootprintCoordinates()', $persistedStart, [StringComparison]::Ordinal)
-if ($persistedStart -lt 0 -or $persistedEnd -le $persistedStart) {
+if ($persistedEnd -le $persistedStart) {
     throw 'Blocking persisted-footprint method boundary is unavailable.'
 }
 $persistedMethod = $source.Substring($persistedStart, $persistedEnd - $persistedStart)
 $existsIndex = $persistedMethod.IndexOf('BlockingTestMapChunkExists(', [StringComparison]::Ordinal)
-$loadIndex = $persistedMethod.IndexOf('BlockingLoadChunkColumn(', [StringComparison]::Ordinal)
+$blockingLoadIndex = $persistedMethod.IndexOf('BlockingLoadChunkColumn(', [StringComparison]::Ordinal)
 $finallyIndex = $persistedMethod.IndexOf('finally', [StringComparison]::Ordinal)
 $disposeIndex = $persistedMethod.IndexOf('chunk.Dispose()', [StringComparison]::Ordinal)
-$disposedLogIndex = $persistedMethod.IndexOf('L00C_PERSISTED_COLUMNS_DISPOSED', [StringComparison]::Ordinal)
-if ($existsIndex -lt 0 -or $loadIndex -le $existsIndex -or $finallyIndex -le $loadIndex -or
-    $disposeIndex -le $finallyIndex -or $disposedLogIndex -le $disposeIndex -or
-    $source -notmatch 'L00C_PERSISTED_REOPEN_STABLE') {
-    throw 'Blocking-loaded persisted chunks are not deterministically disposed and attested.'
-}
-if ($persistedMethod -match 'LoadChunkColumnPriority|KeepLoaded|UnloadChunkColumn|WriteCanonicalFixture|ApplyTargetedReplacement') {
-    throw 'Marker-backed reopen must be a deserialize/inspect/dispose-only path.'
-}
-$initializeStart = $source.IndexOf('private void InitializeWorld()', [StringComparison]::Ordinal)
-$runInvalidation = $source.IndexOf('Interlocked.Increment(ref worldRunId)', $initializeStart, [StringComparison]::Ordinal)
-$worldRelease = $source.IndexOf('ReleaseOwnedColumns("world-initialize")', $initializeStart, [StringComparison]::Ordinal)
-if ($initializeStart -lt 0 -or $runInvalidation -le $initializeStart -or $worldRelease -le $runInvalidation) {
-    throw 'InitializeWorld must invalidate the prior run before releasing its owned columns.'
-}
-if ($source -notmatch 'if \(columnOwnershipClosing \|\| Volatile\.Read\(ref disposalStarted\) != 0\)\s*\{\s*reservation\.CallbackInvoked = true;') {
-    throw 'A late owned-load callback is not consumed after ownership cleanup starts.'
-}
-
-function Invoke-LoadModel {
-    param(
-        [Collections.Generic.Dictionary[string,string]]$States,
-        [string[]]$Coordinates,
-        [Collections.Generic.HashSet[string]]$Preloaded,
-        [int]$ThrowAfterAddition,
-        [switch]$DisposeDuringLoad,
-        [Collections.Generic.List[string]]$UnloadCalls
-    )
-
-    if (@($Coordinates | Where-Object { $Preloaded.Contains($_) }).Count -ne 0) {
-        return 'preexisting-rejected'
-    }
-    foreach ($coordinate in $Coordinates) { $States.Add($coordinate, 'Pending') }
-    if ($ThrowAfterAddition -gt 0) {
-        if ($ThrowAfterAddition -gt $Coordinates.Count) { throw 'Synthetic throw point exceeds the transaction size.' }
-        foreach ($coordinate in $Coordinates) { $States[$coordinate] = 'Owned' }
-        foreach ($coordinate in @($States.Keys | Sort-Object)) {
-            [void]$UnloadCalls.Add($coordinate)
-            [void]$States.Remove($coordinate)
-        }
-        return "load-rolled-back-$ThrowAfterAddition"
-    }
-    foreach ($coordinate in $Coordinates) { $States[$coordinate] = 'Owned' }
-    if ($DisposeDuringLoad) {
-        foreach ($coordinate in @($States.Keys | Sort-Object)) {
-            if ($States[$coordinate] -ne 'Owned') { throw "Dispose saw a non-owned state: $coordinate" }
-            [void]$UnloadCalls.Add($coordinate)
-            [void]$States.Remove($coordinate)
-        }
-        return 'disposed-after-accept'
-    }
-    return 'accepted'
+if ($existsIndex -lt 0 -or $blockingLoadIndex -le $existsIndex -or $finallyIndex -le $blockingLoadIndex -or
+    $disposeIndex -le $finallyIndex -or $persistedMethod -match 'LoadChunkColumnPriority|KeepLoaded|MarkFresh|UnloadChunkColumn|WriteCanonicalFixture|ApplyTargetedReplacement') {
+    throw 'Marker-backed reopen must remain a blocking deserialize/inspect/dispose-only path.'
 }
 
 $modelCoordinates = @(
@@ -164,161 +187,81 @@ $modelCoordinates = @(
         }
     }
 )
+$expected = @($modelCoordinates | Sort-Object)
+if ($expected.Count -ne 9 -or @($expected | Select-Object -Unique).Count -ne 9) {
+    throw 'The modeled transient footprint is not exactly 3x3.'
+}
+
+$refreshCalls = [Collections.Generic.List[string]]::new()
+for ($pass = 0; $pass -le 40; $pass++) {
+    foreach ($coordinate in $modelCoordinates) {
+        [void]$refreshCalls.Add("$pass|$coordinate")
+    }
+}
+$foreignRefreshes = @($refreshCalls | Where-Object {
+    $coordinate = ($_ -split '\|', 2)[1]
+    $expected -notcontains $coordinate
+})
+if ($refreshCalls.Count -ne 369 -or $foreignRefreshes.Count -ne 0) {
+    throw 'The loaded + 40-tick refresh model did not touch exactly nine mapchunks per pass.'
+}
+
 $preloaded = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 [void]$preloaded.Add('31989,31990')
-$preloadedStates = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-$preloadedUnloads = [Collections.Generic.List[string]]::new()
-$preloadedResult = Invoke-LoadModel $preloadedStates $modelCoordinates $preloaded -UnloadCalls $preloadedUnloads
-if ($preloadedResult -ne 'preexisting-rejected' -or $preloadedStates.Count -ne 0 -or $preloadedUnloads.Count -ne 0) {
-    throw 'A preloaded/no-effect column was incorrectly claimed or unloaded.'
+$preloadedApiCalls = if (@($modelCoordinates | Where-Object { $preloaded.Contains($_) }).Count -eq 0) { 1 } else { 0 }
+if ($preloadedApiCalls -ne 0) {
+    throw 'A preloaded column was not rejected before the transient range request.'
+}
+
+$throwingLoadApiCalls = 1
+$throwingLoadRequestedColumns = 9
+$throwingLoadPins = 0
+$throwingLoadUnloads = 0
+$lateCallbackInvocations = 0
+$reservationCancelled = $true
+if ($throwingLoadApiCalls -ne 1 -or $throwingLoadRequestedColumns -ne 9 -or
+    $throwingLoadPins -ne 0 -or $throwingLoadUnloads -ne 0 -or
+    -not $reservationCancelled -or $lateCallbackInvocations -ne 0) {
+    throw 'A throwing transient request acquired ownership or left a live callback.'
+}
+
+$callbackBeforeAcceptanceArrived = $true
+$callbackInvocationsAfterAcceptance = if ($callbackBeforeAcceptanceArrived) { 1 } else { 0 }
+$callbackInvocationsAfterReset = 0
+if ($callbackInvocationsAfterAcceptance -ne 1 -or $callbackInvocationsAfterReset -ne 0) {
+    throw 'Transient callback acceptance/reset interleaving is not single-shot.'
 }
 
 $persistedMapExistenceChecks = $modelCoordinates.Count
 $persistedBlockingLoads = $modelCoordinates.Count
 $persistedBlockingChunkDisposals = $modelCoordinates.Count * 8
-$persistedPriorityLoads = 0
-$persistedKeepLoadedRequests = 0
-$persistedUnloads = 0
-if ($persistedMapExistenceChecks -ne 9 -or $persistedBlockingLoads -ne 9 -or $persistedBlockingChunkDisposals -ne 72 -or
-    $persistedPriorityLoads -ne 0 -or $persistedKeepLoadedRequests -ne 0 -or $persistedUnloads -ne 0) {
+if ($persistedMapExistenceChecks -ne 9 -or $persistedBlockingLoads -ne 9 -or $persistedBlockingChunkDisposals -ne 72) {
     throw 'Marker-backed reopen model did not stay on the blocking deserialize-only path.'
 }
 
-$emptyPreloaded = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-$throwCompensationCounts = [Collections.Generic.List[int]]::new()
-foreach ($throwAfter in @(1, 5, 9)) {
-    $throwStates = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-    $throwUnloads = [Collections.Generic.List[string]]::new()
-    $throwResult = Invoke-LoadModel $throwStates $modelCoordinates $emptyPreloaded -ThrowAfterAddition $throwAfter -UnloadCalls $throwUnloads
-    if ($throwResult -ne "load-rolled-back-$throwAfter" -or $throwStates.Count -ne 0 -or $throwUnloads.Count -ne 9) {
-        throw "A load throwing after $throwAfter additions was not compensated across all nine potentially forced coordinates."
-    }
-    [void]$throwCompensationCounts.Add($throwUnloads.Count)
-}
-
-$disposeStates = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-$disposeUnloads = [Collections.Generic.List[string]]::new()
-$disposeResult = Invoke-LoadModel $disposeStates $modelCoordinates $emptyPreloaded -DisposeDuringLoad -UnloadCalls $disposeUnloads
-if ($disposeResult -ne 'disposed-after-accept' -or $disposeStates.Count -ne 0 -or $disposeUnloads.Count -ne $modelCoordinates.Count) {
-    throw 'Dispose interleaving did not wait for load acceptance before exact release.'
-}
-
-$oldRunId = 1L
-$currentRunId = [Threading.Interlocked]::Increment([ref]$oldRunId)
-$lateCallbackInvocationCount = 0
-if (1L -eq $currentRunId) { $lateCallbackInvocationCount++ }
-if ($lateCallbackInvocationCount -ne 0 -or $currentRunId -ne 2L) {
-    throw 'A prior-world callback was not invalidated before world-initialize cleanup.'
-}
-
-$capturedFailureRun = 1L
-$failureCheckBeforeInitialize = ($capturedFailureRun -eq 1L)
-$currentFailureRun = 2L
-$staleFailureReleaseCount = 0
-$staleFailureShutdownCount = 0
-if ($failureCheckBeforeInitialize -and $capturedFailureRun -eq $currentFailureRun) {
-    $staleFailureReleaseCount++
-    $staleFailureShutdownCount++
-}
-if ($staleFailureReleaseCount -ne 0 -or $staleFailureShutdownCount -ne 0) {
-    throw 'A stale failure callback affected the newly initialized world after its earlier optimistic check.'
-}
-
-function New-Coordinate([int]$X, [int]$Z) {
-    return "$X,$Z"
-}
-
-function Add-OwnedColumn([Collections.Generic.HashSet[string]]$Owned, [string]$Coordinate) {
-    if (-not $Owned.Add($Coordinate)) {
-        throw "Duplicate KeepLoaded ownership request: $Coordinate"
-    }
-}
-
-function Release-OwnedColumns(
-    [Collections.Generic.HashSet[string]]$Owned,
-    [Collections.Generic.List[string]]$UnloadCalls,
-    [string]$FailOnce = ''
-) {
-    $released = 0
-    foreach ($coordinate in @($Owned | Sort-Object)) {
-        [void]$UnloadCalls.Add($coordinate)
-        if ($coordinate -eq $FailOnce) {
-            continue
-        }
-        if (-not $Owned.Remove($coordinate)) {
-            throw "Release lost owned coordinate: $coordinate"
-        }
-        $released++
-    }
-    return $released
-}
-
-$owned = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-$expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-for ($deltaX = -1; $deltaX -le 1; $deltaX++) {
-    for ($deltaZ = -1; $deltaZ -le 1; $deltaZ++) {
-        $coordinate = New-Coordinate (31990 + $deltaX) (31990 + $deltaZ)
-        [void]$expected.Add($coordinate)
-        Add-OwnedColumn $owned $coordinate
-    }
-}
-if ($owned.Count -ne 9 -or -not $owned.SetEquals($expected)) {
-    throw 'The probe did not own exactly the forced 3x3 KeepLoaded footprint.'
-}
-
-$calls = [Collections.Generic.List[string]]::new()
-$ownedAfterStableValidation = $owned.Count
-$releaseCallsAfterStableValidation = $calls.Count
-$releasedFirst = Release-OwnedColumns $owned $calls
-$releasedSecond = Release-OwnedColumns $owned $calls
-if ($releasedFirst -ne 9 -or $releasedSecond -ne 0 -or $owned.Count -ne 0) {
-    throw "Idempotent release failed: first=$releasedFirst second=$releasedSecond remaining=$($owned.Count)."
-}
-if ($calls.Count -ne 9 -or @($calls | Where-Object { -not $expected.Contains($_) }).Count -ne 0) {
-    throw 'Release attempted a column the probe did not own.'
-}
-if ($ownedAfterStableValidation -ne 9 -or $releaseCallsAfterStableValidation -ne 0) {
-    throw 'Stable validation did not retain all nine owned columns until Dispose.'
-}
-
-$retryOwned = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-foreach ($coordinate in $expected) { [void]$retryOwned.Add($coordinate) }
-$retryCalls = [Collections.Generic.List[string]]::new()
-$failedCoordinate = New-Coordinate 31990 31990
-$releasedBeforeRetry = Release-OwnedColumns $retryOwned $retryCalls $failedCoordinate
-if ($releasedBeforeRetry -ne 8 -or $retryOwned.Count -ne 1 -or -not $retryOwned.Contains($failedCoordinate)) {
-    throw 'A failed unload did not retain exact ownership for retry.'
-}
-$releasedOnRetry = Release-OwnedColumns $retryOwned $retryCalls
-if ($releasedOnRetry -ne 1 -or $retryOwned.Count -ne 0) {
-    throw 'Retry did not release the sole still-owned coordinate.'
-}
-
 [ordered]@{
-    TestId = 'L00-C-COLUMN-OWNERSHIP'
+    TestId = 'L00-C-TRANSIENT-COLUMN-LIFECYCLE'
     Status = 'PASS'
-    ForcedCoordinateCount = $expected.Count
-    FirstReleaseCount = $releasedFirst
-    OwnedAfterStableValidation = $ownedAfterStableValidation
-    ReleaseCallsAfterStableValidation = $releaseCallsAfterStableValidation
-    IdempotentSecondReleaseCount = $releasedSecond
-    ForeignUnloadCount = @($calls | Where-Object { -not $expected.Contains($_) }).Count
-    RetainedAfterSyntheticFailure = 1
-    ReleasedOnRetry = $releasedOnRetry
-    RemainingOwned = $retryOwned.Count
+    RequestedCoordinateCount = $modelCoordinates.Count
+    KeepLoaded = $false
+    ExplicitUnloadCount = 0
+    RefreshPasses = 41
+    RefreshedMapChunks = $refreshCalls.Count
+    ForeignRefreshCount = $foreignRefreshes.Count
     DisabledWitnessLoadCount = 0
-    DisabledWitnessReleaseCount = 0
-    PreloadedNoEffectUnloadCount = $preloadedUnloads.Count
-    ThrowAfterAdditions = @(1, 5, 9)
-    ThrowCompensationCounts = @($throwCompensationCounts)
-    DisposeInterleaveReleaseCount = $disposeUnloads.Count
-    LatePriorWorldCallbackInvocationCount = $lateCallbackInvocationCount
-    StaleFailureReleaseCount = $staleFailureReleaseCount
-    StaleFailureShutdownCount = $staleFailureShutdownCount
+    DisabledWitnessRefreshCount = 0
+    PreloadedRequestCount = $preloadedApiCalls
+    ThrowingLoadApiCalls = $throwingLoadApiCalls
+    ThrowingLoadRequestedColumns = $throwingLoadRequestedColumns
+    ThrowingLoadPins = $throwingLoadPins
+    ThrowingLoadUnloads = $throwingLoadUnloads
+    LateCallbackInvocationCount = $lateCallbackInvocations
+    CallbackBeforeAcceptanceInvocationCount = $callbackInvocationsAfterAcceptance
+    CallbackAfterResetInvocationCount = $callbackInvocationsAfterReset
     PersistedMapExistenceChecks = $persistedMapExistenceChecks
     PersistedBlockingLoads = $persistedBlockingLoads
     PersistedBlockingChunkDisposals = $persistedBlockingChunkDisposals
-    PersistedPriorityLoads = $persistedPriorityLoads
-    PersistedKeepLoadedRequests = $persistedKeepLoadedRequests
-    PersistedUnloads = $persistedUnloads
+    PersistedPriorityLoads = 0
+    PersistedRefreshes = 0
+    PersistedUnloads = 0
 } | ConvertTo-Json -Depth 4

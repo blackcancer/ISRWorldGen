@@ -97,22 +97,23 @@ if ($blockingExists.ReturnType.FullName -ne 'System.Boolean' -or $blockingLoad.R
 }
 [void](Require-Method $worldChunk 'MarkModified' @())
 [void](Require-Method $worldChunk 'Dispose' @())
+[void](Require-Method $mapChunk 'MarkFresh' @())
 [void](Require-Method $mapChunk 'MarkDirty' @())
 if (-not $worldChunk.IsAssignableFrom($serverChunk)) {
     throw 'IServerChunk must inherit the MarkModified and Dispose contracts.'
 }
 $apiXml = Get-Content -LiteralPath $apiXmlPath -Raw
-$columnOwnershipSignatures = @(
+$transientColumnSignatures = @(
     'M:Vintagestory.API.Server.IWorldManagerAPI.GetMapChunk(System.Int32,System.Int32)',
     'M:Vintagestory.API.Server.IWorldManagerAPI.GetChunk(System.Int32,System.Int32,System.Int32)',
     'M:Vintagestory.API.Server.IWorldManagerAPI.LoadChunkColumnPriority(System.Int32,System.Int32,System.Int32,System.Int32,Vintagestory.API.Server.ChunkLoadOptions)',
-    'M:Vintagestory.API.Server.IWorldManagerAPI.UnloadChunkColumn(System.Int32,System.Int32)'
     'M:Vintagestory.API.Server.IWorldManagerAPI.BlockingTestMapChunkExists(System.Int32,System.Int32)'
     'M:Vintagestory.API.Server.IWorldManagerAPI.BlockingLoadChunkColumn(System.Int32,System.Int32)'
     'M:Vintagestory.API.Common.IWorldChunk.MarkModified'
+    'M:Vintagestory.API.Common.IMapChunk.MarkFresh'
     'M:Vintagestory.API.Common.IMapChunk.MarkDirty'
 )
-foreach ($signature in $columnOwnershipSignatures) {
+foreach ($signature in $transientColumnSignatures) {
     if (-not $apiXml.Contains($signature)) {
         throw "Required local API signature is missing: $signature"
     }
@@ -123,6 +124,7 @@ foreach ($fragment in @(
     'BlockingLoadChunkColumn(System.Int32,System.Int32)">',
     'only loads and deserializes the chunk data',
     'you need to call .Dispose() after you do not need them anymore',
+    'Causes the TTL counter to reset so that it the mapchunk does not unload',
     'stored to disk on the next autosave or during shutdown',
     'Tells the server that it has to save the changes of this chunk to disk'
 )) {
@@ -213,7 +215,7 @@ $result = [ordered]@{
     NativeTypes = $nativeTypeStatus
     StructureHandlers = @($structureMethods | ForEach-Object { "$($_.DeclaringType.FullName)::$($_.Name)" })
     LightingAnchor = "$($lightMethod.DeclaringType.FullName)::$($lightMethod.Name)"
-    OwnedColumnApi = $columnOwnershipSignatures
+    TransientColumnApi = $transientColumnSignatures
 }
 
 $json = $result | ConvertTo-Json -Depth 5

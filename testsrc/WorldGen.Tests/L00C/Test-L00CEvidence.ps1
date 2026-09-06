@@ -89,13 +89,37 @@ Assert-Equal ([int]$evidence.Parameters.FluidCount) 2610 'Fixture fluid count'
 Assert-Equal ([int]$evidence.Parameters.FreshCount) 1350 'Fixture fresh-fluid count'
 Assert-Equal ([int]$evidence.Parameters.SaltCount) 1260 'Fixture salt-fluid count'
 Assert-Equal ([int]$evidence.Parameters.ClientLaunchCount) 0 'Client launch count'
+Assert-Equal ([int]$evidence.Parameters.Dimension) 0 'Fixture dimension'
 
 $dll = Assert-Artifact $evidence.Artifacts.Assembly 'Assembly'
 $pdb = Assert-Artifact $evidence.Artifacts.Symbols 'Symbols'
 $debuggerInspectionPath = Assert-Artifact $evidence.Artifacts.DebuggerInspection 'Debugger inspection'
+$open1DatabasePath = Assert-Artifact $evidence.Artifacts.Open1Database 'Open1 persisted database'
+$open1DatabaseReportPath = Assert-Artifact $evidence.Artifacts.Open1DatabaseReport 'Open1 persisted database report'
 $artifactDirectoryName = Split-Path -Leaf (Split-Path -Parent $dll)
 Assert-Equal $artifactDirectoryName $evidence.TestedCommit 'Assembly artifact directory'
 Assert-Equal (Split-Path -Parent $pdb) (Split-Path -Parent $dll) 'Assembly/symbol directory'
+
+$recordedDatabaseReport = Get-Content -LiteralPath $open1DatabaseReportPath -Raw | ConvertFrom-Json
+$liveDatabaseReport = (& (Join-Path $PSScriptRoot 'Test-L00CPersistedDatabase.ps1') `
+    -DatabasePath $open1DatabasePath `
+    -FixtureChunkX ([int]$evidence.Parameters.FixtureChunkX) `
+    -FixtureChunkZ ([int]$evidence.Parameters.FixtureChunkZ) `
+    -WorldHeight ([int]$evidence.Parameters.WorldHeight) `
+    -ChunkSize ([int]$evidence.Parameters.ChunkSize) `
+    -Dimension ([int]$evidence.Parameters.Dimension) | Out-String | ConvertFrom-Json)
+foreach ($report in @($recordedDatabaseReport, $liveDatabaseReport)) {
+    Assert-Equal $report.Status 'PASS' 'Open1 persisted database status'
+    Assert-Equal $report.OpenMode 'ReadOnly' 'Open1 persisted database mode'
+    Assert-Equal $report.Packing '(y<<54)|(z<<27)|(dimension<<22)|x' 'Open1 persisted database packing'
+    Assert-Equal ([int]$report.ExpectedMapChunks) 9 'Open1 expected mapchunks'
+    Assert-Equal ([int]$report.ActualMapChunks) 9 'Open1 persisted mapchunks'
+    Assert-Equal ([int]$report.ExpectedChunks) 72 'Open1 expected chunks'
+    Assert-Equal ([int]$report.ActualChunks) 72 'Open1 persisted chunks'
+    Assert-Equal (@($report.MissingMapChunks).Count) 0 'Open1 missing mapchunks'
+    Assert-Equal (@($report.MissingChunks).Count) 0 'Open1 missing chunks'
+    Assert-Equal ([string]$report.DatabaseSha256) ([string]$evidence.Artifacts.Open1Database.Sha256) 'Open1 database/report hash'
+}
 
 $expectedBeforeInventory = '0=[null];1=[0:Vintagestory.ServerMods.GenTerra::OnChunkColumnGen,1:Vintagestory.ServerMods.GenRockStrataNew::GenChunkColumn,2:ISRWorldGen.L00BDebugProbeModSystem::OnChunkColumnGeneration,3:Vintagestory.ServerMods.GenCaves::GenChunkColumn,4:Vintagestory.ServerMods.GenDevastationLayer::OnChunkColumnGeneration,5:Vintagestory.ServerMods.GenBlockLayers::OnChunkColumnGeneration];2=[0:Vintagestory.ServerMods.GenTerraPostProcess::OnChunkColumnGen,1:Vintagestory.ServerMods.GenHotSprings::GenChunkColumn,2:Vintagestory.ServerMods.GenDungeons::onChunkColumnGen,3:Vintagestory.ServerMods.GenDeposits::GenChunkColumn,4:Vintagestory.ServerMods.GenStructures::OnChunkColumnGen,5:Vintagestory.ServerMods.GenPonds::OnChunkColumnGen,6:Vintagestory.ServerMods.GenStructures::OnChunkColumnGenPostPass];3=[0:Vintagestory.GameContent.GenStoryStructures::OnChunkColumnGen,1:Vintagestory.ServerMods.GenVegetationAndPatches::OnChunkColumnGen,2:Vintagestory.ServerMods.GenRivulets::OnChunkColumnGen,3:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration];4=[0:Vintagestory.ServerMods.GenSnowLayer::OnChunkColumnGen,1:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGenerationFlood];5=[0:Vintagestory.ServerMods.GenCreatures::OnChunkColumnGen]'
 $expectedAfterInventory = '0=[null];1=[0:L00CWrapper(original=Vintagestory.ServerMods.GenTerra::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenRockStrataNew::GenChunkColumn@index=1),2:ISRWorldGen.L00BDebugProbeModSystem::OnChunkColumnGeneration,3:L00CWrapper(original=Vintagestory.ServerMods.GenCaves::GenChunkColumn@index=3),4:L00CWrapper(original=Vintagestory.ServerMods.GenDevastationLayer::OnChunkColumnGeneration@index=4),5:L00CWrapper(original=Vintagestory.ServerMods.GenBlockLayers::OnChunkColumnGeneration@index=5)];2=[0:L00CWrapper(original=Vintagestory.ServerMods.GenTerraPostProcess::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenHotSprings::GenChunkColumn@index=1),2:L00CWrapper(original=Vintagestory.ServerMods.GenDungeons::onChunkColumnGen@index=2),3:L00CWrapper(original=Vintagestory.ServerMods.GenDeposits::GenChunkColumn@index=3),4:L00CWrapper(original=Vintagestory.ServerMods.GenStructures::OnChunkColumnGen@index=4),5:L00CWrapper(original=Vintagestory.ServerMods.GenPonds::OnChunkColumnGen@index=5),6:L00CWrapper(original=Vintagestory.ServerMods.GenStructures::OnChunkColumnGenPostPass@index=6)];3=[0:L00CWrapper(original=Vintagestory.GameContent.GenStoryStructures::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenVegetationAndPatches::OnChunkColumnGen@index=1),2:L00CWrapper(original=Vintagestory.ServerMods.GenRivulets::OnChunkColumnGen@index=2),3:L00CFinalizer(before=Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration@index=3),4:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration];4=[0:L00CWrapper(original=Vintagestory.ServerMods.GenSnowLayer::OnChunkColumnGen@index=0),1:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGenerationFlood];5=[0:Vintagestory.ServerMods.GenCreatures::OnChunkColumnGen]'
@@ -124,20 +148,21 @@ foreach ($session in @($evidence.Sessions)) {
     if ($log -notmatch "L00C_HANDLERS phase=before instance=$instance save=$savegame ") {
         throw "Session $($session.Cycle) log does not correlate the savegame identifier."
     }
-    if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=world-initialize instance=$instance released=0 remainingowned=0 exact=True") {
-        throw "Session $($session.Cycle) began with retained KeepLoaded ownership."
+    if ($log -notmatch "L00C_TRANSIENT_CALLBACK_RESET reason=world-initialize instance=$instance cancelled=0 pending=0 exact=True") {
+        throw "Session $($session.Cycle) began with a live transient-load callback."
     }
-    if ($log -match "L00C_COLUMN_RELEASE_ERROR .* instance=$instance ") {
-        throw "Session $($session.Cycle) contains a KeepLoaded release error."
+    if ($log -match "L00C_COLUMN_(?:OWNED|RELEASE) .* instance=$instance " -or
+        $log -match "L00C_TRANSIENT_LOAD_ACCEPTED .* instance=$instance .* keeploaded=True") {
+        throw "Session $($session.Cycle) acquired or explicitly released KeepLoaded ownership."
     }
 
     if ($session.WorldRole -eq 'disabled-witness') {
         Assert-Equal $session.GracefulShutdown $true "Session $($session.Cycle) graceful shutdown"
         if ($log -notmatch "L00C_INACTIVE instance=$instance " -or
-            $log -notmatch "L00C_WITNESS_NO_REQUEST instance=$instance save=$savegame loadrequests=0 owned=0 fixturewrites=0 markers=0") {
+            $log -notmatch "L00C_WITNESS_NO_REQUEST instance=$instance save=$savegame loadrequests=0 transientrequests=0 refreshpasses=0 fixturewrites=0 markers=0") {
             throw 'Disabled witness log is missing its inactive no-request attestation.'
         }
-        if ($log -match "L00C_(?:FIXTURE_WRITTEN|ACTIVATED|COLUMN_REQUEST|COLUMN_OWNED|COLUMN_LOAD_ACCEPTED|COLUMN_PRECONDITION|COLUMN_RELEASE reason=|MARKER_SAVED) instance=$instance " -or
+        if ($log -match "L00C_(?:FIXTURE_WRITTEN|ACTIVATED|COLUMN_REQUEST|TRANSIENT_LOAD_ACCEPTED|TRANSIENT_PRECONDITION|FOOTPRINT_REFRESH|MARKER_SAVED) instance=$instance " -or
             $log -match "L00C_HALO_.* instance=$instance ") {
             throw 'Disabled witness emitted a chunk request, ownership, fixture, or marker mutation.'
         }
@@ -180,17 +205,20 @@ foreach ($session in @($evidence.Sessions)) {
         if ([bool]$session.IsNew) {
             $requiredPatterns += @(
                 "L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8",
+                "L00C_TRANSIENT_LOAD_ACCEPTED instance=$instance marker=$marker columns=9 keeploaded=False pinned=0 exact=True",
+                "L00C_FOOTPRINT_REFRESH instance=$instance marker=$marker phase=loaded tick=0 sequence=1 columns=9 exact=True",
                 "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks ",
                 "L00C_HALO_VALID instance=$instance marker=$marker phase=afterticks radius=1 columns=8 ",
                 "L00C_HALO_STABLE instance=$instance marker=$marker ticks=40 columns=8 ",
-                "L00C_TICKS_STABLE instance=$instance marker=$marker ticks=40 "
+                "L00C_TICKS_STABLE instance=$instance marker=$marker ticks=40 ",
+                "L00C_TRANSIENT_LIFECYCLE_STABLE instance=$instance marker=$marker loadpriority=1 transientrequests=9 refreshpasses=41 refreshedmapchunks=369 keeploaded=0 unload=0"
             )
         }
         else {
             $requiredPatterns += @(
                 "L00C_PERSISTED_PRECHECK instance=$instance marker=$marker maps=9 exact=True",
                 "L00C_PERSISTED_COLUMNS_DISPOSED instance=$instance marker=$marker columns=9 chunks=72 exact=True",
-                "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker loadpriority=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0"
+                "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0"
             )
         }
         foreach ($pattern in $requiredPatterns) {
@@ -219,32 +247,27 @@ foreach ($session in @($evidence.Sessions)) {
             }
         ) | Sort-Object
         if ([bool]$session.IsNew) {
-            $ownedLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_OWNED instance=$instance marker=$marker role=(?:halo|fixture-center) chunk=\(([-0-9]+),([-0-9]+)\) owned=([1-9]).*$")
-            $releaseLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_RELEASE reason=dispose instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) released=([1-9]).*$")
-            Assert-Equal $ownedLines.Count 9 "Session $($session.Cycle) owned KeepLoaded footprint"
-            Assert-Equal $releaseLines.Count 9 "Session $($session.Cycle) released KeepLoaded footprint"
-            $ownedCoordinates = @($ownedLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
-            $releasedCoordinates = @($releaseLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
-            Assert-Equal ($ownedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact owned coordinates"
-            Assert-Equal ($releasedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact released coordinates"
-            Assert-Equal (($ownedLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) ownership sequence"
-            Assert-Equal (($releaseLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) release sequence"
-            if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=9 remainingowned=0 exact=True" -or
-                $log -notmatch "L00C_COLUMN_PRECONDITION instance=$instance marker=$marker unloaded=9 exact=True" -or
-                $log -notmatch "L00C_COLUMN_LOAD_ACCEPTED instance=$instance marker=$marker columns=9 owned=9 exact=True") {
-                throw "New-world session $($session.Cycle) lacks its exact KeepLoaded ownership lifecycle."
+            if ($log -notmatch "L00C_TRANSIENT_PRECONDITION instance=$instance marker=$marker unloaded=9 exact=True" -or
+                $log -notmatch "L00C_TRANSIENT_LOAD_ACCEPTED instance=$instance marker=$marker columns=9 keeploaded=False pinned=0 exact=True") {
+                throw "New-world session $($session.Cycle) lacks its exact non-owning transient-load lifecycle."
+            }
+            $refreshLines = [regex]::Matches($log, "(?m)^.*L00C_FOOTPRINT_REFRESH instance=$instance marker=$marker phase=(loaded|tick) tick=([0-9]+) sequence=([0-9]+) columns=9 exact=True.*$")
+            Assert-Equal $refreshLines.Count 41 "Session $($session.Cycle) bounded footprint refresh count"
+            Assert-Equal (($refreshLines | ForEach-Object { $_.Groups[3].Value }) -join '|') ((1..41) -join '|') "Session $($session.Cycle) refresh sequence"
+            Assert-Equal $refreshLines[0].Groups[1].Value 'loaded' "Session $($session.Cycle) initial refresh phase"
+            Assert-Equal $refreshLines[0].Groups[2].Value '0' "Session $($session.Cycle) initial refresh tick"
+            Assert-Equal (($refreshLines | Select-Object -Skip 1 | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique) -join '|') 'tick' "Session $($session.Cycle) tick refresh phase"
+            Assert-Equal (($refreshLines | Select-Object -Skip 1 | ForEach-Object { $_.Groups[2].Value }) -join '|') ((1..40) -join '|') "Session $($session.Cycle) tick refresh sequence"
+            if ($log -match 'KeepLoaded=True|L00C_COLUMN_(?:OWNED|RELEASE)') {
+                throw "New-world session $($session.Cycle) acquired or explicitly unloaded a column."
             }
             $stableIndex = $log.IndexOf("L00C_HALO_STABLE instance=$instance", [StringComparison]::Ordinal)
             $shutdownRequestIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
             $shutdownPhaseIndex = $log.IndexOf('Entering runphase Shutdown', [StringComparison]::Ordinal)
-            $disposeReleaseIndex = $log.IndexOf("L00C_COLUMN_RELEASE reason=dispose instance=$instance", [StringComparison]::Ordinal)
-            if ($stableIndex -lt 0 -or $shutdownRequestIndex -le $stableIndex -or $shutdownPhaseIndex -le $shutdownRequestIndex -or $disposeReleaseIndex -le $shutdownPhaseIndex -or
-                $log -match "L00C_COLUMN_RELEASE reason=fixture-stable instance=$instance") {
-                throw "New-world session $($session.Cycle) did not retain its KeepLoaded footprint until shutdown Dispose."
-            }
-            $generatingSave = [regex]::Match($log, '(?m)^.*Saved [0-9]+ generating chunks.*$')
-            if (-not $generatingSave.Success -or $generatingSave.Index -le $shutdownRequestIndex -or $shutdownPhaseIndex -le $generatingSave.Index) {
-                throw "New-world session $($session.Cycle) did not flush generating chunks before shutdown Dispose released the footprint."
+            $worldSavedIndex = $log.LastIndexOf('World saved!', [StringComparison]::Ordinal)
+            if ($stableIndex -lt 0 -or $shutdownRequestIndex -le $stableIndex -or
+                $shutdownPhaseIndex -le $shutdownRequestIndex -or $worldSavedIndex -le $shutdownPhaseIndex) {
+                throw "New-world session $($session.Cycle) did not validate, request shutdown, retain native ownership, and save in order."
             }
         }
         else {
@@ -253,9 +276,9 @@ foreach ($session in @($evidence.Sessions)) {
             $blockingCoordinates = @($blockingLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
             Assert-Equal ($blockingCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact blocking-loaded coordinates"
             Assert-Equal (($blockingLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) blocking-load sequence"
-            if ($log -match "L00C_(?:COLUMN_REQUEST|COLUMN_PRECONDITION|COLUMN_OWNED|COLUMN_LOAD_ACCEPTED|FIXTURE_WRITTEN|HANDLER_SUPPRESSED|HALO_NATIVE_FORWARD|LIGHTING_STABLE|TICKS_STABLE|HALO_STABLE) instance=$instance " -or
+            if ($log -match "L00C_(?:COLUMN_REQUEST|TRANSIENT_PRECONDITION|TRANSIENT_LOAD_ACCEPTED|FOOTPRINT_REFRESH|FIXTURE_WRITTEN|HANDLER_SUPPRESSED|HALO_NATIVE_FORWARD|LIGHTING_STABLE|TICKS_STABLE|HALO_STABLE) instance=$instance " -or
                 $log -match "L00C_HALO_PREPARE_(?:BEGIN|COMPLETE) instance=$instance ") {
-                throw "Reopen session $($session.Cycle) used a generation, KeepLoaded, fixture-write, or wrapper path."
+                throw "Reopen session $($session.Cycle) used a generation, transient-load, refresh, fixture-write, or wrapper path."
             }
             $precheckIndex = $log.IndexOf("L00C_PERSISTED_PRECHECK instance=$instance", [StringComparison]::Ordinal)
             $firstBlockingIndex = $log.IndexOf("L00C_PERSISTED_COLUMN_LOADED instance=$instance", [StringComparison]::Ordinal)
@@ -304,7 +327,7 @@ foreach ($session in @($evidence.Sessions)) {
             throw "Reopen session $($session.Cycle) unexpectedly revalidated the halo through ticks."
         }
         if (-not [bool]$session.IsNew) {
-            $persistedStable = [regex]::Match($log, "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker loadpriority=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0 center=([0-9A-F]{64}) halo=([0-9A-F]{64})")
+            $persistedStable = [regex]::Match($log, "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0 center=([0-9A-F]{64}) halo=([0-9A-F]{64})")
             if (-not $persistedStable.Success) {
                 throw "Reopen session $($session.Cycle) lacks its zero-mutation persisted snapshot attestation."
             }
@@ -352,13 +375,10 @@ foreach ($session in @($evidence.Sessions)) {
         throw "Unknown WorldRole: $($session.WorldRole)"
     }
 
-    $expectedDisposeRelease = if ($session.WorldRole -like 'activated-*' -and [bool]$session.IsNew) { 9 } else { 0 }
-    if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=$expectedDisposeRelease remainingowned=0 exact=True") {
-        throw "Session $($session.Cycle) disposal did not prove its exact terminal KeepLoaded release."
+    if ($log -notmatch "L00C_TRANSIENT_CALLBACK_RESET reason=dispose instance=$instance cancelled=0 pending=0 exact=True") {
+        throw "Session $($session.Cycle) disposal did not neutralize transient callbacks exactly."
     }
-    $successfulReleaseCount = [regex]::Matches($log, "L00C_COLUMN_RELEASE reason=").Count
-    $expectedReleaseCount = if ($session.WorldRole -like 'activated-*' -and [bool]$session.IsNew) { 9 } else { 0 }
-    Assert-Equal $successfulReleaseCount $expectedReleaseCount "Session $($session.Cycle) total successful release count"
+    Assert-Equal ([regex]::Matches($log, "L00C_COLUMN_(?:OWNED|RELEASE)").Count) 0 "Session $($session.Cycle) explicit column ownership/unload count"
 
     Assert-Equal $session.DebuggerFinalMode 'Design' "Session $($session.Cycle) debugger final mode"
     Assert-Equal $session.ProcessAbsent $true "Session $($session.Cycle) process absent"
