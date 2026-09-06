@@ -5,7 +5,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function New-Handler {
-    param([string]$Pass, [string]$Target, [string]$Method, [bool]$Targeted = $false, [bool]$Writer = $false)
+    param(
+        [string]$Pass,
+        [string]$Target,
+        [string]$Method,
+        [bool]$Targeted = $false,
+        [bool]$Writer = $false,
+        [bool]$SuppressInHalo = $false
+    )
 
     return [pscustomobject]@{
         Kind = 'Native'
@@ -14,6 +21,7 @@ function New-Handler {
         Method = $Method
         Targeted = $Targeted
         Writer = $Writer
+        SuppressInHalo = $SuppressInHalo
     }
 }
 
@@ -50,6 +58,7 @@ function Install-Ownership {
                     OriginalMethod = $handler.Method
                     Original = $handler
                     Writer = $handler.Writer
+                    SuppressInHalo = $handler.SuppressInHalo
                 }
                 [void]$wrappers.Add($wrapper)
                 [void]$rebuilt.Add($wrapper)
@@ -110,13 +119,13 @@ $passes = @{
         (New-Handler Terrain ThirdParty Tail)
     )
     TerrainFeatures = @(
-        (New-Handler TerrainFeatures GenStructures OnChunkColumnGen $true),
-        (New-Handler TerrainFeatures GenPonds OnChunkColumnGen $true),
-        (New-Handler TerrainFeatures GenStructures OnChunkColumnGenPostPass $true)
+        (New-Handler TerrainFeatures GenStructures OnChunkColumnGen $true $false $true),
+        (New-Handler TerrainFeatures GenPonds OnChunkColumnGen $true $false $true),
+        (New-Handler TerrainFeatures GenStructures OnChunkColumnGenPostPass $true $false $true)
     )
     Vegetation = @(
-        (New-Handler Vegetation GenStoryStructures OnChunkColumnGen $true),
-        (New-Handler Vegetation GenVegetationAndPatches OnChunkColumnGen $true),
+        (New-Handler Vegetation GenStoryStructures OnChunkColumnGen $true $false $true),
+        (New-Handler Vegetation GenVegetationAndPatches OnChunkColumnGen $true $false $true),
         (New-Handler Vegetation GenLightSurvival OnChunkColumnGeneration)
     )
 }
@@ -145,6 +154,30 @@ $expectedNonFixture = foreach ($pass in @('Terrain', 'TerrainFeatures', 'Vegetat
 }
 if (($nonFixtureCalls -join '|') -ne ($expectedNonFixture -join '|')) {
     throw 'Non-fixture dispatch did not preserve the exact global callback order.'
+}
+
+$haloForwarded = @($state.Wrappers | Where-Object { -not $_.SuppressInHalo })
+$haloSuppressed = @($state.Wrappers | Where-Object SuppressInHalo)
+if ($haloForwarded.Count -ne 2 -or $haloSuppressed.Count -ne 5) {
+    throw "Halo handler classification drifted: forwarded=$($haloForwarded.Count), suppressed=$($haloSuppressed.Count)."
+}
+if (@($haloForwarded | Where-Object OriginalTarget -in @('GenTerra', 'GenCaves')).Count -ne 2) {
+    throw 'The halo no longer forwards the sampled base terrain handlers at their native positions.'
+}
+if (@($haloSuppressed | Where-Object OriginalTarget -eq 'GenVegetationAndPatches').Count -ne 1) {
+    throw 'The known cross-column loose-stone writer is not guarded in the halo.'
+}
+
+$protectedCoordinates = @(
+    for ($deltaX = -1; $deltaX -le 1; $deltaX++) {
+        for ($deltaZ = -1; $deltaZ -le 1; $deltaZ++) {
+            [pscustomobject]@{ X = $deltaX; Z = $deltaZ }
+        }
+    }
+)
+$firstRing = @($protectedCoordinates | Where-Object { $_.X -ne 0 -or $_.Z -ne 0 })
+if ($protectedCoordinates.Count -ne 9 -or $firstRing.Count -ne 8) {
+    throw 'The bounded 3x3 protection footprint or first ring cardinality drifted.'
 }
 
 $fixtureCalls = [Collections.Generic.List[string]]::new()
@@ -186,4 +219,8 @@ foreach ($pass in @($state.Original.Keys)) {
     SecondRestoreRemovedOwned = $removedSecond
     OldSetRestoredBeforeNewOwnership = $true
     DuplicateTargetDistinctMethods = @($state.Wrappers | Where-Object OriginalTarget -eq 'GenStructures' | Select-Object -ExpandProperty OriginalMethod)
+    ProtectedFootprintColumns = $protectedCoordinates.Count
+    FirstRingColumns = $firstRing.Count
+    HaloBaseHandlersForwarded = $haloForwarded.Count
+    HaloCrossColumnHandlersSuppressed = $haloSuppressed.Count
 } | ConvertTo-Json -Depth 5

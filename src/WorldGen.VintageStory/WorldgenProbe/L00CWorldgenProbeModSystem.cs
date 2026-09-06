@@ -18,6 +18,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private const string MarkerKey = "isrworldgen:l00c:marker:v1";
     private const string MarkerVersion = "l00c-flat-v1";
     private const int StableTickTarget = 40;
+    private const int FixtureProtectionRadius = 1;
     private const string LightingAnchorType = "Vintagestory.ServerMods.GenLightSurvival";
     private const string LightingAnchorMethod = "OnChunkColumnGeneration";
 
@@ -29,15 +30,15 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenDevastationLayer"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenBlockLayers"),
         new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenTerraPostProcess"),
-        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenHotSprings"),
-        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenDungeons"),
-        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenDeposits"),
-        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenStructures", "OnChunkColumnGen"),
-        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenPonds"),
-        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenStructures", "OnChunkColumnGenPostPass"),
-        new(EnumWorldGenPass.Vegetation, "Vintagestory.GameContent.GenStoryStructures"),
-        new(EnumWorldGenPass.Vegetation, "Vintagestory.ServerMods.GenVegetationAndPatches"),
-        new(EnumWorldGenPass.Vegetation, "Vintagestory.ServerMods.GenRivulets"),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenHotSprings", SuppressInHalo: true),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenDungeons", SuppressInHalo: true),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenDeposits", SuppressInHalo: true),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenStructures", "OnChunkColumnGen", SuppressInHalo: true),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenPonds", SuppressInHalo: true),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenStructures", "OnChunkColumnGenPostPass", SuppressInHalo: true),
+        new(EnumWorldGenPass.Vegetation, "Vintagestory.GameContent.GenStoryStructures", SuppressInHalo: true),
+        new(EnumWorldGenPass.Vegetation, "Vintagestory.ServerMods.GenVegetationAndPatches", SuppressInHalo: true),
+        new(EnumWorldGenPass.Vegetation, "Vintagestory.ServerMods.GenRivulets", SuppressInHalo: true),
         new(EnumWorldGenPass.NeighbourSunLightFlood, "Vintagestory.ServerMods.GenSnowLayer")
     ];
 
@@ -50,6 +51,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private ProbeMarker? marker;
     private FixtureSnapshot? preLightingSnapshot;
     private FixtureSnapshot? initialSnapshot;
+    private HaloSnapshot? initialHaloSnapshot;
     private long tickListenerId;
     private int stableTickCount;
     private int fixtureCallbackCount;
@@ -104,6 +106,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         marker = null;
         preLightingSnapshot = null;
         initialSnapshot = null;
+        initialHaloSnapshot = null;
 
         ISaveGame saveGame = serverApi.WorldManager.SaveGame;
         ProbeMarker? persistedMarker = ReadMarker(saveGame);
@@ -385,7 +388,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     {
         int maxChunkX = serverApi.WorldManager.MapSizeX / serverApi.WorldManager.ChunkSize;
         int maxChunkZ = serverApi.WorldManager.MapSizeZ / serverApi.WorldManager.ChunkSize;
-        if (config.FixtureChunkX < 1 || config.FixtureChunkX >= maxChunkX - 1 || config.FixtureChunkZ < 1 || config.FixtureChunkZ >= maxChunkZ - 1)
+        if (config.FixtureChunkX < FixtureProtectionRadius ||
+            config.FixtureChunkX >= maxChunkX - FixtureProtectionRadius ||
+            config.FixtureChunkZ < FixtureProtectionRadius ||
+            config.FixtureChunkZ >= maxChunkZ - FixtureProtectionRadius)
         {
             throw new InvalidOperationException($"L00-C fixture chunk ({config.FixtureChunkX},{config.FixtureChunkZ}) is outside the bounded interior map area ({maxChunkX},{maxChunkZ}).");
         }
@@ -393,11 +399,17 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void InvokeOwnedHandler(OwnedHandler owned, IChunkColumnGenerateRequest request)
     {
-        if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
+        bool center = IsFixtureCenter(request);
+        bool halo = !center && IsProtectedFixtureRequest(request);
+        if (!center && (!halo || !owned.Specification.SuppressInHalo))
         {
             owned.Original(request);
             Interlocked.Increment(ref owned.ForwardedCount);
-            if (Interlocked.Exchange(ref owned.ForwardLogIssued, 1) == 0)
+            if (halo && Interlocked.Exchange(ref owned.HaloForwardLogIssued, 1) == 0)
+            {
+                Log($"L00C_HALO_NATIVE_FORWARD instance={instanceId} marker={marker!.MarkerId} reason=local-only-handler pass={owned.Pass} index={owned.OriginalIndex} target={owned.OriginalTargetType} method={owned.OriginalMethod.Name} firstchunk=({request.ChunkX},{request.ChunkZ})");
+            }
+            else if (!halo && Interlocked.Exchange(ref owned.ForwardLogIssued, 1) == 0)
             {
                 Log($"L00C_NATIVE_FORWARD instance={instanceId} marker={marker!.MarkerId} pass={owned.Pass} index={owned.OriginalIndex} target={owned.OriginalTargetType} method={owned.OriginalMethod.Name} firstchunk=({request.ChunkX},{request.ChunkZ})");
             }
@@ -409,13 +421,15 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             throw new InvalidOperationException("L00-C fixture handler ran while the world was inactive.");
         }
 
-        if (owned.Specification.WritesFixture)
+        if (center && owned.Specification.WritesFixture)
         {
             GenerateFixtureColumn(request);
             return;
         }
 
-        Log($"L00C_HANDLER_SUPPRESSED instance={instanceId} marker={marker!.MarkerId} pass={owned.Pass} index={owned.OriginalIndex} target={owned.OriginalTargetType} method={owned.OriginalMethod.Name} chunk=({request.ChunkX},{request.ChunkZ})");
+        string scope = center ? "center" : "halo";
+        string reason = center ? "canonical-center" : "cross-column-write-guard";
+        Log($"L00C_HANDLER_SUPPRESSED instance={instanceId} marker={marker!.MarkerId} scope={scope} reason={reason} pass={owned.Pass} index={owned.OriginalIndex} target={owned.OriginalTargetType} method={owned.OriginalMethod.Name} chunk=({request.ChunkX},{request.ChunkZ})");
     }
 
     private void GenerateFixtureColumn(IChunkColumnGenerateRequest request)
@@ -430,7 +444,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void FinalizeFixtureBeforeLighting(IChunkColumnGenerateRequest request)
     {
-        if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
+        if (!IsFixtureCenter(request))
         {
             return;
         }
@@ -496,7 +510,18 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         mapChunk.YMax = (ushort)geometry.WaterSurface;
         mapChunk.MarkDirty();
 
-        Log($"L00C_FIXTURE_WRITTEN instance={instanceId} marker={marker!.MarkerId} phase={phase} chunk=({request.ChunkX},{request.ChunkZ}) chunksize={chunkSize} worldheight={worldHeight} rock={config.RockBlockId} fresh={config.FreshWaterBlockId} salt={config.SaltWaterBlockId} rocksurface={geometry.RockSurface} watersurface={geometry.WaterSurface} thread={Environment.CurrentManagedThreadId}");
+        Log($"L00C_FIXTURE_WRITTEN instance={instanceId} marker={marker!.MarkerId} phase={phase} center=({config.FixtureChunkX},{config.FixtureChunkZ}) radius={FixtureProtectionRadius} chunk=({request.ChunkX},{request.ChunkZ}) chunksize={chunkSize} worldheight={worldHeight} rock={config.RockBlockId} fresh={config.FreshWaterBlockId} salt={config.SaltWaterBlockId} rocksurface={geometry.RockSurface} watersurface={geometry.WaterSurface} thread={Environment.CurrentManagedThreadId}");
+    }
+
+    private bool IsProtectedFixtureRequest(IChunkColumnGenerateRequest request)
+    {
+        return Math.Abs(request.ChunkX - config.FixtureChunkX) <= FixtureProtectionRadius &&
+            Math.Abs(request.ChunkZ - config.FixtureChunkZ) <= FixtureProtectionRadius;
+    }
+
+    private bool IsFixtureCenter(IChunkColumnGenerateRequest request)
+    {
+        return request.ChunkX == config.FixtureChunkX && request.ChunkZ == config.FixtureChunkZ;
     }
 
     private static void SetSolid(IServerChunk[] chunks, int chunkSize, int x, int y, int z, int blockId)
@@ -533,6 +558,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                     }
                     Log($"L00C_LIGHTING_STABLE instance={instanceId} marker={marker!.MarkerId} prelighting={lightingSnapshot.Hash} postlighting={initialSnapshot.Hash}");
                 }
+                initialHaloSnapshot = InspectProtectionHalo("loaded");
                 stableTickCount = 0;
             }
             else
@@ -569,8 +595,16 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             throw new InvalidOperationException($"L00-C fixture changed after {StableTickTarget} ticks: {initialSnapshot.Hash} -> {afterTicks.Hash}.");
         }
 
+        HaloSnapshot afterTicksHalo = InspectProtectionHalo("afterticks");
+        if (initialHaloSnapshot is null || !string.Equals(initialHaloSnapshot.Hash, afterTicksHalo.Hash, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"L00-C protected first ring changed after {StableTickTarget} ticks: {initialHaloSnapshot?.Hash ?? "none"} -> {afterTicksHalo.Hash}.");
+        }
+
         Log($"L00C_TICKS_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} snapshot={afterTicks.Hash} fluids={afterTicks.FluidCount} fresh={afterTicks.FreshCount} salt={afterTicks.SaltCount} unexpected={afterTicks.UnexpectedCount}");
+        Log($"L00C_HALO_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} columns={afterTicksHalo.ColumnCount} snapshot={afterTicksHalo.Hash}");
         initialSnapshot = null;
+        initialHaloSnapshot = null;
         RequestShutdownIfConfigured("fixture-stable");
     }
 
@@ -592,6 +626,96 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
 
         return InspectFixtureData(phase, chunks, mapChunk, chunkSize, worldHeight);
+    }
+
+    private HaloSnapshot InspectProtectionHalo(string phase)
+    {
+        ICoreServerAPI serverApi = RequireApi();
+        int chunkSize = serverApi.WorldManager.ChunkSize;
+        int worldHeight = serverApi.WorldManager.MapSizeY;
+        int chunkCount = worldHeight / chunkSize;
+        var aggregate = new StringBuilder();
+        int inspectedColumns = 0;
+
+        for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
+        {
+            for (int deltaZ = -FixtureProtectionRadius; deltaZ <= FixtureProtectionRadius; deltaZ++)
+            {
+                if (deltaX == 0 && deltaZ == 0)
+                {
+                    continue;
+                }
+
+                int chunkX = config.FixtureChunkX + deltaX;
+                int chunkZ = config.FixtureChunkZ + deltaZ;
+                IMapChunk mapChunk = serverApi.WorldManager.GetMapChunk(chunkX, chunkZ)
+                    ?? throw new InvalidOperationException($"L00-C protected halo map chunk ({chunkX},{chunkZ}) is not loaded.");
+                var chunks = new IServerChunk[chunkCount];
+                for (int chunkY = 0; chunkY < chunkCount; chunkY++)
+                {
+                    IServerChunk chunk = serverApi.WorldManager.GetChunk(chunkX, chunkY, chunkZ)
+                        ?? throw new InvalidOperationException($"L00-C protected halo chunk ({chunkX},{chunkY},{chunkZ}) is not loaded.");
+                    chunk.Unpack_ReadOnly();
+                    chunks[chunkY] = chunk;
+                }
+
+                var canonical = new StringBuilder();
+                var blockIds = new HashSet<int>();
+                int solidCount = 0;
+                int fluidCount = 0;
+                for (int z = 0; z < chunkSize; z++)
+                {
+                    for (int x = 0; x < chunkSize; x++)
+                    {
+                        int index2d = MapUtil.Index2d(x, z, chunkSize);
+                        canonical.Append("m:")
+                            .Append(mapChunk.WorldGenTerrainHeightMap[index2d]).Append(',')
+                            .Append(mapChunk.RainHeightMap[index2d]).Append(',')
+                            .Append(mapChunk.TopRockIdMap[index2d]).Append(';');
+                        for (int y = 0; y < worldHeight; y++)
+                        {
+                            int index3d = MapUtil.Index3d(x, y % chunkSize, z, chunkSize, chunkSize);
+                            IServerChunk chunk = chunks[y / chunkSize];
+                            int solid = chunk.Data.GetBlockId(index3d, BlockLayersAccess.Solid);
+                            int fluid = chunk.Data.GetBlockId(index3d, BlockLayersAccess.Fluid);
+                            if (solid != 0) solidCount++;
+                            if (fluid != 0) fluidCount++;
+                            blockIds.Add(solid);
+                            blockIds.Add(fluid);
+                            canonical.Append(solid).Append(',').Append(fluid).Append(';');
+                        }
+                    }
+                }
+
+                if (solidCount == 0 || mapChunk.YMax == 0 || mapChunk.YMax >= worldHeight)
+                {
+                    throw new InvalidOperationException($"L00-C protected halo column ({chunkX},{chunkZ}) is empty or has invalid height metadata: solid={solidCount}, ymax={mapChunk.YMax}.");
+                }
+                foreach (int blockId in blockIds)
+                {
+                    if (serverApi.World.GetBlock(blockId) is null)
+                    {
+                        throw new InvalidOperationException($"L00-C protected halo column ({chunkX},{chunkZ}) contains unknown block id {blockId}.");
+                    }
+                }
+
+                canonical.Append("ymax=").Append(mapChunk.YMax);
+                string columnHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())));
+                aggregate.Append(chunkX).Append(',').Append(chunkZ).Append(':').Append(columnHash).Append(';');
+                inspectedColumns++;
+                Log($"L00C_HALO_COLUMN_VALID instance={instanceId} marker={marker!.MarkerId} phase={phase} chunk=({chunkX},{chunkZ}) snapshot={columnHash} solids={solidCount} fluids={fluidCount} ymax={mapChunk.YMax} blockids={blockIds.Count}");
+            }
+        }
+
+        int expectedColumns = (2 * FixtureProtectionRadius + 1) * (2 * FixtureProtectionRadius + 1) - 1;
+        if (inspectedColumns != expectedColumns)
+        {
+            throw new InvalidOperationException($"L00-C protected halo inspected {inspectedColumns} columns instead of {expectedColumns}.");
+        }
+
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(aggregate.ToString())));
+        Log($"L00C_HALO_VALID instance={instanceId} marker={marker!.MarkerId} phase={phase} radius={FixtureProtectionRadius} columns={inspectedColumns} snapshot={hash}");
+        return new HaloSnapshot(hash, inspectedColumns);
     }
 
     private FixtureSnapshot InspectFixtureData(
@@ -912,6 +1036,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         marker = null;
         preLightingSnapshot = null;
         initialSnapshot = null;
+        initialHaloSnapshot = null;
         active = false;
         api = null;
         base.Dispose();
@@ -922,7 +1047,12 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
     }
 
-    private sealed record ReplacementSpec(EnumWorldGenPass Pass, string TargetType, string? MethodName = null, bool WritesFixture = false);
+    private sealed record ReplacementSpec(
+        EnumWorldGenPass Pass,
+        string TargetType,
+        string? MethodName = null,
+        bool WritesFixture = false,
+        bool SuppressInHalo = false);
     private sealed record HandlerLocation(EnumWorldGenPass Pass, int Index, ChunkColumnGenerationDelegate Handler);
     private sealed record HandlerOwnershipState(
         IWorldGenHandler HandlerSet,
@@ -933,6 +1063,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ChunkColumnGenerationDelegate LightingFinalizer);
     private readonly record struct RestoreResult(int RemovedOwned, int RestoredNative, bool Exact);
     private sealed record FixtureSnapshot(string Hash, int SolidCount, int FluidCount, int FreshCount, int SaltCount, int UnexpectedCount, ushort YMax);
+    private sealed record HaloSnapshot(string Hash, int ColumnCount);
 
     private sealed class OwnedHandler
     {
@@ -961,6 +1092,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         public ChunkColumnGenerationDelegate Wrapper { get; }
         public int ForwardedCount;
         public int ForwardLogIssued;
+        public int HaloForwardLogIssued;
 
         private void Invoke(IChunkColumnGenerateRequest request) => owner.InvokeOwnedHandler(this, request);
     }

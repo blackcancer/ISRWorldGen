@@ -153,6 +153,9 @@ foreach ($session in @($evidence.Sessions)) {
             "L00C_ACTIVATED instance=$instance marker=$marker open=$open isnew=$isNew ",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded ",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks ",
+            "L00C_HALO_VALID instance=$instance marker=$marker phase=loaded radius=1 columns=8 ",
+            "L00C_HALO_VALID instance=$instance marker=$marker phase=afterticks radius=1 columns=8 ",
+            "L00C_HALO_STABLE instance=$instance marker=$marker ticks=40 columns=8 ",
             "L00C_TICKS_STABLE instance=$instance marker=$marker ticks=40 ",
             "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker ",
             'Forced: Shutdown through Server API',
@@ -184,6 +187,9 @@ foreach ($session in @($evidence.Sessions)) {
         }
         Assert-Equal $loaded.Groups[1].Value $afterTicks.Groups[1].Value "Session $($session.Cycle) tick-stable full snapshot"
         Assert-Equal $loaded.Groups[1].Value ([string]$evidence.Parameters.FixtureSnapshotSha256) "Session $($session.Cycle) canonical full snapshot"
+        $haloLoaded = [regex]::Match($log, "L00C_HALO_VALID instance=$instance marker=$marker phase=loaded radius=1 columns=8 snapshot=([0-9A-F]{64})")
+        $haloAfterTicks = [regex]::Match($log, "L00C_HALO_VALID instance=$instance marker=$marker phase=afterticks radius=1 columns=8 snapshot=([0-9A-F]{64})")
+        Assert-Equal $haloLoaded.Groups[1].Value $haloAfterTicks.Groups[1].Value "Session $($session.Cycle) valid/stable first-ring snapshot"
         if ($log -notmatch "L00C_FIXTURE_INSPECTED instance=$instance .* solids=67022 fluids=2610 fresh=1350 salt=1260 .* ymax=67 unexpected=0") {
             throw "Activated session $($session.Cycle) does not retain the expected distinct block IDs/counts and height metadata."
         }
@@ -209,6 +215,12 @@ foreach ($session in @($evidence.Sessions)) {
             }
             Assert-Equal $preLighting.Groups[1].Value $loaded.Groups[1].Value "Session $($session.Cycle) pre-lighting/full loaded snapshot"
             Assert-Equal $postLighting.Groups[1].Value $postLighting.Groups[2].Value "Session $($session.Cycle) lighting-stable snapshot"
+            if ($log -notmatch "L00C_HANDLER_SUPPRESSED instance=$instance marker=$marker scope=halo reason=cross-column-write-guard .* target=Vintagestory\.ServerMods\.GenVegetationAndPatches method=OnChunkColumnGen ") {
+                throw "New-world session $($session.Cycle) did not guard the observed cross-column loose-stone writer."
+            }
+            if ($log -notmatch "L00C_HALO_NATIVE_FORWARD instance=$instance marker=$marker reason=local-only-handler .* target=Vintagestory\.ServerMods\.GenTerra method=OnChunkColumnGen ") {
+                throw "New-world session $($session.Cycle) did not preserve native base-terrain generation in the halo."
+            }
         }
     }
     else {
