@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-06T13:46:00Z",
+  "updated_utc": "2026-09-06T13:49:00Z",
   "integrated_commit": "fce147620d21bb9e3da2091617794993d57c2d0c",
   "tasks": {
     "L00-A": {
@@ -30,10 +30,10 @@
       "blocker": null
     },
     "L00-C": {
-      "status": "READY",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
+      "status": "IN_PROGRESS",
+      "owner": "agent:l00_c",
+      "branch": "agent/l00-c",
+      "base_commit": "9048bbbfe72303862cfdd02e279f64385e4e8f1b",
       "evidence": [],
       "blocker": null
     },
@@ -63,10 +63,10 @@
       "blocker": null
     },
     "L01-C": {
-      "status": "READY",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
+      "status": "IN_PROGRESS",
+      "owner": "agent:l01_c",
+      "branch": "agent/l01-c",
+      "base_commit": "9048bbbfe72303862cfdd02e279f64385e4e8f1b",
       "evidence": [],
       "blocker": null
     },
