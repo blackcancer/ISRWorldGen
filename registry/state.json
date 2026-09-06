@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-06T15:17:13.2350924Z",
-  "integrated_commit": "ed504555f948d3470727fab9f67b855e9b0c15cf",
+  "updated_utc": "2026-09-06T15:19:49.1792546Z",
+  "integrated_commit": "09d71314aecbdeec62fb9e532aa5ea905e66ed03",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -277,8 +277,13 @@
       "owner": "agent:l10_a",
       "branch": "agent/l10-a",
       "base_commit": "c5abaa8ad80e592302f74aba35f581af68f0b071",
-      "evidence": [],
-      "blocker": null
+      "evidence": [
+        "worklogs/L10-A.md",
+        "commit:09d71314aecbdeec62fb9e532aa5ea905e66ed03",
+        "local:.local/L10A-integrated/tests/L10A-targeted-release.trx",
+        "local:.local/L10A-integrated/tests/L10A-integrated-release.trx"
+      ],
+      "blocker": "T10-01 moteur NOT_RUN : atlas, bassins, grottes et merveille intégrés ne sont pas encore disponibles ; l'implémentation abstraite et T10-02 sont acceptés, mais NOT_RUN ne vaut pas DONE."
     },
     "L10-B": {
       "status": "BACKLOG",
