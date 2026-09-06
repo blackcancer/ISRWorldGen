@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ISRWorldGen.Runtime</AssemblyName>
+    <RootNamespace>ISRWorldGen.Runtime</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WorldGen.Core\WorldGen.Core.csproj" />
+  </ItemGroup>
+</Project>
