@@ -499,6 +499,12 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         int freshCount = 0;
         int saltCount = 0;
         int unexpectedCount = 0;
+        int terrainMapMismatchCount = 0;
+        int rainMapMismatchCount = 0;
+        int topRockMapMismatchCount = 0;
+        int solidMismatchCount = 0;
+        int fluidMismatchCount = 0;
+        string firstMismatch = "none";
 
         for (int x = 0; x < chunkSize; x++)
         {
@@ -508,10 +514,19 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 int expectedSolidTop = wall ? geometry.WaterSurface : geometry.RockSurface;
                 int index2d = MapUtil.Index2d(x, z, chunkSize);
                 int expectedTerrainHeight = expectedSolidTop;
-                if (mapChunk.WorldGenTerrainHeightMap[index2d] != expectedTerrainHeight ||
-                    mapChunk.RainHeightMap[index2d] != geometry.WaterSurface ||
-                    mapChunk.TopRockIdMap[index2d] != config.RockBlockId)
+                if (mapChunk.WorldGenTerrainHeightMap[index2d] != expectedTerrainHeight)
                 {
+                    terrainMapMismatchCount++;
+                    unexpectedCount++;
+                }
+                if (mapChunk.RainHeightMap[index2d] != geometry.WaterSurface)
+                {
+                    rainMapMismatchCount++;
+                    unexpectedCount++;
+                }
+                if (mapChunk.TopRockIdMap[index2d] != config.RockBlockId)
+                {
+                    topRockMapMismatchCount++;
                     unexpectedCount++;
                 }
 
@@ -533,9 +548,17 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                     {
                         expectedFluid = x < geometry.DividerX ? config.FreshWaterBlockId : config.SaltWaterBlockId;
                     }
-                    if (solid != expectedSolid || fluid != expectedFluid)
+                    if (solid != expectedSolid)
                     {
+                        solidMismatchCount++;
                         unexpectedCount++;
+                        if (firstMismatch == "none") firstMismatch = $"solid@{x},{y},{z}:actual={solid}:expected={expectedSolid}";
+                    }
+                    if (fluid != expectedFluid)
+                    {
+                        fluidMismatchCount++;
+                        unexpectedCount++;
+                        if (firstMismatch == "none") firstMismatch = $"fluid@{x},{y},{z}:actual={fluid}:expected={expectedFluid}";
                     }
                 }
             }
@@ -543,7 +566,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         if (mapChunk.YMax != geometry.WaterSurface || freshCount == 0 || saltCount == 0 || unexpectedCount != 0)
         {
-            throw new InvalidOperationException($"L00-C fixture validation failed: ymax={mapChunk.YMax}, fresh={freshCount}, salt={saltCount}, unexpected={unexpectedCount}.");
+            throw new InvalidOperationException($"L00-C fixture validation failed: ymax={mapChunk.YMax}, fresh={freshCount}, salt={saltCount}, unexpected={unexpectedCount}, terrainmap={terrainMapMismatchCount}, rainmap={rainMapMismatchCount}, toprockmap={topRockMapMismatchCount}, solid={solidMismatchCount}, fluid={fluidMismatchCount}, first={firstMismatch}.");
         }
 
         string canonical = $"{chunkSize}|{worldHeight}|{geometry.RockSurface}|{geometry.WaterSurface}|{config.RockBlockId}|{config.FreshWaterBlockId}|{config.SaltWaterBlockId}|{solidCount}|{fluidCount}|{freshCount}|{saltCount}|{mapChunk.YMax}|{unexpectedCount}";
