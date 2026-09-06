@@ -18,9 +18,10 @@ $mapSnapshotPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\Worldgen
 $markerReaderPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\ProbeMarkerEnvelopeReader.cs'
 $initializationGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\InitializationFailClosedGate.cs'
 $delayedShutdownGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\DelayedShutdownGate.cs'
+$reopenTransactionPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\PersistedReopenPublicationTransaction.cs'
 $projectPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
 
-foreach ($path in @($sourcePath, $callbackGatePath, $mapSnapshotPath, $markerReaderPath, $initializationGatePath, $delayedShutdownGatePath)) {
+foreach ($path in @($sourcePath, $callbackGatePath, $mapSnapshotPath, $markerReaderPath, $initializationGatePath, $delayedShutdownGatePath, $reopenTransactionPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "L00-C source is missing: $path"
     }
@@ -34,6 +35,7 @@ $allProbeSource = @(
     Get-Content -LiteralPath $markerReaderPath -Raw
     Get-Content -LiteralPath $initializationGatePath -Raw
     Get-Content -LiteralPath $delayedShutdownGatePath -Raw
+    Get-Content -LiteralPath $reopenTransactionPath -Raw
 ) -join "`n"
 $forbidden = @(
     'WipeAllHandlers',
@@ -121,6 +123,7 @@ $required = @(
     'AutoShutdownDelayMilliseconds',
     'L00C_DELAYED_SHUTDOWN_ARMED',
     'L00C_DELAYED_SHUTDOWN_FIRED',
+    'PersistedReopenPublicationTransaction',
     'ValidateAndCopy',
     'L00C_MAP_SNAPSHOT_COMMITTED',
     'L00C_PERSISTED_MAP_SNAPSHOT_LOADED',
@@ -198,6 +201,7 @@ $mapSnapshotType = 'ISRWorldGen.WorldgenProbe.PersistedMapFootprintSnapshot'
 $markerReaderType = 'ISRWorldGen.WorldgenProbe.ProbeMarkerEnvelopeReader'
 $initializationGateType = 'ISRWorldGen.WorldgenProbe.InitializationFailClosedGate'
 $delayedShutdownGateType = 'ISRWorldGen.WorldgenProbe.DelayedShutdownGate'
+$reopenTransactionType = 'ISRWorldGen.WorldgenProbe.PersistedReopenPublicationTransaction'
 $probePresent = @($typeNames | Where-Object { $_ -eq $probeType }).Count -eq 1
 $markerGatePresent = @($typeNames | Where-Object { $_ -eq $markerGateType }).Count -eq 1
 $callbackGatePresent = @($typeNames | Where-Object { $_ -eq $callbackGateType }).Count -eq 1
@@ -205,10 +209,11 @@ $mapSnapshotPresent = @($typeNames | Where-Object { $_ -eq $mapSnapshotType }).C
 $markerReaderPresent = @($typeNames | Where-Object { $_ -eq $markerReaderType }).Count -eq 1
 $initializationGatePresent = @($typeNames | Where-Object { $_ -eq $initializationGateType }).Count -eq 1
 $delayedShutdownGatePresent = @($typeNames | Where-Object { $_ -eq $delayedShutdownGateType }).Count -eq 1
-if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent -or -not $mapSnapshotPresent -or -not $markerReaderPresent -or -not $initializationGatePresent -or -not $delayedShutdownGatePresent)) {
+$reopenTransactionPresent = @($typeNames | Where-Object { $_ -eq $reopenTransactionType }).Count -eq 1
+if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent -or -not $mapSnapshotPresent -or -not $markerReaderPresent -or -not $initializationGatePresent -or -not $delayedShutdownGatePresent -or -not $reopenTransactionPresent)) {
     throw 'Debug assembly does not contain every L00-C probe, marker, and transient callback type.'
 }
-if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent -or $mapSnapshotPresent -or $markerReaderPresent -or $initializationGatePresent -or $delayedShutdownGatePresent)) {
+if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent -or $mapSnapshotPresent -or $markerReaderPresent -or $initializationGatePresent -or $delayedShutdownGatePresent -or $reopenTransactionPresent)) {
     throw 'Release assembly must not contain any L00-C probe, marker, or transient callback type.'
 }
 
@@ -220,6 +225,7 @@ $campaignControllerOracleStatus = 'NOT_APPLICABLE'
 $markerEnvelopeOracleStatus = 'NOT_APPLICABLE'
 $initializationFailClosedOracleStatus = 'NOT_APPLICABLE'
 $delayedShutdownOracleStatus = 'NOT_APPLICABLE'
+$reopenTransactionOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
     $markerOraclePath = Join-Path $PSScriptRoot 'Test-L00CMarkerPublication.ps1'
     $markerOracle = (& $markerOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
@@ -269,6 +275,12 @@ if ($Configuration -eq 'Debug') {
         throw 'The production delayed-shutdown oracle did not pass.'
     }
     $delayedShutdownOracleStatus = $delayedShutdownOracle.Status
+    $reopenTransactionOraclePath = Join-Path $PSScriptRoot 'Test-L00CPersistedReopenTransaction.ps1'
+    $reopenTransactionOracle = (& $reopenTransactionOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($reopenTransactionOracle.Status -ne 'PASS' -or -not $reopenTransactionOracle.CommitIsFinalCriticalOperation) {
+        throw 'The production persisted-reopen transaction oracle did not pass.'
+    }
+    $reopenTransactionOracleStatus = $reopenTransactionOracle.Status
 }
 
 $result = [ordered]@{
@@ -283,6 +295,7 @@ $result = [ordered]@{
     MarkerEnvelopeReaderTypePresent = $markerReaderPresent
     InitializationFailClosedGateTypePresent = $initializationGatePresent
     DelayedShutdownGateTypePresent = $delayedShutdownGatePresent
+    PersistedReopenTransactionTypePresent = $reopenTransactionPresent
     MarkerPublicationOracle = $markerOracleStatus
     PersistedMapSnapshotOracle = $mapSnapshotOracleStatus
     TransientCallbackOracle = $callbackOracleStatus
@@ -291,6 +304,7 @@ $result = [ordered]@{
     MarkerEnvelopeOracle = $markerEnvelopeOracleStatus
     InitializationFailClosedOracle = $initializationFailClosedOracleStatus
     DelayedShutdownOracle = $delayedShutdownOracleStatus
+    PersistedReopenTransactionOracle = $reopenTransactionOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }

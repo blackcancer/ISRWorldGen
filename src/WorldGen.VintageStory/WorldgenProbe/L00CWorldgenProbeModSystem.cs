@@ -266,14 +266,17 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         if (!saveGame.IsNew)
         {
             ResolveMaterials();
-            PersistedFootprintSnapshot persistedSnapshot = InspectPersistedFootprintBlocking();
-            marker!.OpenCount++;
-            markerPublication.Commit(payload => saveGame.StoreData(MarkerKey, payload));
-            active = true;
-
-            LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
-            Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} run={runId} open={marker.OpenCount} isnew=False save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
-            SchedulePersistedReopen(runId, persistedSnapshot);
+            PersistedReopenPublicationTransaction.Execute(
+                InspectPersistedFootprintBlocking,
+                () =>
+                {
+                    marker!.OpenCount++;
+                    active = true;
+                },
+                () => LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet),
+                () => Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} run={runId} open={marker.OpenCount} isnew=False save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})"),
+                persistedSnapshot => SchedulePersistedReopen(runId, persistedSnapshot),
+                () => markerPublication.Commit(payload => saveGame.StoreData(MarkerKey, payload)));
             return;
         }
 

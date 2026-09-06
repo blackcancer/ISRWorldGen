@@ -46,17 +46,19 @@ if ($transitionMethod.IndexOf('markerPublication.BeginWorldTransition()', [Strin
     throw 'The production world-transition boundary does not atomically disengage marker and transient callback state under runGate.'
 }
 $reopenStart = $initializeMethod.IndexOf('if (!saveGame.IsNew)', [StringComparison]::Ordinal)
-$reopenInspect = $initializeMethod.IndexOf('InspectPersistedFootprintBlocking()', $reopenStart, [StringComparison]::Ordinal)
+$reopenTransaction = $initializeMethod.IndexOf('PersistedReopenPublicationTransaction.Execute(', $reopenStart, [StringComparison]::Ordinal)
+$reopenInspect = $initializeMethod.IndexOf('InspectPersistedFootprintBlocking,', $reopenTransaction, [StringComparison]::Ordinal)
 $reopenIncrement = $initializeMethod.IndexOf('marker!.OpenCount++', $reopenInspect, [StringComparison]::Ordinal)
-$reopenCommit = $initializeMethod.IndexOf('markerPublication.Commit(', $reopenIncrement, [StringComparison]::Ordinal)
-$reopenSchedule = $initializeMethod.IndexOf('SchedulePersistedReopen(', $reopenStart, [StringComparison]::Ordinal)
-$reopenReturn = $initializeMethod.IndexOf('return;', $reopenSchedule, [StringComparison]::Ordinal)
+$reopenSchedule = $initializeMethod.IndexOf('SchedulePersistedReopen(', $reopenIncrement, [StringComparison]::Ordinal)
+$reopenCommit = $initializeMethod.IndexOf('markerPublication.Commit(', $reopenSchedule, [StringComparison]::Ordinal)
+$reopenReturn = $initializeMethod.IndexOf('return;', $reopenCommit, [StringComparison]::Ordinal)
 $handlerValidation = $initializeMethod.IndexOf('ValidateReplacementPreconditions(handlers)', [StringComparison]::Ordinal)
 $newApply = $initializeMethod.IndexOf('ApplyTargetedReplacement(handlers)', $handlerValidation, [StringComparison]::Ordinal)
-if ($reopenStart -lt 0 -or $reopenInspect -le $reopenStart -or $reopenIncrement -le $reopenInspect -or
-    $reopenCommit -le $reopenIncrement -or $reopenSchedule -le $reopenCommit -or
-    $reopenReturn -le $reopenSchedule -or $handlerValidation -le $reopenReturn -or $newApply -le $handlerValidation) {
-    throw 'Persisted reopen must inspect fully before incrementing and committing OpenCount, then return before any worldgen handler replacement.'
+if ($reopenStart -lt 0 -or $reopenTransaction -le $reopenStart -or $reopenInspect -le $reopenTransaction -or
+    $reopenIncrement -le $reopenInspect -or $reopenSchedule -le $reopenIncrement -or
+    $reopenCommit -le $reopenSchedule -or $reopenReturn -le $reopenCommit -or
+    $handlerValidation -le $reopenReturn -or $newApply -le $handlerValidation) {
+    throw 'Persisted reopen must inspect, prepare, log, and schedule before committing OpenCount as its final fallible action.'
 }
 $newWorldBranch = $initializeMethod.Substring($handlerValidation)
 if ($newWorldBranch.Contains('markerPublication.Commit(', [StringComparison]::Ordinal)) {
