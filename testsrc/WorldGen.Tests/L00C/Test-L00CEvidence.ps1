@@ -188,15 +188,42 @@ foreach ($session in $orderedEvidenceSessions) {
             $log.IndexOf("L00C_WITNESS_NO_REQUEST instance=$instance", [StringComparison]::Ordinal)) {
             throw 'Disabled witness shutdown was not requested after its no-request attestation.'
         }
+        $delayMatch = [regex]::Match($log, "L00C_PROBE_READY instance=$instance .* autoshutdowndelayms=([0-9]+)")
+        if (-not $delayMatch.Success) { throw 'Disabled witness lacks its bounded shutdown delay configuration.' }
+        $delayMilliseconds = [int]$delayMatch.Groups[1].Value
+        if ($delayMilliseconds -gt 0) {
+            if ($delayMilliseconds -lt 50 -or $delayMilliseconds -gt 60000) {
+                throw "Disabled witness delayed shutdown is outside 50..60000 ms: $delayMilliseconds."
+            }
+            $witnessIndex = $log.IndexOf("L00C_WITNESS_NO_REQUEST instance=$instance", [StringComparison]::Ordinal)
+            $armedIndex = $log.IndexOf("L00C_DELAYED_SHUTDOWN_ARMED instance=$instance run=$worldRun reason=inactive-witness-complete delayms=$delayMilliseconds", [StringComparison]::Ordinal)
+            $firedIndex = $log.IndexOf("L00C_DELAYED_SHUTDOWN_FIRED instance=$instance run=$worldRun reason=inactive-witness-complete", [StringComparison]::Ordinal)
+            $shutdownIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
+            if ($armedIndex -le $witnessIndex -or $firedIndex -le $armedIndex -or $shutdownIndex -le $firedIndex -or
+                [regex]::Matches($log, "L00C_DELAYED_SHUTDOWN_ARMED instance=$instance ").Count -ne 1 -or
+                [regex]::Matches($log, "L00C_DELAYED_SHUTDOWN_FIRED instance=$instance ").Count -ne 1) {
+                throw 'Disabled witness did not arm, fire, and request its delayed one-shot shutdown in order.'
+            }
+        }
+        elseif ($log -match "L00C_DELAYED_SHUTDOWN_(?:ARMED|FIRED) instance=$instance ") {
+            throw 'Immediate disabled witness unexpectedly used the delayed shutdown path.'
+        }
     }
     elseif ($session.WorldRole -eq 'missing-handler') {
+        Assert-Equal $session.GracefulShutdown $true "Session $($session.Cycle) fail-closed shutdown"
         if ($log -notmatch "L00C_ERROR code=expected-handler-absent instance=$instance ") {
             throw 'Missing-handler session lacks the explicit expected-handler-absent error.'
         }
+        if ($log -notmatch "L00C_INITIALIZATION_FAILED instance=$instance .* type=System\.InvalidOperationException " -or
+            $log -notmatch "L00C_INITIALIZATION_SHUTDOWN instance=$instance .* accepted=True cleanupError=none shutdownError=none" -or
+            [regex]::Matches($log, "L00C_INITIALIZATION_SHUTDOWN instance=$instance ").Count -ne 1 -or
+            $log -notmatch 'Forced: Shutdown through Server API' -or $log -notmatch 'World saved!') {
+            throw 'Missing-handler session did not fail closed through exactly one successful server shutdown request.'
+        }
         if ($log -match "L00C_ACTIVATED instance=$instance " -or
             $log -match "L00C_FIXTURE_WRITTEN instance=$instance " -or
-            $log -match "L00C_(?:MARKER_SAVED|MAP_SNAPSHOT_COMMITTED|PERSISTED_MAP_SNAPSHOT_LOADED) instance=$instance ") {
-            throw 'Missing-handler session silently activated, wrote the fixture, or published a marker candidate.'
+            $log -match "L00C_(?:MARKER_SAVED|MAP_SNAPSHOT_COMMITTED|PERSISTED_MAP_SNAPSHOT_LOADED|COLUMN_REQUEST|TRANSIENT_LOAD_ACCEPTED|FOOTPRINT_REFRESH|DELAYED_SHUTDOWN_FIRED) instance=$instance ") {
+            throw 'Missing-handler session activated, generated, armed callbacks, wrote the fixture, or published a marker candidate after refusal.'
         }
     }
     elseif ($session.WorldRole -like 'activated-*') {

@@ -49,11 +49,11 @@ internal sealed class PersistedMapFootprintSnapshot
             MapChunks = mapChunkCopies.OrderBy(mapChunk => mapChunk.X).ThenBy(mapChunk => mapChunk.Z).ToList()
         };
         snapshot.ContentSha256 = snapshot.ComputeContentSha256();
-        _ = snapshot.ValidateAndCopy(markerId, savegameIdentifier, fixtureChunkX, fixtureChunkZ, chunkSize, worldHeight);
+        snapshot.ValidateForCopy(markerId, savegameIdentifier, fixtureChunkX, fixtureChunkZ, chunkSize, worldHeight);
         return snapshot;
     }
 
-    public IReadOnlyDictionary<string, PersistedMapChunkSnapshot> ValidateAndCopy(
+    public void ValidateForCopy(
         string markerId,
         string savegameIdentifier,
         int fixtureChunkX,
@@ -66,13 +66,13 @@ internal sealed class PersistedMapFootprintSnapshot
         {
             throw new InvalidOperationException("L00-C persisted map snapshot identity or geometry is inconsistent with the current marker and world.");
         }
-        if (chunkSize <= 0 || worldHeight <= 0 || MapChunks is null || MapChunks.Count != 9)
+        if (chunkSize <= 0 || chunkSize > 64 || worldHeight <= 0 || worldHeight > 4096 || MapChunks is null || MapChunks.Count != 9)
         {
             throw new InvalidOperationException("L00-C persisted map snapshot must contain exactly 9 bounded map chunks.");
         }
 
         int expectedMapLength = checked(chunkSize * chunkSize);
-        var copies = new Dictionary<string, PersistedMapChunkSnapshot>(StringComparer.Ordinal);
+        var coordinates = new HashSet<string>(StringComparer.Ordinal);
         foreach (PersistedMapChunkSnapshot mapChunk in MapChunks)
         {
             if (mapChunk is null)
@@ -95,7 +95,7 @@ internal sealed class PersistedMapFootprintSnapshot
             }
 
             string key = CoordinateKey(mapChunk.X, mapChunk.Z);
-            if (!copies.TryAdd(key, mapChunk.DeepCopy()))
+            if (!coordinates.Add(key))
             {
                 throw new InvalidOperationException($"L00-C persisted map snapshot contains duplicate coordinate ({mapChunk.X},{mapChunk.Z}).");
             }
@@ -106,7 +106,7 @@ internal sealed class PersistedMapFootprintSnapshot
             for (int deltaZ = -1; deltaZ <= 1; deltaZ++)
             {
                 string key = CoordinateKey(fixtureChunkX + deltaX, fixtureChunkZ + deltaZ);
-                if (!copies.ContainsKey(key))
+                if (!coordinates.Contains(key))
                 {
                     throw new InvalidOperationException($"L00-C persisted map snapshot is missing coordinate {key}.");
                 }
@@ -117,6 +117,22 @@ internal sealed class PersistedMapFootprintSnapshot
         if (!string.Equals(ContentSha256, computed, StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"L00-C persisted map snapshot checksum mismatch: stored={ContentSha256}, computed={computed}.");
+        }
+    }
+
+    public IReadOnlyDictionary<string, PersistedMapChunkSnapshot> ValidateAndCopy(
+        string markerId,
+        string savegameIdentifier,
+        int fixtureChunkX,
+        int fixtureChunkZ,
+        int chunkSize,
+        int worldHeight)
+    {
+        ValidateForCopy(markerId, savegameIdentifier, fixtureChunkX, fixtureChunkZ, chunkSize, worldHeight);
+        var copies = new Dictionary<string, PersistedMapChunkSnapshot>(StringComparer.Ordinal);
+        foreach (PersistedMapChunkSnapshot mapChunk in MapChunks)
+        {
+            copies.Add(CoordinateKey(mapChunk.X, mapChunk.Z), mapChunk.DeepCopy());
         }
         return copies;
     }

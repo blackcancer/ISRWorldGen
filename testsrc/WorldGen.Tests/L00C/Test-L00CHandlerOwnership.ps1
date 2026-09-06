@@ -67,7 +67,7 @@ if ($reopenBranch -match 'ApplyTargetedReplacement|ScheduleProbeColumn|LoadChunk
     throw 'Persisted reopen still enters a worldgen replacement or priority-load path.'
 }
 $saveStart = $source.IndexOf('private void OnGameWorldSaveCore()', [StringComparison]::Ordinal)
-$saveEnd = $source.IndexOf('private static ProbeMarker? ReadMarker(', $saveStart, [StringComparison]::Ordinal)
+$saveEnd = $source.IndexOf('private ProbeMarker? ReadMarker(', $saveStart, [StringComparison]::Ordinal)
 $saveMethod = $source.Substring($saveStart, $saveEnd - $saveStart)
 if ($saveMethod -notmatch 'marker is not null\s*&&\s*markerPublication\.SaveIfCommitted\(') {
     throw 'GameWorldSave can still publish an unvalidated marker candidate.'

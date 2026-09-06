@@ -9,7 +9,9 @@ param(
 
     [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
     [string]$SeedSavePath,
-    [switch]$AllowExisting
+    [switch]$AllowExisting,
+    [ValidateScript({ $_ -eq 0 -or ($_ -ge 50 -and $_ -le 60000) })]
+    [int]$AutoShutdownDelayMilliseconds = 0
 )
 
 Set-StrictMode -Version Latest
@@ -78,6 +80,7 @@ $probeConfig = [ordered]@{
     Enabled = ($WorldRole -ne 'disabled-witness')
     AutoRun = ($WorldRole -ne 'missing-handler')
     AutoShutdown = $true
+    AutoShutdownDelayMilliseconds = $AutoShutdownDelayMilliseconds
     FixtureChunkX = 31990
     FixtureChunkZ = 31990
     ExpectedMissingHandlerTarget = if ($WorldRole -eq 'missing-handler') { 'Vintagestory.ServerMods.IntentionallyAbsentL00C' } else { $null }

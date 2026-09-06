@@ -119,6 +119,8 @@ $transientColumnSignatures = @(
     'M:Vintagestory.API.Common.IWorldChunk.MarkModified'
     'M:Vintagestory.API.Common.IMapChunk.MarkFresh'
     'M:Vintagestory.API.Common.IMapChunk.MarkDirty'
+    'M:Vintagestory.API.Common.IEventAPI.RegisterCallback(System.Action{System.Single},System.Int32)'
+    'M:Vintagestory.API.Common.IEventAPI.UnregisterCallback(System.Int64)'
 )
 foreach ($signature in $transientColumnSignatures) {
     if (-not $apiXml.Contains($signature)) {
@@ -136,6 +138,8 @@ foreach ($fragment in @(
     'Causes the TTL counter to reset so that it the mapchunk does not unload',
     'stored to disk on the next autosave or during shutdown',
     'Tells the server that it has to save the changes of this chunk to disk'
+    'Calls given method after supplied amount of milliseconds.'
+    'Removes a delayed callback'
 )) {
     if (-not $apiXml.Contains($fragment)) {
         throw "Blocking persisted-column API contract text is missing: $fragment"
@@ -144,6 +148,7 @@ foreach ($fragment in @(
 
 [void][Reflection.Assembly]::LoadFrom($cecilPath)
 $lib = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($libPath)
+$apiDefinition = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($apiPath)
 function Require-CecilType([string]$Name) {
     $type = $lib.MainModule.Types | Where-Object FullName -eq $Name | Select-Object -First 1
     if ($null -eq $type) { throw "Required implementation type is missing: $Name" }
@@ -158,6 +163,23 @@ function Get-CecilBodyText($Method) {
     return (($Method.Body.Instructions | ForEach-Object { "$($_.OpCode) $($_.Operand)" }) -join "`n")
 }
 
+$commonEventApi = $apiDefinition.MainModule.Types | Where-Object FullName -eq 'Vintagestory.API.Common.IEventAPI' | Select-Object -First 1
+if ($null -eq $commonEventApi) {
+    throw 'Required delayed-callback API type is missing: Vintagestory.API.Common.IEventAPI'
+}
+$delayedRegister = $commonEventApi.Methods | Where-Object {
+    $_.Name -eq 'RegisterCallback' -and $_.ReturnType.FullName -eq 'System.Int64' -and $_.Parameters.Count -eq 2 -and
+    $_.Parameters[0].ParameterType.FullName -eq 'System.Action`1<System.Single>' -and
+    $_.Parameters[1].ParameterType.FullName -eq 'System.Int32'
+} | Select-Object -First 1
+$delayedUnregister = $commonEventApi.Methods | Where-Object {
+    $_.Name -eq 'UnregisterCallback' -and $_.ReturnType.FullName -eq 'System.Void' -and $_.Parameters.Count -eq 1 -and
+    $_.Parameters[0].ParameterType.FullName -eq 'System.Int64'
+} | Select-Object -First 1
+if ($null -eq $delayedRegister -or $null -eq $delayedUnregister) {
+    throw 'Delayed callback registration/unregistration API drifted.'
+}
+
 $worldApiImplementation = Require-CecilType 'Vintagestory.Server.WorldAPI'
 $serverMainImplementation = Require-CecilType 'Vintagestory.Server.ServerMain'
 $supplyImplementation = Require-CecilType 'Vintagestory.Server.ServerSystemSupplyChunks'
@@ -165,6 +187,15 @@ $worldApiBlockingBody = Get-CecilBodyText (Require-CecilMethod $worldApiImplemen
 $serverBlockingBody = Get-CecilBodyText (Require-CecilMethod $serverMainImplementation 'BlockingLoadChunkColumn' 2)
 $tryLoadBody = Get-CecilBodyText (Require-CecilMethod $supplyImplementation 'TryLoadChunkColumn' 1)
 $getMapChunkBody = Get-CecilBodyText (Require-CecilMethod $worldApiImplementation 'GetMapChunk' 2)
+$serverEventApiImplementation = Require-CecilType 'Vintagestory.Server.ServerEventAPI'
+$triggerInitWorldGen = Require-CecilMethod $serverEventApiImplementation 'TriggerInitWorldGen' 0
+$triggerInitBody = Get-CecilBodyText $triggerInitWorldGen
+$serverMainType = Require-CecilType 'Vintagestory.Server.ServerMain'
+$launchBody = Get-CecilBodyText (Require-CecilMethod $serverMainType 'Launch' 0)
+$modHandlerType = Require-CecilType 'Vintagestory.Server.ServerSystemModHandler'
+$loadAndSaveType = Require-CecilType 'Vintagestory.Server.ServerSystemLoadAndSaveGame'
+$modRunGameBody = Get-CecilBodyText (Require-CecilMethod $modHandlerType 'OnBeginRunGame' 0)
+$loadSaveRunGameBody = Get-CecilBodyText (Require-CecilMethod $loadAndSaveType 'OnBeginRunGame' 0)
 if ($worldApiBlockingBody -notmatch 'ServerMain::BlockingLoadChunkColumn' -or
     $serverBlockingBody -notmatch 'ServerSystemSupplyChunks::TryLoadChunkColumn' -or
     $tryLoadBody -notmatch 'GameDatabase::GetChunk' -or $tryLoadBody -notmatch 'ServerChunk::FromBytes' -or
@@ -174,6 +205,16 @@ if ($worldApiBlockingBody -notmatch 'ServerMain::BlockingLoadChunkColumn' -or
 if ($getMapChunkBody -notmatch 'loadedMapChunks' -or $getMapChunkBody -notmatch 'TryGetValue' -or
     $getMapChunkBody -match 'TryLoadMapChunk|GameDatabase::GetMapChunk') {
     throw 'GetMapChunk no longer proves a loaded-cache-only lookup.'
+}
+if ($triggerInitWorldGen.Body.ExceptionHandlers.Count -eq 0 -or $triggerInitBody -notmatch 'System.Action::Invoke' -or
+    $triggerInitBody -notmatch 'Error during Init worldgen' -or $triggerInitBody -notmatch 'Done all worldgens') {
+    throw 'TriggerInitWorldGen no longer proves that handler exceptions are logged and iteration continues.'
+}
+if ($launchBody -notmatch '(?s)ldc\.i4\.6\s+ldloc\.0\s+stelem\.ref' -or
+    $launchBody -notmatch '(?s)ldc\.i4\.s 28\s+ldloc\.s V_5\s+stelem\.ref' -or
+    $modRunGameBody -notmatch 'ServerEventAPI::OnServerStage' -or
+    $loadSaveRunGameBody -notmatch 'add_OnGameWorldBeingSaved') {
+    throw 'Server system order drifted: ModHandler index 6 must precede LoadAndSave index 28 and its RunGame save subscription.'
 }
 
 $chunkHandlerProperty = $handler.GetProperty('OnChunkColumnGen')
@@ -262,6 +303,9 @@ $result = [ordered]@{
     BlockingLoadImplementation = 'TryLoadChunkColumn:GetChunk+ServerChunk.FromBytes;no-mapchunk-attachment'
     GetMapChunkImplementation = 'loadedMapChunks.TryGetValue;no-disk-load'
     PersistedMapSource = 'versioned-marker-envelope-copy'
+    InitWorldGenFailureSemantics = 'catch-log-continue'
+    RunGameSystemOrder = 'ModHandler=6;LoadAndSave=28'
+    DelayedCallbackApi = 'RegisterCallback(Action<float>,int)->long;UnregisterCallback(long)'
 }
 
 $json = $result | ConvertTo-Json -Depth 5

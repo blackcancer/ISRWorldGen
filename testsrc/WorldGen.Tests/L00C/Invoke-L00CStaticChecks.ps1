@@ -15,16 +15,26 @@ $ErrorActionPreference = 'Stop'
 $sourcePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
 $callbackGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\TransientLoadCallbackGate.cs'
 $mapSnapshotPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\PersistedMapFootprintSnapshot.cs'
+$markerReaderPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\ProbeMarkerEnvelopeReader.cs'
+$initializationGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\InitializationFailClosedGate.cs'
+$delayedShutdownGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\DelayedShutdownGate.cs'
 $projectPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
 
-foreach ($path in @($sourcePath, $callbackGatePath, $mapSnapshotPath)) {
+foreach ($path in @($sourcePath, $callbackGatePath, $mapSnapshotPath, $markerReaderPath, $initializationGatePath, $delayedShutdownGatePath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "L00-C source is missing: $path"
     }
 }
 
 $source = Get-Content -LiteralPath $sourcePath -Raw
-$allProbeSource = $source + "`n" + (Get-Content -LiteralPath $callbackGatePath -Raw) + "`n" + (Get-Content -LiteralPath $mapSnapshotPath -Raw)
+$allProbeSource = @(
+    $source
+    Get-Content -LiteralPath $callbackGatePath -Raw
+    Get-Content -LiteralPath $mapSnapshotPath -Raw
+    Get-Content -LiteralPath $markerReaderPath -Raw
+    Get-Content -LiteralPath $initializationGatePath -Raw
+    Get-Content -LiteralPath $delayedShutdownGatePath -Raw
+) -join "`n"
 $forbidden = @(
     'WipeAllHandlers',
     'Task.Run(',
@@ -101,6 +111,16 @@ $required = @(
     'BlockingTestMapChunkExists',
     'BlockingLoadChunkColumn',
     'PersistedMapFootprintSnapshot',
+    'ProbeMarkerEnvelopeReader',
+    'ValidateForCopy',
+    'InitializationFailClosedGate',
+    'CloseProbeStateAfterInitializationFailure',
+    'L00C_INITIALIZATION_FAILED',
+    'L00C_INITIALIZATION_SHUTDOWN',
+    'DelayedShutdownGate',
+    'AutoShutdownDelayMilliseconds',
+    'L00C_DELAYED_SHUTDOWN_ARMED',
+    'L00C_DELAYED_SHUTDOWN_FIRED',
     'ValidateAndCopy',
     'L00C_MAP_SNAPSHOT_COMMITTED',
     'L00C_PERSISTED_MAP_SNAPSHOT_LOADED',
@@ -175,14 +195,20 @@ $probeType = 'ISRWorldGen.WorldgenProbe.L00CWorldgenProbeModSystem'
 $markerGateType = 'ISRWorldGen.WorldgenProbe.MarkerPublicationGate'
 $callbackGateType = 'ISRWorldGen.WorldgenProbe.TransientLoadCallbackGate'
 $mapSnapshotType = 'ISRWorldGen.WorldgenProbe.PersistedMapFootprintSnapshot'
+$markerReaderType = 'ISRWorldGen.WorldgenProbe.ProbeMarkerEnvelopeReader'
+$initializationGateType = 'ISRWorldGen.WorldgenProbe.InitializationFailClosedGate'
+$delayedShutdownGateType = 'ISRWorldGen.WorldgenProbe.DelayedShutdownGate'
 $probePresent = @($typeNames | Where-Object { $_ -eq $probeType }).Count -eq 1
 $markerGatePresent = @($typeNames | Where-Object { $_ -eq $markerGateType }).Count -eq 1
 $callbackGatePresent = @($typeNames | Where-Object { $_ -eq $callbackGateType }).Count -eq 1
 $mapSnapshotPresent = @($typeNames | Where-Object { $_ -eq $mapSnapshotType }).Count -eq 1
-if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent -or -not $mapSnapshotPresent)) {
+$markerReaderPresent = @($typeNames | Where-Object { $_ -eq $markerReaderType }).Count -eq 1
+$initializationGatePresent = @($typeNames | Where-Object { $_ -eq $initializationGateType }).Count -eq 1
+$delayedShutdownGatePresent = @($typeNames | Where-Object { $_ -eq $delayedShutdownGateType }).Count -eq 1
+if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent -or -not $mapSnapshotPresent -or -not $markerReaderPresent -or -not $initializationGatePresent -or -not $delayedShutdownGatePresent)) {
     throw 'Debug assembly does not contain every L00-C probe, marker, and transient callback type.'
 }
-if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent -or $mapSnapshotPresent)) {
+if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent -or $mapSnapshotPresent -or $markerReaderPresent -or $initializationGatePresent -or $delayedShutdownGatePresent)) {
     throw 'Release assembly must not contain any L00-C probe, marker, or transient callback type.'
 }
 
@@ -191,6 +217,9 @@ $mapSnapshotOracleStatus = 'NOT_APPLICABLE'
 $callbackOracleStatus = 'NOT_APPLICABLE'
 $persistenceAttestationOracleStatus = 'NOT_APPLICABLE'
 $campaignControllerOracleStatus = 'NOT_APPLICABLE'
+$markerEnvelopeOracleStatus = 'NOT_APPLICABLE'
+$initializationFailClosedOracleStatus = 'NOT_APPLICABLE'
+$delayedShutdownOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
     $markerOraclePath = Join-Path $PSScriptRoot 'Test-L00CMarkerPublication.ps1'
     $markerOracle = (& $markerOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
@@ -222,6 +251,24 @@ if ($Configuration -eq 'Debug') {
         throw 'The four-phase campaign controller oracle did not pass.'
     }
     $campaignControllerOracleStatus = $campaignControllerOracle.Status
+    $markerEnvelopeOraclePath = Join-Path $PSScriptRoot 'Test-L00CMarkerEnvelopeSafety.ps1'
+    $markerEnvelopeOracle = (& $markerEnvelopeOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($markerEnvelopeOracle.Status -ne 'PASS') {
+        throw 'The bounded production marker-envelope oracle did not pass.'
+    }
+    $markerEnvelopeOracleStatus = $markerEnvelopeOracle.Status
+    $initializationFailClosedOraclePath = Join-Path $PSScriptRoot 'Test-L00CInitializationFailClosed.ps1'
+    $initializationFailClosedOracle = (& $initializationFailClosedOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($initializationFailClosedOracle.Status -ne 'PASS') {
+        throw 'The production initialization fail-closed oracle did not pass.'
+    }
+    $initializationFailClosedOracleStatus = $initializationFailClosedOracle.Status
+    $delayedShutdownOraclePath = Join-Path $PSScriptRoot 'Test-L00CDelayedShutdownGate.ps1'
+    $delayedShutdownOracle = (& $delayedShutdownOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($delayedShutdownOracle.Status -ne 'PASS') {
+        throw 'The production delayed-shutdown oracle did not pass.'
+    }
+    $delayedShutdownOracleStatus = $delayedShutdownOracle.Status
 }
 
 $result = [ordered]@{
@@ -233,11 +280,17 @@ $result = [ordered]@{
     MarkerGateTypePresent = $markerGatePresent
     TransientCallbackGateTypePresent = $callbackGatePresent
     PersistedMapSnapshotTypePresent = $mapSnapshotPresent
+    MarkerEnvelopeReaderTypePresent = $markerReaderPresent
+    InitializationFailClosedGateTypePresent = $initializationGatePresent
+    DelayedShutdownGateTypePresent = $delayedShutdownGatePresent
     MarkerPublicationOracle = $markerOracleStatus
     PersistedMapSnapshotOracle = $mapSnapshotOracleStatus
     TransientCallbackOracle = $callbackOracleStatus
     PersistenceAttestationOracle = $persistenceAttestationOracleStatus
     CampaignControllerOracle = $campaignControllerOracleStatus
+    MarkerEnvelopeOracle = $markerEnvelopeOracleStatus
+    InitializationFailClosedOracle = $initializationFailClosedOracleStatus
+    DelayedShutdownOracle = $delayedShutdownOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }
