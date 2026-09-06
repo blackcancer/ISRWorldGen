@@ -8,10 +8,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $apiPath = Join-Path $GamePath 'VintagestoryAPI.dll'
+$apiXmlPath = Join-Path $GamePath 'VintagestoryAPI.xml'
 $essentialsPath = Join-Path $GamePath 'Mods\VSEssentials.dll'
 $survivalPath = Join-Path $GamePath 'Mods\VSSurvivalMod.dll'
 
-foreach ($path in @($apiPath, $essentialsPath, $survivalPath)) {
+foreach ($path in @($apiPath, $apiXmlPath, $essentialsPath, $survivalPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required local assembly is missing: $path"
     }
@@ -86,6 +87,19 @@ $passType = Require-Type $api 'Vintagestory.API.Server.EnumWorldGenPass'
 [void](Require-Method $saveGame 'GetData' @('System.String'))
 [void](Require-Method $saveGame 'StoreData' @('System.String', 'System.Byte[]'))
 [void](Require-Method $server 'ShutDown' @())
+$apiXml = Get-Content -LiteralPath $apiXmlPath -Raw
+$columnOwnershipSignatures = @(
+    'M:Vintagestory.API.Server.IWorldManagerAPI.GetMapChunk(System.Int32,System.Int32)',
+    'M:Vintagestory.API.Server.IWorldManagerAPI.GetChunk(System.Int32,System.Int32,System.Int32)',
+    'M:Vintagestory.API.Server.IWorldManagerAPI.LoadChunkColumnPriority(System.Int32,System.Int32,Vintagestory.API.Server.ChunkLoadOptions)',
+    'M:Vintagestory.API.Server.IWorldManagerAPI.LoadChunkColumnPriority(System.Int32,System.Int32,System.Int32,System.Int32,Vintagestory.API.Server.ChunkLoadOptions)',
+    'M:Vintagestory.API.Server.IWorldManagerAPI.UnloadChunkColumn(System.Int32,System.Int32)'
+)
+foreach ($signature in $columnOwnershipSignatures) {
+    if (-not $apiXml.Contains($signature)) {
+        throw "Required local API signature is missing: $signature"
+    }
+}
 
 $chunkHandlerProperty = $handler.GetProperty('OnChunkColumnGen')
 if ($null -eq $chunkHandlerProperty -or -not $chunkHandlerProperty.PropertyType.IsArray) {
@@ -169,6 +183,7 @@ $result = [ordered]@{
     NativeTypes = $nativeTypeStatus
     StructureHandlers = @($structureMethods | ForEach-Object { "$($_.DeclaringType.FullName)::$($_.Name)" })
     LightingAnchor = "$($lightMethod.DeclaringType.FullName)::$($lightMethod.Name)"
+    OwnedColumnApi = $columnOwnershipSignatures
 }
 
 $json = $result | ConvertTo-Json -Depth 5

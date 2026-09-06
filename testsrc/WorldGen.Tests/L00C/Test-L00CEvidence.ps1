@@ -124,6 +124,12 @@ foreach ($session in @($evidence.Sessions)) {
     if ($log -notmatch "L00C_HANDLERS phase=before instance=$instance save=$savegame ") {
         throw "Session $($session.Cycle) log does not correlate the savegame identifier."
     }
+    if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=world-initialize instance=$instance released=0 remainingowned=0 exact=True") {
+        throw "Session $($session.Cycle) began with retained KeepLoaded ownership."
+    }
+    if ($log -match "L00C_COLUMN_RELEASE_ERROR .* instance=$instance ") {
+        throw "Session $($session.Cycle) contains a KeepLoaded release error."
+    }
 
     if ($session.WorldRole -eq 'disabled-witness') {
         Assert-Equal $session.GracefulShutdown $true "Session $($session.Cycle) graceful shutdown"
@@ -132,6 +138,25 @@ foreach ($session in @($evidence.Sessions)) {
         }
         if ($log -match "L00C_FIXTURE_WRITTEN instance=$instance " -or $log -match "L00C_ACTIVATED instance=$instance ") {
             throw 'Disabled witness unexpectedly ran the L00-C fixture writer.'
+        }
+        $ownedLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_OWNED instance=$instance marker=none role=inactive-witness chunk=\(([-0-9]+),([-0-9]+)\) owned=1.*$")
+        $releaseLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_RELEASE reason=inactive-witness-complete instance=$instance marker=none chunk=\(([-0-9]+),([-0-9]+)\) released=1.*$")
+        Assert-Equal $ownedLines.Count 1 "Session $($session.Cycle) witness owned-column count"
+        Assert-Equal $releaseLines.Count 1 "Session $($session.Cycle) witness release count"
+        Assert-Equal $releaseLines[0].Groups[1].Value $ownedLines[0].Groups[1].Value "Session $($session.Cycle) witness release X"
+        Assert-Equal $releaseLines[0].Groups[2].Value $ownedLines[0].Groups[2].Value "Session $($session.Cycle) witness release Z"
+        if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=inactive-witness-complete instance=$instance released=1 remainingowned=0 exact=True") {
+            throw "Disabled witness did not release its sole KeepLoaded column exactly."
+        }
+        if ($log -notmatch "L00C_COLUMN_PRECONDITION instance=$instance marker=none unloaded=1 exact=True" -or
+            $log -notmatch "L00C_COLUMN_LOAD_ACCEPTED instance=$instance marker=none columns=1 owned=1 exact=True") {
+            throw 'Disabled witness did not prove an unloaded, accepted, solely owned request.'
+        }
+        if ($log.IndexOf("L00C_COLUMN_RELEASE reason=inactive-witness-complete instance=$instance", [StringComparison]::Ordinal) -le
+            $log.IndexOf("L00C_WITNESS_LOADED instance=$instance", [StringComparison]::Ordinal) -or
+            $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal) -le
+            $log.IndexOf("L00C_COLUMN_RELEASE_RESULT reason=inactive-witness-complete instance=$instance", [StringComparison]::Ordinal)) {
+            throw 'Disabled witness did not release its KeepLoaded column between validation and shutdown.'
         }
     }
     elseif ($session.WorldRole -eq 'missing-handler') {
@@ -167,13 +192,46 @@ foreach ($session in @($evidence.Sessions)) {
                 throw "Activated session $($session.Cycle) is missing log pattern: $pattern"
             }
         }
-        $haloCompleteIndex = $log.IndexOf("L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8", [StringComparison]::Ordinal)
+        $haloBeginIndex = $log.IndexOf("L00C_HALO_PREPARE_BEGIN instance=$instance marker=$marker radius=1 columns=8", [StringComparison]::Ordinal)
         $centerRequestIndex = $log.IndexOf("L00C_COLUMN_REQUEST instance=$instance active=True", [StringComparison]::Ordinal)
-        if ($haloCompleteIndex -lt 0 -or $centerRequestIndex -le $haloCompleteIndex) {
-            throw "Activated session $($session.Cycle) did not prepare the full first ring before requesting the fixture center."
+        $haloCompleteIndex = $log.IndexOf("L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8", [StringComparison]::Ordinal)
+        $loadedInspectionIndex = $log.IndexOf("L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded", [StringComparison]::Ordinal)
+        if ($haloBeginIndex -lt 0 -or $centerRequestIndex -le $haloBeginIndex -or $haloCompleteIndex -le $centerRequestIndex -or $loadedInspectionIndex -le $haloCompleteIndex) {
+            throw "Activated session $($session.Cycle) did not atomically request, fully load, and inspect the exact protected footprint in order."
         }
         if ($log -notmatch "L00C_TICKS_STABLE instance=$instance .* unexpected=0") {
             throw "Activated session $($session.Cycle) did not preserve the exact fixture after bounded ticks."
+        }
+
+        $ownedLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_OWNED instance=$instance marker=$marker role=(?:halo|fixture-center) chunk=\(([-0-9]+),([-0-9]+)\) owned=([1-9]).*$")
+        $releaseLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_RELEASE reason=fixture-stable instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) released=([1-9]).*$")
+        Assert-Equal $ownedLines.Count 9 "Session $($session.Cycle) owned KeepLoaded footprint"
+        Assert-Equal $releaseLines.Count 9 "Session $($session.Cycle) released KeepLoaded footprint"
+        $expectedCoordinates = @(
+            for ($deltaX = -1; $deltaX -le 1; $deltaX++) {
+                for ($deltaZ = -1; $deltaZ -le 1; $deltaZ++) {
+                    "$([int]$evidence.Parameters.FixtureChunkX + $deltaX),$([int]$evidence.Parameters.FixtureChunkZ + $deltaZ)"
+                }
+            }
+        ) | Sort-Object
+        $ownedCoordinates = @($ownedLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
+        $releasedCoordinates = @($releaseLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
+        Assert-Equal ($ownedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact owned coordinates"
+        Assert-Equal ($releasedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact released coordinates"
+        Assert-Equal (($ownedLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) ownership sequence"
+        Assert-Equal (($releaseLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) release sequence"
+        if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=fixture-stable instance=$instance released=9 remainingowned=0 exact=True") {
+            throw "Activated session $($session.Cycle) retained KeepLoaded ownership after terminal validation."
+        }
+        if ($log -notmatch "L00C_COLUMN_PRECONDITION instance=$instance marker=$marker unloaded=9 exact=True" -or
+            $log -notmatch "L00C_COLUMN_LOAD_ACCEPTED instance=$instance marker=$marker columns=9 owned=9 exact=True") {
+            throw "Activated session $($session.Cycle) did not prove an unloaded and atomically accepted 3x3 ownership request."
+        }
+        if ($log.IndexOf("L00C_COLUMN_RELEASE reason=fixture-stable instance=$instance", [StringComparison]::Ordinal) -le
+            $log.IndexOf("L00C_HALO_STABLE instance=$instance", [StringComparison]::Ordinal) -or
+            $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal) -le
+            $log.IndexOf("L00C_COLUMN_RELEASE_RESULT reason=fixture-stable instance=$instance", [StringComparison]::Ordinal)) {
+            throw "Activated session $($session.Cycle) did not release its KeepLoaded footprint between terminal validation and shutdown."
         }
 
         $beforeLine = [regex]::Match($log, "(?m)^.*L00C_HANDLERS phase=before instance=$instance .*$").Value
@@ -233,6 +291,13 @@ foreach ($session in @($evidence.Sessions)) {
         throw "Unknown WorldRole: $($session.WorldRole)"
     }
 
+    if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=0 remainingowned=0 exact=True") {
+        throw "Session $($session.Cycle) disposal did not prove zero retained KeepLoaded ownership."
+    }
+    $successfulReleaseCount = [regex]::Matches($log, "L00C_COLUMN_RELEASE reason=").Count
+    $expectedReleaseCount = if ($session.WorldRole -eq 'disabled-witness') { 1 } elseif ($session.WorldRole -like 'activated-*') { 9 } else { 0 }
+    Assert-Equal $successfulReleaseCount $expectedReleaseCount "Session $($session.Cycle) total successful release count"
+
     Assert-Equal $session.DebuggerFinalMode 'Design' "Session $($session.Cycle) debugger final mode"
     Assert-Equal $session.ProcessAbsent $true "Session $($session.Cycle) process absent"
 }
@@ -251,10 +316,17 @@ for ($index = 0; $index -lt $allSessions.Count; $index++) {
 
 $debuggerInspection = Get-Content -LiteralPath $debuggerInspectionPath -Raw | ConvertFrom-Json
 Assert-Equal $debuggerInspection.TestedCommit $evidence.TestedCommit 'Debugger inspection commit'
-Assert-Equal ([int]$debuggerInspection.ProcessId) 55992 'Debugger inspection process'
-Assert-Equal $debuggerInspection.InstanceId 'a292390ee34844a7b8f040ee30874303' 'Debugger inspection instance'
+$debuggerSession = @($evidence.Sessions | Where-Object {
+    [int]$_.ProcessId -eq [int]$debuggerInspection.ProcessId -and
+    [string]$_.InstanceId -eq [string]$debuggerInspection.InstanceId
+})
+if ($debuggerSession.Count -ne 1 -or $debuggerSession[0].WorldRole -notlike 'activated-*') {
+    throw 'Debugger inspection does not correlate to exactly one activated evidence session.'
+}
+Assert-Equal $debuggerInspection.MarkerId $debuggerSession[0].MarkerId 'Debugger inspection marker'
 Assert-Equal $debuggerInspection.ModuleSha256 $evidence.Artifacts.Assembly.Sha256 'Debugger module SHA256'
 Assert-Equal $debuggerInspection.PdbSha256 $evidence.Artifacts.Symbols.Sha256 'Debugger PDB SHA256'
+Assert-Equal $debuggerInspection.ClientLaunched $false 'Debugger client launch flag'
 Assert-Equal $debuggerInspection.Loaded.Phase 'loaded' 'Debugger loaded phase'
 Assert-Equal $debuggerInspection.AfterTicks.Phase 'afterticks' 'Debugger afterticks phase'
 Assert-Equal $debuggerInspection.Loaded.UnexpectedCount 0 'Debugger loaded unexpected count'

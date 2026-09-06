@@ -44,9 +44,11 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private readonly string instanceId = Guid.NewGuid().ToString("N");
     private readonly ChunkColumnGenerationDelegate lightingFinalizerHandler;
-    private readonly Queue<ChunkCoordinate> pendingHaloColumns = new();
+    private readonly object ownedColumnsGate = new();
+    private readonly Dictionary<ChunkCoordinate, ColumnOwnershipState> ownedLoadedColumns = [];
 
     private ICoreServerAPI? api;
+    private IWorldManagerAPI? ownedColumnWorldManager;
     private HandlerOwnershipState? ownershipState;
     private L00CProbeConfig config = new();
     private ProbeMarker? marker;
@@ -59,7 +61,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private int fixtureCallbackCount;
     private int requestIssued;
     private int shutdownIssued;
+    private int disposalStarted;
     private bool active;
+    private bool columnOwnershipClosing;
+    private long worldRunId;
 
     /// <summary>Initializes the stable delegate identity used for targeted handler ownership.</summary>
     public L00CWorldgenProbeModSystem()
@@ -88,6 +93,12 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private void InitializeWorld()
     {
         ICoreServerAPI serverApi = RequireApi();
+        ReleaseOwnedColumns("world-initialize");
+        long runId = Interlocked.Increment(ref worldRunId);
+        lock (ownedColumnsGate)
+        {
+            columnOwnershipClosing = false;
+        }
         IWorldGenHandler handlers = serverApi.Event.GetRegisteredWorldGenHandlers(WorldType)
             ?? throw new InvalidOperationException("L00-C could not obtain the standard worldgen handler set.");
 
@@ -106,7 +117,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         shutdownIssued = 0;
         stableTickCount = 0;
         haloPreparedCount = 0;
-        pendingHaloColumns.Clear();
         marker = null;
         preLightingSnapshot = null;
         initialSnapshot = null;
@@ -125,7 +135,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 active = false;
                 marker = null;
                 Log($"L00C_INACTIVE instance={instanceId} reason=new-world-not-enabled save={saveGame.SavegameIdentifier}");
-                ScheduleProbeColumn();
+                ScheduleProbeColumn(runId);
                 return;
             }
 
@@ -147,7 +157,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             }
 
             Log($"L00C_INACTIVE instance={instanceId} reason=existing-world-without-marker save={saveGame.SavegameIdentifier}");
-            ScheduleProbeColumn();
+            ScheduleProbeColumn(runId);
             return;
         }
         else
@@ -165,7 +175,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
         Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} open={marker.OpenCount} isnew={saveGame.IsNew} save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
-        ScheduleProbeColumn();
+        ScheduleProbeColumn(runId);
     }
 
     private RestoreResult RestoreOwnedHandlerSet(string reason)
@@ -357,7 +367,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         return block;
     }
 
-    private void ScheduleProbeColumn()
+    private void ScheduleProbeColumn(long runId)
     {
         if (!config.AutoRun)
         {
@@ -365,11 +375,31 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             return;
         }
 
-        RequireApi().Event.ServerRunPhase(EnumServerRunPhase.RunGame, RequestProbeColumn);
+        RequireApi().Event.ServerRunPhase(EnumServerRunPhase.RunGame, () => RequestProbeColumn(runId));
     }
 
-    private void RequestProbeColumn()
+    private void RequestProbeColumn(long runId)
     {
+        try
+        {
+            RequestProbeColumnCore(runId);
+        }
+        catch (Exception exception)
+        {
+            if (!IsCurrentRun(runId))
+            {
+                return;
+            }
+            throw HandleAsynchronousFailure("probe-request-error", exception);
+        }
+    }
+
+    private void RequestProbeColumnCore(long runId)
+    {
+        if (!IsCurrentRun(runId))
+        {
+            return;
+        }
         if (Interlocked.Exchange(ref requestIssued, 1) != 0)
         {
             return;
@@ -379,63 +409,291 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ValidateFixtureCoordinate(serverApi);
         if (active)
         {
+            var footprint = new List<OwnedColumnRequest>();
             for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
             {
                 for (int deltaZ = -FixtureProtectionRadius; deltaZ <= FixtureProtectionRadius; deltaZ++)
                 {
-                    if (deltaX != 0 || deltaZ != 0)
-                    {
-                        pendingHaloColumns.Enqueue(new ChunkCoordinate(config.FixtureChunkX + deltaX, config.FixtureChunkZ + deltaZ));
-                    }
+                    var coordinate = new ChunkCoordinate(config.FixtureChunkX + deltaX, config.FixtureChunkZ + deltaZ);
+                    string role = deltaX == 0 && deltaZ == 0 ? "fixture-center" : "halo";
+                    footprint.Add(new OwnedColumnRequest(coordinate, role));
                 }
             }
-            Log($"L00C_HALO_PREPARE_BEGIN instance={instanceId} marker={marker!.MarkerId} radius={FixtureProtectionRadius} columns={pendingHaloColumns.Count}");
-            RequestNextHaloColumn();
+            Log($"L00C_HALO_PREPARE_BEGIN instance={instanceId} marker={marker!.MarkerId} radius={FixtureProtectionRadius} columns={footprint.Count - 1}");
+            foreach (OwnedColumnRequest request in footprint.Where(item => item.Role == "halo"))
+            {
+                Log($"L00C_HALO_COLUMN_REQUEST instance={instanceId} marker={marker!.MarkerId} chunk=({request.Coordinate.X},{request.Coordinate.Z})");
+            }
+            Log($"L00C_COLUMN_REQUEST instance={instanceId} active=True chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
+            LoadOwnedChunkColumns(serverApi.WorldManager, footprint, () => OnHaloColumnLoaded(runId));
             return;
         }
 
-        RequestFixtureCenter(serverApi);
+        var witness = new OwnedColumnRequest(new ChunkCoordinate(config.FixtureChunkX, config.FixtureChunkZ), "inactive-witness");
+        Log($"L00C_COLUMN_REQUEST instance={instanceId} active=False chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
+        LoadOwnedChunkColumns(serverApi.WorldManager, [witness], () => OnProbeColumnLoaded(runId));
     }
 
-    private void RequestNextHaloColumn()
+    private void OnHaloColumnLoaded(long runId)
     {
-        ICoreServerAPI serverApi = RequireApi();
-        if (!pendingHaloColumns.TryDequeue(out ChunkCoordinate coordinate))
+        if (!IsCurrentRun(runId))
         {
-            Log($"L00C_HALO_PREPARE_COMPLETE instance={instanceId} marker={marker!.MarkerId} radius={FixtureProtectionRadius} columns={haloPreparedCount}");
-            RequestFixtureCenter(serverApi);
             return;
         }
 
-        Log($"L00C_HALO_COLUMN_REQUEST instance={instanceId} marker={marker!.MarkerId} chunk=({coordinate.X},{coordinate.Z}) remaining={pendingHaloColumns.Count}");
-        serverApi.WorldManager.LoadChunkColumnPriority(
-            coordinate.X,
-            coordinate.Z,
-            new ChunkLoadOptions
+        try
+        {
+            for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
             {
-                KeepLoaded = true,
-                OnLoaded = () => OnHaloColumnLoaded(coordinate)
-            });
+                for (int deltaZ = -FixtureProtectionRadius; deltaZ <= FixtureProtectionRadius; deltaZ++)
+                {
+                    if (deltaX == 0 && deltaZ == 0)
+                    {
+                        continue;
+                    }
+                    int prepared = Interlocked.Increment(ref haloPreparedCount);
+                    Log($"L00C_HALO_COLUMN_PREPARED instance={instanceId} marker={marker!.MarkerId} chunk=({config.FixtureChunkX + deltaX},{config.FixtureChunkZ + deltaZ}) prepared={prepared}");
+                }
+            }
+            Log($"L00C_HALO_PREPARE_COMPLETE instance={instanceId} marker={marker!.MarkerId} radius={FixtureProtectionRadius} columns={haloPreparedCount}");
+            OnProbeColumnLoaded(runId);
+        }
+        catch (Exception exception)
+        {
+            if (!IsCurrentRun(runId))
+            {
+                return;
+            }
+            throw HandleAsynchronousFailure("halo-chain-error", exception);
+        }
     }
 
-    private void OnHaloColumnLoaded(ChunkCoordinate coordinate)
+    private void LoadOwnedChunkColumns(IWorldManagerAPI worldManager, IReadOnlyList<OwnedColumnRequest> requests, Action onLoaded)
     {
-        int prepared = Interlocked.Increment(ref haloPreparedCount);
-        Log($"L00C_HALO_COLUMN_PREPARED instance={instanceId} marker={marker!.MarkerId} chunk=({coordinate.X},{coordinate.Z}) prepared={prepared}");
-        RequestNextHaloColumn();
+        bool invokeLoadedAfterAcceptance = false;
+        var reservation = new OwnedLoadReservation(onLoaded);
+        lock (ownedColumnsGate)
+        {
+            if (columnOwnershipClosing || Volatile.Read(ref disposalStarted) != 0)
+            {
+                throw new InvalidOperationException("L00-C refused KeepLoaded ownership after cleanup started.");
+            }
+            if (ownedColumnWorldManager is not null && !ReferenceEquals(ownedColumnWorldManager, worldManager))
+            {
+                throw new InvalidOperationException("L00-C cannot force columns from two world-manager instances at once.");
+            }
+            if (requests.Count is not (1 or 9) || requests.Select(item => item.Coordinate).Distinct().Count() != requests.Count)
+            {
+                throw new InvalidOperationException($"L00-C requires one witness column or the exact nine-column fixture footprint, got {requests.Count} request(s).");
+            }
+
+            foreach (OwnedColumnRequest request in requests)
+            {
+                if (ownedLoadedColumns.ContainsKey(request.Coordinate))
+                {
+                    throw new InvalidOperationException($"L00-C duplicate KeepLoaded reservation for ({request.Coordinate.X},{request.Coordinate.Z}).");
+                }
+                if (IsColumnAlreadyLoaded(worldManager, request.Coordinate))
+                {
+                    Log($"L00C_COLUMN_PREEXISTING_REJECTED instance={instanceId} marker={marker?.MarkerId ?? "none"} role={request.Role} chunk=({request.Coordinate.X},{request.Coordinate.Z})");
+                    throw new InvalidOperationException($"L00-C refuses KeepLoaded ownership of preloaded column ({request.Coordinate.X},{request.Coordinate.Z}).");
+                }
+            }
+            Log($"L00C_COLUMN_PRECONDITION instance={instanceId} marker={marker?.MarkerId ?? "none"} unloaded={requests.Count} exact=True");
+
+            foreach (OwnedColumnRequest request in requests)
+            {
+                ownedLoadedColumns.Add(request.Coordinate, ColumnOwnershipState.Pending);
+            }
+            ownedColumnWorldManager = worldManager;
+
+            try
+            {
+                var options = new ChunkLoadOptions
+                {
+                    KeepLoaded = true,
+                    OnLoaded = () => OnOwnedLoadCompleted(reservation)
+                };
+                if (requests.Count == 1)
+                {
+                    ChunkCoordinate coordinate = requests[0].Coordinate;
+                    worldManager.LoadChunkColumnPriority(coordinate.X, coordinate.Z, options);
+                }
+                else
+                {
+                    int minX = requests.Min(item => item.Coordinate.X);
+                    int minZ = requests.Min(item => item.Coordinate.Z);
+                    int maxX = requests.Max(item => item.Coordinate.X);
+                    int maxZ = requests.Max(item => item.Coordinate.Z);
+                    if ((maxX - minX + 1) * (maxZ - minZ + 1) != requests.Count)
+                    {
+                        throw new InvalidOperationException("L00-C KeepLoaded footprint is not the exact requested rectangle.");
+                    }
+                    worldManager.LoadChunkColumnPriority(minX, minZ, maxX, maxZ, options);
+                }
+            }
+            catch
+            {
+                reservation.Cancelled = true;
+                foreach (OwnedColumnRequest request in requests)
+                {
+                    ownedLoadedColumns.Remove(request.Coordinate);
+                }
+                if (ownedLoadedColumns.Count == 0)
+                {
+                    ownedColumnWorldManager = null;
+                }
+                Log($"L00C_COLUMN_LOAD_REJECTED instance={instanceId} marker={marker?.MarkerId ?? "none"} columns={requests.Count} remainingowned={ownedLoadedColumns.Count}");
+                throw;
+            }
+
+            int ownedCount = ownedLoadedColumns.Count(item => item.Value == ColumnOwnershipState.Owned);
+            foreach (OwnedColumnRequest request in requests)
+            {
+                ownedLoadedColumns[request.Coordinate] = ColumnOwnershipState.Owned;
+                ownedCount++;
+                Log($"L00C_COLUMN_OWNED instance={instanceId} marker={marker?.MarkerId ?? "none"} role={request.Role} chunk=({request.Coordinate.X},{request.Coordinate.Z}) owned={ownedCount}");
+            }
+            reservation.Accepted = true;
+            Log($"L00C_COLUMN_LOAD_ACCEPTED instance={instanceId} marker={marker?.MarkerId ?? "none"} columns={requests.Count} owned={ownedLoadedColumns.Count} exact=True");
+            if (reservation.CallbackArrived && !reservation.CallbackInvoked)
+            {
+                reservation.CallbackInvoked = true;
+                invokeLoadedAfterAcceptance = true;
+            }
+        }
+
+        if (invokeLoadedAfterAcceptance)
+        {
+            reservation.OnLoaded();
+        }
     }
 
-    private void RequestFixtureCenter(ICoreServerAPI serverApi)
+    private void OnOwnedLoadCompleted(OwnedLoadReservation reservation)
     {
-        Log($"L00C_COLUMN_REQUEST instance={instanceId} active={active} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
-        serverApi.WorldManager.LoadChunkColumnPriority(
-            config.FixtureChunkX,
-            config.FixtureChunkZ,
-            new ChunkLoadOptions
+        bool invokeLoaded = false;
+        lock (ownedColumnsGate)
+        {
+            if (reservation.Cancelled || reservation.CallbackInvoked || Volatile.Read(ref disposalStarted) != 0)
             {
-                KeepLoaded = true,
-                OnLoaded = OnProbeColumnLoaded
-            });
+                return;
+            }
+            reservation.CallbackArrived = true;
+            if (reservation.Accepted)
+            {
+                reservation.CallbackInvoked = true;
+                invokeLoaded = true;
+            }
+        }
+
+        if (invokeLoaded)
+        {
+            reservation.OnLoaded();
+        }
+    }
+
+    private static bool IsColumnAlreadyLoaded(IWorldManagerAPI worldManager, ChunkCoordinate coordinate)
+    {
+        if (worldManager.GetMapChunk(coordinate.X, coordinate.Z) is not null)
+        {
+            return true;
+        }
+        int verticalChunkCount = (worldManager.MapSizeY + worldManager.ChunkSize - 1) / worldManager.ChunkSize;
+        for (int chunkY = 0; chunkY < verticalChunkCount; chunkY++)
+        {
+            if (worldManager.GetChunk(coordinate.X, chunkY, coordinate.Z) is not null)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void ReleaseOwnedColumns(string reason)
+    {
+        lock (ownedColumnsGate)
+        {
+            columnOwnershipClosing = true;
+            IWorldManagerAPI? worldManager = ownedColumnWorldManager;
+            if (ownedLoadedColumns.Count != 0 && worldManager is null)
+            {
+                string message = $"L00-C lost its world-manager reference with {ownedLoadedColumns.Count} owned KeepLoaded column(s).";
+                Log($"L00C_COLUMN_RELEASE_ERROR reason={reason} instance={instanceId} chunk=none type={typeof(InvalidOperationException).FullName} message={Sanitize(message)}");
+                throw new InvalidOperationException(message);
+            }
+
+            int released = 0;
+            Exception? releaseFailure = null;
+            if (ownedLoadedColumns.Any(item => item.Value != ColumnOwnershipState.Owned))
+            {
+                string message = "L00-C cleanup observed a KeepLoaded reservation that was not accepted.";
+                Log($"L00C_COLUMN_RELEASE_ERROR reason={reason} instance={instanceId} chunk=pending type={typeof(InvalidOperationException).FullName} message={Sanitize(message)}");
+                throw new InvalidOperationException(message);
+            }
+
+            foreach (ChunkCoordinate coordinate in ownedLoadedColumns.Keys.OrderBy(item => item.X).ThenBy(item => item.Z).ToArray())
+            {
+                try
+                {
+                    worldManager!.UnloadChunkColumn(coordinate.X, coordinate.Z);
+                    if (!ownedLoadedColumns.Remove(coordinate))
+                    {
+                        throw new InvalidOperationException($"L00-C lost owned coordinate ({coordinate.X},{coordinate.Z}) during release.");
+                    }
+                    released++;
+                    Log($"L00C_COLUMN_RELEASE reason={reason} instance={instanceId} marker={marker?.MarkerId ?? "none"} chunk=({coordinate.X},{coordinate.Z}) released={released}");
+                }
+                catch (Exception exception)
+                {
+                    Log($"L00C_COLUMN_RELEASE_ERROR reason={reason} instance={instanceId} chunk=({coordinate.X},{coordinate.Z}) type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
+                    releaseFailure = releaseFailure is null ? exception : new AggregateException(releaseFailure, exception);
+                }
+            }
+
+            int remaining = ownedLoadedColumns.Count;
+            bool exact = remaining == 0;
+            if (exact)
+            {
+                ownedColumnWorldManager = null;
+            }
+            Log($"L00C_COLUMN_RELEASE_RESULT reason={reason} instance={instanceId} released={released} remainingowned={remaining} exact={exact}");
+            if (!exact || releaseFailure is not null)
+            {
+                throw new InvalidOperationException($"L00-C could not release all owned KeepLoaded columns; remaining={remaining}.", releaseFailure);
+            }
+        }
+    }
+
+    private bool IsCurrentRun(long runId) =>
+        Volatile.Read(ref disposalStarted) == 0 && Volatile.Read(ref worldRunId) == runId;
+
+    private Exception HandleAsynchronousFailure(string stage, Exception exception)
+    {
+        ICoreServerAPI? serverApi = api;
+        if (serverApi is null || Volatile.Read(ref disposalStarted) != 0)
+        {
+            return exception;
+        }
+
+        serverApi.Logger.Error($"L00C_VALIDATION_ERROR instance={instanceId} stage={stage} type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
+        Exception result = exception;
+        try
+        {
+            ReleaseOwnedColumns(stage);
+        }
+        catch (Exception cleanupException)
+        {
+            result = new AggregateException(result, cleanupException);
+        }
+        try
+        {
+            RequestShutdownIfConfigured(stage);
+        }
+        catch (Exception shutdownException)
+        {
+            result = new AggregateException(result, shutdownException);
+        }
+        return result;
     }
 
     private void ValidateFixtureCoordinate(ICoreServerAPI serverApi)
@@ -596,8 +854,13 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         chunks[chunkY].Empty = false;
     }
 
-    private void OnProbeColumnLoaded()
+    private void OnProbeColumnLoaded(long runId)
     {
+        if (!IsCurrentRun(runId))
+        {
+            return;
+        }
+
         try
         {
             if (active)
@@ -619,47 +882,64 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             {
                 FixtureSnapshot witness = InspectWitness();
                 Log($"L00C_WITNESS_LOADED instance={instanceId} chunk=({config.FixtureChunkX},{config.FixtureChunkZ}) snapshot={witness.Hash} solids={witness.SolidCount} fluids={witness.FluidCount} ymax={witness.YMax}");
+                ReleaseOwnedColumns("inactive-witness-complete");
                 RequestShutdownIfConfigured("inactive-witness-complete");
             }
         }
         catch (Exception exception)
         {
-            RequireApi().Logger.Error($"L00C_VALIDATION_ERROR instance={instanceId} type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
-            RequestShutdownIfConfigured("validation-error");
-            throw;
+            if (!IsCurrentRun(runId))
+            {
+                return;
+            }
+            throw HandleAsynchronousFailure("probe-loaded-error", exception);
         }
     }
 
     private void OnServerTick(float deltaTime)
     {
-        if (!active || initialSnapshot is null)
+        if (Volatile.Read(ref disposalStarted) != 0 || !active || initialSnapshot is null)
         {
             return;
         }
 
-        stableTickCount++;
-        if (stableTickCount < StableTickTarget)
+        try
         {
-            return;
-        }
+            stableTickCount++;
+            if (stableTickCount < StableTickTarget)
+            {
+                return;
+            }
 
-        FixtureSnapshot afterTicks = InspectFixture("afterticks");
-        if (!string.Equals(initialSnapshot.Hash, afterTicks.Hash, StringComparison.Ordinal))
+            FixtureSnapshot afterTicks = InspectFixture("afterticks");
+            if (!string.Equals(initialSnapshot.Hash, afterTicks.Hash, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"L00-C fixture changed after {StableTickTarget} ticks: {initialSnapshot.Hash} -> {afterTicks.Hash}.");
+            }
+
+            HaloSnapshot afterTicksHalo = InspectProtectionHalo("afterticks");
+            if (initialHaloSnapshot is null || !string.Equals(initialHaloSnapshot.Hash, afterTicksHalo.Hash, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"L00-C protected first ring changed after {StableTickTarget} ticks: {initialHaloSnapshot?.Hash ?? "none"} -> {afterTicksHalo.Hash}.");
+            }
+
+            Log($"L00C_TICKS_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} snapshot={afterTicks.Hash} fluids={afterTicks.FluidCount} fresh={afterTicks.FreshCount} salt={afterTicks.SaltCount} unexpected={afterTicks.UnexpectedCount}");
+            Log($"L00C_HALO_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} columns={afterTicksHalo.ColumnCount} snapshot={afterTicksHalo.Hash}");
+            initialSnapshot = null;
+            initialHaloSnapshot = null;
+            ReleaseOwnedColumns("fixture-stable");
+            RequestShutdownIfConfigured("fixture-stable");
+        }
+        catch (Exception exception)
         {
-            throw new InvalidOperationException($"L00-C fixture changed after {StableTickTarget} ticks: {initialSnapshot.Hash} -> {afterTicks.Hash}.");
+            initialSnapshot = null;
+            initialHaloSnapshot = null;
+            if (Volatile.Read(ref disposalStarted) != 0)
+            {
+                return;
+            }
+            throw HandleAsynchronousFailure("tick-validation-error", exception);
         }
-
-        HaloSnapshot afterTicksHalo = InspectProtectionHalo("afterticks");
-        if (initialHaloSnapshot is null || !string.Equals(initialHaloSnapshot.Hash, afterTicksHalo.Hash, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException($"L00-C protected first ring changed after {StableTickTarget} ticks: {initialHaloSnapshot?.Hash ?? "none"} -> {afterTicksHalo.Hash}.");
-        }
-
-        Log($"L00C_TICKS_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} snapshot={afterTicks.Hash} fluids={afterTicks.FluidCount} fresh={afterTicks.FreshCount} salt={afterTicks.SaltCount} unexpected={afterTicks.UnexpectedCount}");
-        Log($"L00C_HALO_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} columns={afterTicksHalo.ColumnCount} snapshot={afterTicksHalo.Hash}");
-        initialSnapshot = null;
-        initialHaloSnapshot = null;
-        RequestShutdownIfConfigured("fixture-stable");
     }
 
     private FixtureSnapshot InspectFixture(string phase)
@@ -916,7 +1196,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void OnGameWorldSave()
     {
-        if (marker is not null)
+        if (Volatile.Read(ref disposalStarted) == 0 && marker is not null)
         {
             StoreMarker(RequireApi().WorldManager.SaveGame, marker);
             Log($"L00C_MARKER_SAVED instance={instanceId} marker={marker.MarkerId} open={marker.OpenCount}");
@@ -1054,6 +1334,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     /// <inheritdoc />
     public override void Dispose()
     {
+        Interlocked.Exchange(ref disposalStarted, 1);
+        Interlocked.Increment(ref worldRunId);
         ICoreServerAPI? serverApi = api;
         Exception? disposeFailure = null;
         if (serverApi is not null)
@@ -1071,6 +1353,16 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             {
                 serverApi.Logger.Error($"L00C_DISPOSE_ERROR instance={instanceId} stage=events type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
                 disposeFailure = exception;
+            }
+
+            try
+            {
+                ReleaseOwnedColumns("dispose");
+            }
+            catch (Exception exception)
+            {
+                serverApi.Logger.Error($"L00C_DISPOSE_ERROR instance={instanceId} stage=columns type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
+                disposeFailure = disposeFailure is null ? exception : new AggregateException(disposeFailure, exception);
             }
 
             try
@@ -1117,8 +1409,24 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ChunkColumnGenerationDelegate LightingFinalizer);
     private readonly record struct RestoreResult(int RemovedOwned, int RestoredNative, bool Exact);
     private readonly record struct ChunkCoordinate(int X, int Z);
+    private readonly record struct OwnedColumnRequest(ChunkCoordinate Coordinate, string Role);
     private sealed record FixtureSnapshot(string Hash, int SolidCount, int FluidCount, int FreshCount, int SaltCount, int UnexpectedCount, ushort YMax);
     private sealed record HaloSnapshot(string Hash, int ColumnCount);
+
+    private enum ColumnOwnershipState
+    {
+        Pending,
+        Owned
+    }
+
+    private sealed class OwnedLoadReservation(Action onLoaded)
+    {
+        public Action OnLoaded { get; } = onLoaded;
+        public bool Accepted { get; set; }
+        public bool CallbackArrived { get; set; }
+        public bool CallbackInvoked { get; set; }
+        public bool Cancelled { get; set; }
+    }
 
     private sealed class OwnedHandler
     {

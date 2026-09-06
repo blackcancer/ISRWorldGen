@@ -114,11 +114,17 @@ function Restore-Ownership {
 $passes = @{
     Terrain = @(
         (New-Handler Terrain GenTerra OnChunkColumnGen $true $true),
+        (New-Handler Terrain GenRockStrataNew GenChunkColumn $true),
         (New-Handler Terrain L00B OnChunkColumnGeneration),
         (New-Handler Terrain GenCaves GenChunkColumn $true),
-        (New-Handler Terrain ThirdParty Tail)
+        (New-Handler Terrain GenDevastationLayer OnChunkColumnGeneration $true),
+        (New-Handler Terrain GenBlockLayers OnChunkColumnGeneration $true)
     )
     TerrainFeatures = @(
+        (New-Handler TerrainFeatures GenTerraPostProcess OnChunkColumnGen $true),
+        (New-Handler TerrainFeatures GenHotSprings GenChunkColumn $true $false $true),
+        (New-Handler TerrainFeatures GenDungeons onChunkColumnGen $true $false $true),
+        (New-Handler TerrainFeatures GenDeposits GenChunkColumn $true $false $true),
         (New-Handler TerrainFeatures GenStructures OnChunkColumnGen $true $false $true),
         (New-Handler TerrainFeatures GenPonds OnChunkColumnGen $true $false $true),
         (New-Handler TerrainFeatures GenStructures OnChunkColumnGenPostPass $true $false $true)
@@ -126,7 +132,15 @@ $passes = @{
     Vegetation = @(
         (New-Handler Vegetation GenStoryStructures OnChunkColumnGen $true $false $true),
         (New-Handler Vegetation GenVegetationAndPatches OnChunkColumnGen $true $false $true),
+        (New-Handler Vegetation GenRivulets OnChunkColumnGen $true $false $true),
         (New-Handler Vegetation GenLightSurvival OnChunkColumnGeneration)
+    )
+    NeighbourSunLightFlood = @(
+        (New-Handler NeighbourSunLightFlood GenSnowLayer OnChunkColumnGen $true),
+        (New-Handler NeighbourSunLightFlood GenLightSurvival OnChunkColumnGenerationFlood)
+    )
+    Done = @(
+        (New-Handler Done GenCreatures OnChunkColumnGen)
     )
 }
 
@@ -143,13 +157,13 @@ foreach ($wrapper in $state.Wrappers) {
 }
 
 $nonFixtureCalls = [Collections.Generic.List[string]]::new()
-foreach ($pass in @('Terrain', 'TerrainFeatures', 'Vegetation')) {
+foreach ($pass in @('Terrain', 'TerrainFeatures', 'Vegetation', 'NeighbourSunLightFlood', 'Done')) {
     foreach ($handler in $passes[$pass]) {
         if ($handler.Kind -eq 'Wrapper') { [void]$nonFixtureCalls.Add("$($handler.OriginalTarget)::$($handler.OriginalMethod)") }
         elseif ($handler.Kind -eq 'Native') { [void]$nonFixtureCalls.Add("$($handler.Target)::$($handler.Method)") }
     }
 }
-$expectedNonFixture = foreach ($pass in @('Terrain', 'TerrainFeatures', 'Vegetation')) {
+$expectedNonFixture = foreach ($pass in @('Terrain', 'TerrainFeatures', 'Vegetation', 'NeighbourSunLightFlood', 'Done')) {
     foreach ($handler in $state.Original[$pass]) { "$($handler.Target)::$($handler.Method)" }
 }
 if (($nonFixtureCalls -join '|') -ne ($expectedNonFixture -join '|')) {
@@ -158,10 +172,10 @@ if (($nonFixtureCalls -join '|') -ne ($expectedNonFixture -join '|')) {
 
 $haloForwarded = @($state.Wrappers | Where-Object { -not $_.SuppressInHalo })
 $haloSuppressed = @($state.Wrappers | Where-Object SuppressInHalo)
-if ($haloForwarded.Count -ne 2 -or $haloSuppressed.Count -ne 5) {
+if ($state.Wrappers.Count -ne 16 -or $haloForwarded.Count -ne 7 -or $haloSuppressed.Count -ne 9) {
     throw "Halo handler classification drifted: forwarded=$($haloForwarded.Count), suppressed=$($haloSuppressed.Count)."
 }
-if (@($haloForwarded | Where-Object OriginalTarget -in @('GenTerra', 'GenCaves')).Count -ne 2) {
+if (@($haloForwarded | Where-Object OriginalTarget -in @('GenTerra', 'GenRockStrataNew', 'GenCaves', 'GenDevastationLayer', 'GenBlockLayers', 'GenTerraPostProcess', 'GenSnowLayer')).Count -ne 7) {
     throw 'The halo no longer forwards the sampled base terrain handlers at their native positions.'
 }
 if (@($haloSuppressed | Where-Object OriginalTarget -eq 'GenVegetationAndPatches').Count -ne 1) {
@@ -194,7 +208,7 @@ if ($finalizerIndex -lt 0 -or $lightIndex -ne ($finalizerIndex + 1)) {
 
 $removedFirst = Restore-Ownership $passes $state
 $removedSecond = Restore-Ownership $passes $state
-if ($removedFirst -ne 8 -or $removedSecond -ne 0) {
+if ($removedFirst -ne 17 -or $removedSecond -ne 0) {
     throw "Restoration counts are not real/idempotent: first=$removedFirst second=$removedSecond."
 }
 
