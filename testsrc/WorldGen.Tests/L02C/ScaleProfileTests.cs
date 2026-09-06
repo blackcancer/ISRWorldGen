@@ -46,6 +46,8 @@ public sealed class ScaleProfileTests
             Assert.AreEqual(proposal.RequestedSiteCount, frozen.AtlasIndexProfile.RequestedSiteCount);
             Assert.AreEqual(proposal.SiteQuota, frozen.AtlasIndexProfile.SiteQuota);
             Assert.AreEqual(proposal.AtlasMemoryBudgetBytes, frozen.AtlasIndexProfile.MemoryBudgetBytes);
+            Assert.IsGreaterThan(0, frozen.BaselineAtlasEstimatedPeakBytes);
+            Assert.IsLessThanOrEqualTo(frozen.AtlasMemoryBudgetBytes, frozen.BaselineAtlasEstimatedPeakBytes);
         }
     }
 
@@ -135,6 +137,22 @@ public sealed class ScaleProfileTests
         Assert.AreEqual("atlas.profile.site-quota", quotaFailure.Error.Stage);
         Assert.AreEqual(GenerationFailureCode.BudgetExceeded, budgetFailure.Error.Code);
         Assert.AreEqual("atlas.profile.memory-budget", budgetFailure.Error.Stage);
+    }
+
+    [TestMethod]
+    public void WithinQuotaButOverPlannerBudget_IsRejectedBeforeFreeze()
+    {
+        ScaleProfileDefinition proposal = ProfileTestSupport.Balanced() with
+        {
+            RequestedSiteCount = 128,
+            SiteQuota = 128,
+        };
+
+        GenerationFailure<FrozenScaleProfile> failure = ProfileTestSupport.Failure(
+            ScaleProfileValidator.ValidateAndFreeze(proposal, ProfileTestSupport.QualifiedNativeConstraints()));
+
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, failure.Error.Code);
+        Assert.AreEqual("atlas.profile.memory-budget", failure.Error.Stage);
     }
 
     [TestMethod]

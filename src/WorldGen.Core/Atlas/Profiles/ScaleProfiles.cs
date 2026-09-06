@@ -189,6 +189,7 @@ public sealed class FrozenScaleProfile : IEquatable<FrozenScaleProfile>
         uint nativeRuleSetVersion,
         VerticalEnvelope verticalEnvelope,
         AtlasIndexProfile atlasIndexProfile,
+        long baselineAtlasEstimatedPeakBytes,
         Hash256 geographyConfigHash)
     {
         Definition = definition;
@@ -204,6 +205,7 @@ public sealed class FrozenScaleProfile : IEquatable<FrozenScaleProfile>
         AtlasMemoryBudgetBytes = definition.AtlasMemoryBudgetBytes;
         VerticalEnvelope = verticalEnvelope;
         AtlasIndexProfile = atlasIndexProfile;
+        BaselineAtlasEstimatedPeakBytes = baselineAtlasEstimatedPeakBytes;
         NativeRuleSetId = nativeRuleSetId;
         NativeRuleSetVersion = nativeRuleSetVersion;
         GeographyConfigHash = geographyConfigHash;
@@ -234,6 +236,8 @@ public sealed class FrozenScaleProfile : IEquatable<FrozenScaleProfile>
     public VerticalEnvelope VerticalEnvelope { get; }
 
     public AtlasIndexProfile AtlasIndexProfile { get; }
+
+    public long BaselineAtlasEstimatedPeakBytes { get; }
 
     public string NativeRuleSetId { get; }
 
@@ -368,14 +372,43 @@ public static class ScaleProfileValidator
             proposal.RequestedSiteCount,
             proposal.SiteQuota,
             proposal.AtlasMemoryBudgetBytes);
+        GenerationResult<AtlasMemoryEstimate> planResult = AtlasSpatialIndexPlanner.Estimate(
+            CreatePlanningIdentity(inputHash),
+            indexProfile,
+            Array.Empty<SpatialPrimitiveDefinition>(),
+            new SpatialIndexBuildOptions(1, SpatialIndexCacheMode.Cold));
+        if (planResult is GenerationFailure<AtlasMemoryEstimate> planFailure)
+        {
+            return GenerationResult<FrozenScaleProfile>.Failure(planFailure.Error);
+        }
+
+        AtlasMemoryEstimate plan = ((GenerationSuccess<AtlasMemoryEstimate>)planResult).Snapshot;
+        if (plan.EstimatedPeakBuildBytes > proposal.AtlasMemoryBudgetBytes)
+        {
+            return Fail(
+                GenerationFailureCode.BudgetExceeded,
+                "atlas.profile.memory-budget",
+                inputHash,
+                $"Qualified L02-B cold plan requires {plan.EstimatedPeakBuildBytes} bytes, exceeding profile budget {proposal.AtlasMemoryBudgetBytes}.");
+        }
+
         return GenerationResult<FrozenScaleProfile>.Success(new FrozenScaleProfile(
             proposal,
             persistedNativeRuleSetId,
             persistedNativeRuleSetVersion,
             verticalEnvelope,
             indexProfile,
+            plan.EstimatedPeakBuildBytes,
             ProfileCanonicalEncoding.ComputeConfigurationHash(proposal)));
     }
+
+    private static GenerationIdentity CreatePlanningIdentity(Hash256 geographyConfigHash) => new(
+        nativeSeed: 0,
+        GenerationIdentity.SupportedAlgorithmVersion,
+        GenerationIdentity.SupportedSchemaVersion,
+        geographyConfigHash,
+        Hash256.Zero,
+        "l02c-profile-preflight-v1");
 
     private static bool HasValidDimensions(
         ScaleProfileDefinition proposal,
