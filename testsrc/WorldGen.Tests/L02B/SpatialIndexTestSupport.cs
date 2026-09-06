@@ -78,6 +78,21 @@ internal static class SpatialIndexTestSupport
             points);
     }
 
+    internal static SpatialPrimitiveDefinition[] ManyPrimitiveFixtures(int primitiveCount = 500_000)
+    {
+        var primitives = new SpatialPrimitiveDefinition[primitiveCount];
+        for (int index = 0; index < primitiveCount; index++)
+        {
+            primitives[index] = new SpatialPrimitiveDefinition(
+                new StableId(1, checked((ulong)index + 1)),
+                SpatialPrimitiveKind.River,
+                "p",
+                [new SpatialPoint(0, 0), new SpatialPoint(1, 1)]);
+        }
+
+        return primitives;
+    }
+
     internal static AtlasIndexBuildOutcome Success(GenerationResult<AtlasIndexBuildOutcome> result)
     {
         Assert.IsInstanceOfType<GenerationSuccess<AtlasIndexBuildOutcome>>(result);

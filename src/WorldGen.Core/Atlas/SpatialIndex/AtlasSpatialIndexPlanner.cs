@@ -123,10 +123,11 @@ public static class AtlasSpatialIndexPlanner
         {
             int pointCount = 0;
             long placementCount = 0;
-            var ids = new HashSet<StableId>();
+            StableId previousId = StableId.Zero;
+            bool hasPreviousId = false;
             foreach (SpatialPrimitiveDefinition primitive in primitives.Definitions)
             {
-                if (!ids.Add(primitive.Id))
+                if (hasPreviousId && primitive.Id == previousId)
                 {
                     return Failure(
                         identity,
@@ -135,8 +136,12 @@ public static class AtlasSpatialIndexPlanner
                         $"Duplicate primitive StableId {primitive.Id}.");
                 }
 
-                foreach (SpatialPoint point in primitive.Points)
+                previousId = primitive.Id;
+                hasPreviousId = true;
+
+                for (int pointIndex = 0; pointIndex < primitive.Points.Count; pointIndex++)
                 {
+                    SpatialPoint point = primitive.Points[pointIndex];
                     if (!profile.Contains(point))
                     {
                         return Failure(

@@ -86,6 +86,8 @@ try {
             liveManagedBytesDelta = $allocationReport.liveManagedBytesDelta
             denseRefusalAllocatedBytes = $allocationReport.rejectedDenseRefusalAllocatedBytes
             largeInputRefusalAllocatedBytes = $allocationReport.largeInputRefusalAllocatedBytes
+            manyPrimitiveEstimateAllocatedBytes = $allocationReport.manyPrimitiveEstimateAllocatedBytes
+            manyPrimitiveBuildAllocatedBytes = $allocationReport.manyPrimitiveBuildAllocatedBytes
         }
     }
 }
@@ -163,10 +165,25 @@ $isolatedAllocation =
     $allocationReports[1].largeInputFailureCode -eq "BudgetExceeded" -and
     $allocationReports[0].largeInputFailureStage -eq "atlas.spatial-index.budget" -and
     $allocationReports[1].largeInputFailureStage -eq "atlas.spatial-index.budget" -and
+    $allocationReports[0].manyPrimitiveCount -eq 500000 -and
+    $allocationReports[1].manyPrimitiveCount -eq 500000 -and
+    $allocationReports[0].manyPrimitiveMemoryBudgetBytes -eq 25165824 -and
+    $allocationReports[1].manyPrimitiveMemoryBudgetBytes -eq 25165824 -and
+    $allocationReports[0].manyPrimitiveEstimatedPeakBuildBytes -eq $allocationReports[1].manyPrimitiveEstimatedPeakBuildBytes -and
+    $allocationReports[0].manyPrimitiveEstimateAllocatedBytes -lt 8388608 -and
+    $allocationReports[1].manyPrimitiveEstimateAllocatedBytes -lt 8388608 -and
+    $allocationReports[0].manyPrimitiveBuildAllocatedBytes -lt 8388608 -and
+    $allocationReports[1].manyPrimitiveBuildAllocatedBytes -lt 8388608 -and
+    $allocationReports[0].manyPrimitiveFailureCode -eq "BudgetExceeded" -and
+    $allocationReports[1].manyPrimitiveFailureCode -eq "BudgetExceeded" -and
+    $allocationReports[0].manyPrimitiveFailureStage -eq "atlas.spatial-index.budget" -and
+    $allocationReports[1].manyPrimitiveFailureStage -eq "atlas.spatial-index.budget" -and
     -not $allocationReports[0].rejectedDenseSnapshotVisible -and
     -not $allocationReports[1].rejectedDenseSnapshotVisible -and
     -not $allocationReports[0].largeInputSnapshotVisible -and
-    -not $allocationReports[1].largeInputSnapshotVisible
+    -not $allocationReports[1].largeInputSnapshotVisible -and
+    -not $allocationReports[0].manyPrimitiveSnapshotVisible -and
+    -not $allocationReports[1].manyPrimitiveSnapshotVisible
 $processIds = @(
     $reports[0].processId,
     $reports[1].processId,
@@ -220,6 +237,16 @@ $summary = [pscustomobject][ordered]@{
         minimumBytes = ($allocationReports.largeInputRefusalAllocatedBytes | Measure-Object -Minimum).Minimum
         maximumBytes = ($allocationReports.largeInputRefusalAllocatedBytes | Measure-Object -Maximum).Maximum
         scope = "200,000-point immutable input already constructed; one MiB profile; measured dedicated refusal only"
+    }
+    manyPrimitiveEstimateAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.manyPrimitiveEstimateAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.manyPrimitiveEstimateAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "500,000 immutable two-point primitives already constructed; 24 MiB profile; Estimate only"
+    }
+    manyPrimitiveBuildAllocationRange = [pscustomobject][ordered]@{
+        minimumBytes = ($allocationReports.manyPrimitiveBuildAllocatedBytes | Measure-Object -Minimum).Minimum
+        maximumBytes = ($allocationReports.manyPrimitiveBuildAllocatedBytes | Measure-Object -Maximum).Maximum
+        scope = "500,000 immutable two-point primitives already constructed; 24 MiB profile; Build refusal only"
     }
     runs = $runs
 }

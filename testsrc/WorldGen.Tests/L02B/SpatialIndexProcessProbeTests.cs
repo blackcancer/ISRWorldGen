@@ -207,6 +207,32 @@ public sealed class SpatialIndexProcessProbeTests
         Assert.IsLessThan(256 * 1024L, largeInputRefusalAllocation);
         GC.KeepAlive(largeInput);
 
+        SpatialPrimitiveDefinition[] manyPrimitives = SpatialIndexTestSupport.ManyPrimitiveFixtures();
+        var manyPrimitiveProfile = new AtlasIndexProfile(
+            SpatialIndexTestSupport.FixtureProfile().Domain,
+            SpatialIndexTestSupport.FixtureProfile().Scale,
+            tileSize: 512,
+            requestedSiteCount: 1,
+            siteQuota: 1,
+            memoryBudgetBytes: 24L * 1024 * 1024);
+        long manyEstimateBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasMemoryEstimate> manyEstimateResult = AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), manyPrimitiveProfile, manyPrimitives);
+        long manyEstimateAllocation = GC.GetTotalAllocatedBytes(precise: true) - manyEstimateBefore;
+        Assert.IsInstanceOfType<GenerationSuccess<AtlasMemoryEstimate>>(manyEstimateResult);
+        AtlasMemoryEstimate manyEstimate = ((GenerationSuccess<AtlasMemoryEstimate>)manyEstimateResult).Snapshot;
+        long manyBuildBefore = GC.GetTotalAllocatedBytes(precise: true);
+        GenerationResult<AtlasIndexBuildOutcome> manyBuildResult = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), manyPrimitiveProfile, manyPrimitives);
+        long manyBuildAllocation = GC.GetTotalAllocatedBytes(precise: true) - manyBuildBefore;
+        Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(manyBuildResult);
+        GenerationError manyBuildError = ((GenerationFailure<AtlasIndexBuildOutcome>)manyBuildResult).Error;
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, manyBuildError.Code);
+        Assert.AreEqual("atlas.spatial-index.budget", manyBuildError.Stage);
+        Assert.IsLessThan(8L * 1024 * 1024, manyEstimateAllocation);
+        Assert.IsLessThan(8L * 1024 * 1024, manyBuildAllocation);
+        GC.KeepAlive(manyPrimitives);
+
         string commit = Environment.GetEnvironmentVariable("ISRW_L02B_COMMIT")
             ?? throw new InvalidOperationException("ISRW_L02B_COMMIT is required for a persisted allocation proof.");
         var report = new
@@ -240,6 +266,14 @@ public sealed class SpatialIndexProcessProbeTests
             largeInputFailureCode = largeInputError.Code.ToString(),
             largeInputFailureStage = largeInputError.Stage,
             largeInputSnapshotVisible = false,
+            manyPrimitiveCount = manyPrimitives.Length,
+            manyPrimitiveMemoryBudgetBytes = manyPrimitiveProfile.MemoryBudgetBytes,
+            manyPrimitiveEstimatedPeakBuildBytes = manyEstimate.EstimatedPeakBuildBytes,
+            manyPrimitiveEstimateAllocatedBytes = manyEstimateAllocation,
+            manyPrimitiveBuildAllocatedBytes = manyBuildAllocation,
+            manyPrimitiveFailureCode = manyBuildError.Code.ToString(),
+            manyPrimitiveFailureStage = manyBuildError.Stage,
+            manyPrimitiveSnapshotVisible = false,
             processId = Environment.ProcessId,
             framework = RuntimeInformation.FrameworkDescription,
             architecture = RuntimeInformation.ProcessArchitecture.ToString(),

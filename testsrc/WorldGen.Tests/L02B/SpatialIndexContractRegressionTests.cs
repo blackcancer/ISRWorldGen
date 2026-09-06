@@ -214,6 +214,44 @@ public sealed class SpatialIndexContractRegressionTests
         Assert.AreEqual(0, input.EnumerationCount);
     }
 
+    [TestMethod]
+    [DoNotParallelize]
+    public void FiveHundredThousandPrimitives_With24MiBBudgetAvoidPerIdAllocationBeforeRefusal()
+    {
+        SpatialPrimitiveDefinition[] primitives = SpatialIndexTestSupport.ManyPrimitiveFixtures();
+        var profile = new AtlasIndexProfile(
+            SpatialIndexTestSupport.FixtureProfile().Domain,
+            SpatialIndexTestSupport.FixtureProfile().Scale,
+            tileSize: 512,
+            requestedSiteCount: 1,
+            siteQuota: 1,
+            memoryBudgetBytes: 24L * 1024 * 1024);
+
+        long estimateBefore = GC.GetAllocatedBytesForCurrentThread();
+        GenerationResult<AtlasMemoryEstimate> estimateResult = AtlasSpatialIndexPlanner.Estimate(
+            SpatialIndexTestSupport.Identity(), profile, primitives);
+        long estimateAllocation = GC.GetAllocatedBytesForCurrentThread() - estimateBefore;
+        Assert.IsInstanceOfType<GenerationSuccess<AtlasMemoryEstimate>>(estimateResult);
+        AtlasMemoryEstimate estimate = ((GenerationSuccess<AtlasMemoryEstimate>)estimateResult).Snapshot;
+        Assert.IsGreaterThan(profile.MemoryBudgetBytes, estimate.EstimatedPeakBuildBytes);
+        Assert.AreEqual(500_000, estimate.PrimitiveCount);
+        Assert.AreEqual(24 + (500_000L * IntPtr.Size) + 32, estimate.EstimatedCanonicalCaptureBytes);
+
+        long buildBefore = GC.GetAllocatedBytesForCurrentThread();
+        GenerationResult<AtlasIndexBuildOutcome> buildResult = AtlasSpatialIndexBuilder.Build(
+            SpatialIndexTestSupport.Identity(), profile, primitives);
+        long buildAllocation = GC.GetAllocatedBytesForCurrentThread() - buildBefore;
+        Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(buildResult);
+        GenerationError error = ((GenerationFailure<AtlasIndexBuildOutcome>)buildResult).Error;
+        Assert.AreEqual(GenerationFailureCode.BudgetExceeded, error.Code);
+        Assert.AreEqual("atlas.spatial-index.budget", error.Stage);
+        Assert.IsLessThan(8L * 1024 * 1024, estimateAllocation,
+            "Estimate must only allocate the bounded canonical reference array, not a per-ID HashSet.");
+        Assert.IsLessThan(8L * 1024 * 1024, buildAllocation,
+            "Build must reject after the plan without allocating a per-ID HashSet.");
+        GC.KeepAlive(primitives);
+    }
+
     private static void AssertStableIdCollision(GenerationResult<AtlasIndexBuildOutcome> result)
     {
         Assert.IsInstanceOfType<GenerationFailure<AtlasIndexBuildOutcome>>(result);
