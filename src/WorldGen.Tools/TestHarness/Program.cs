@@ -1,2 +1,3 @@
-Console.Error.WriteLine("ISRWorldGen test harness is not implemented yet.");
-return 2;
+using ISRWorldGen.Tools.TestHarness;
+
+return HarnessApplication.Run(args);
