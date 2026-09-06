@@ -13,13 +13,17 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $sourcePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
+$callbackGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\TransientLoadCallbackGate.cs'
 $projectPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
 
-if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-    throw "L00-C source is missing: $sourcePath"
+foreach ($path in @($sourcePath, $callbackGatePath)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "L00-C source is missing: $path"
+    }
 }
 
 $source = Get-Content -LiteralPath $sourcePath -Raw
+$allProbeSource = $source + "`n" + (Get-Content -LiteralPath $callbackGatePath -Raw)
 $forbidden = @(
     'WipeAllHandlers',
     'Task.Run(',
@@ -42,7 +46,7 @@ $forbidden = @(
     '.UnloadChunkColumn('
 )
 foreach ($fragment in $forbidden) {
-    if ($source.Contains($fragment)) {
+    if ($allProbeSource.Contains($fragment)) {
         throw "Forbidden L00-C fragment found: $fragment"
     }
 }
@@ -69,6 +73,7 @@ $required = @(
     'SuppressInHalo',
     'IsProtectedFixtureRequest',
     'OnHaloColumnLoaded',
+    'TransientLoadCallbackGate',
     'TransientLoadReservation',
     'IsColumnAlreadyLoaded',
     'runGate',
@@ -95,6 +100,7 @@ $required = @(
     'BlockingTestMapChunkExists',
     'BlockingLoadChunkColumn',
     'L00C_PERSISTED_REOPEN_STABLE',
+    'run={runId}',
     'MarkerPublicationGate',
     'markerPublication.BeginWorldTransition()',
     'markerPublication.Begin(persistedMarker)',
@@ -110,7 +116,7 @@ $required = @(
     'IsNew'
 )
 foreach ($fragment in $required) {
-    if (-not $source.Contains($fragment)) {
+    if (-not $allProbeSource.Contains($fragment)) {
         throw "Required L00-C fragment is missing: $fragment"
     }
 }
@@ -162,16 +168,20 @@ finally {
 
 $probeType = 'ISRWorldGen.WorldgenProbe.L00CWorldgenProbeModSystem'
 $markerGateType = 'ISRWorldGen.WorldgenProbe.MarkerPublicationGate'
+$callbackGateType = 'ISRWorldGen.WorldgenProbe.TransientLoadCallbackGate'
 $probePresent = @($typeNames | Where-Object { $_ -eq $probeType }).Count -eq 1
 $markerGatePresent = @($typeNames | Where-Object { $_ -eq $markerGateType }).Count -eq 1
-if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent)) {
-    throw 'Debug assembly does not contain the L00-C probe and marker publication types.'
+$callbackGatePresent = @($typeNames | Where-Object { $_ -eq $callbackGateType }).Count -eq 1
+if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent)) {
+    throw 'Debug assembly does not contain every L00-C probe, marker, and transient callback type.'
 }
-if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent)) {
-    throw 'Release assembly must not contain any L00-C probe or marker publication type.'
+if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent)) {
+    throw 'Release assembly must not contain any L00-C probe, marker, or transient callback type.'
 }
 
 $markerOracleStatus = 'NOT_APPLICABLE'
+$callbackOracleStatus = 'NOT_APPLICABLE'
+$persistenceAttestationOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
     $markerOraclePath = Join-Path $PSScriptRoot 'Test-L00CMarkerPublication.ps1'
     $markerOracle = (& $markerOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
@@ -179,6 +189,18 @@ if ($Configuration -eq 'Debug') {
         throw 'The production marker publication oracle did not pass against the freshly built Debug assembly.'
     }
     $markerOracleStatus = $markerOracle.Status
+    $callbackOraclePath = Join-Path $PSScriptRoot 'Test-L00CTransientCallbackGate.ps1'
+    $callbackOracle = (& $callbackOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($callbackOracle.Status -ne 'PASS') {
+        throw 'The production transient callback oracle did not pass against the freshly built Debug assembly.'
+    }
+    $callbackOracleStatus = $callbackOracle.Status
+    $persistenceOraclePath = Join-Path $PSScriptRoot 'Test-L00CPersistenceAttestation.ps1'
+    $persistenceOracle = (& $persistenceOraclePath -RepositoryRoot $RepositoryRoot | Out-String | ConvertFrom-Json)
+    if ($persistenceOracle.Status -ne 'PASS') {
+        throw 'The pre-open2 persistence attestation oracle did not pass.'
+    }
+    $persistenceAttestationOracleStatus = $persistenceOracle.Status
 }
 
 $result = [ordered]@{
@@ -188,7 +210,10 @@ $result = [ordered]@{
     Configuration = $Configuration
     ProbeTypePresent = $probePresent
     MarkerGateTypePresent = $markerGatePresent
+    TransientCallbackGateTypePresent = $callbackGatePresent
     MarkerPublicationOracle = $markerOracleStatus
+    TransientCallbackOracle = $callbackOracleStatus
+    PersistenceAttestationOracle = $persistenceAttestationOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }

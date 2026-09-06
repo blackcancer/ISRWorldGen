@@ -11,10 +11,14 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 }
 
 $sourcePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
+$callbackGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\TransientLoadCallbackGate.cs'
 $source = Get-Content -LiteralPath $sourcePath -Raw
+$callbackGateSource = Get-Content -LiteralPath $callbackGatePath -Raw
+$combinedSource = $source + "`n" + $callbackGateSource
 
 $requiredSourceFragments = @(
     'LoadTransientChunkColumns',
+    'TransientLoadCallbackGate',
     'TransientLoadReservation',
     'ResetTransientLoadCallbacks',
     'RefreshTransientFootprint',
@@ -38,7 +42,7 @@ $requiredSourceFragments = @(
     'fixtureWriteCount'
 )
 foreach ($fragment in $requiredSourceFragments) {
-    if (-not $source.Contains($fragment)) {
+    if (-not $combinedSource.Contains($fragment)) {
         throw "Production transient-load implementation is missing: $fragment"
     }
 }
@@ -59,7 +63,7 @@ $forbiddenSourceFragments = @(
     'L00C_COLUMN_RELEASE'
 )
 foreach ($fragment in $forbiddenSourceFragments) {
-    if ($source.Contains($fragment)) {
+    if ($combinedSource.Contains($fragment)) {
         throw "Production still owns or explicitly unloads a generated column: $fragment"
     }
 }
@@ -86,7 +90,9 @@ $priorityCallIndex = $loadMethod.IndexOf('worldManager.LoadChunkColumnPriority('
 if ($preloadedIndex -lt 0 -or $priorityCounterIndex -le $preloadedIndex -or
     $transientCounterIndex -le $preloadedIndex -or $priorityCallIndex -le $priorityCounterIndex -or
     $priorityCallIndex -le $transientCounterIndex -or
-    $loadMethod -notmatch 'catch \(Exception loadException\)[\s\S]+reservation\.Cancelled = true' -or
+    $loadMethod -notmatch 'catch \(Exception loadException\)[\s\S]+transientLoadCallbacks\.Reject\(reservation\)' -or
+    $loadMethod -notmatch 'transientLoadCallbacks\.Begin\(onLoaded\)' -or
+    $loadMethod -notmatch 'transientLoadCallbacks\.Accept\(reservation\)' -or
     $loadMethod -match 'UnloadChunkColumn|ReleaseOwnedColumns') {
     throw 'Transient load ordering/cancellation is not honest or still performs compensating unloads.'
 }
@@ -154,9 +160,10 @@ $initializeEnd = $source.IndexOf('private void BeginWorldTransition()', $initial
 $initializeMethod = $source.Substring($initializeStart, $initializeEnd - $initializeStart)
 $beginTransitionEnd = $source.IndexOf('private RestoreResult RestoreOwnedHandlerSet(', $initializeEnd, [StringComparison]::Ordinal)
 $beginTransitionMethod = $source.Substring($initializeEnd, $beginTransitionEnd - $initializeEnd)
-if ($source -notmatch 'if \(transientLoadClosing \|\| Volatile\.Read\(ref disposalStarted\) != 0\)[\s\S]+reservation\.CallbackInvoked = true;' -or
+if ($callbackGateSource -notmatch 'if \(closing\)[\s\S]+reservation\.Cancelled = true;[\s\S]+reservation\.CallbackInvoked = true;' -or
+    $source -notmatch 'transientLoadCallbacks\.Complete\(reservation\)' -or
     $beginTransitionMethod -notmatch 'ResetTransientLoadCallbacks\("world-initialize"\)' -or
-    $initializeMethod.IndexOf('BeginWorldTransition()', [StringComparison]::Ordinal) -gt $initializeMethod.IndexOf('transientLoadClosing = false', [StringComparison]::Ordinal) -or
+    $initializeMethod.IndexOf('BeginWorldTransition()', [StringComparison]::Ordinal) -gt $initializeMethod.IndexOf('transientLoadCallbacks.Open()', [StringComparison]::Ordinal) -or
     $source -notmatch 'ResetTransientLoadCallbacks\("dispose"\)') {
     throw 'Late transient callbacks are not neutralized at world transition and Dispose.'
 }
@@ -213,23 +220,10 @@ if ($preloadedApiCalls -ne 0) {
     throw 'A preloaded column was not rejected before the transient range request.'
 }
 
-$throwingLoadApiCalls = 1
-$throwingLoadRequestedColumns = 9
-$throwingLoadPins = 0
-$throwingLoadUnloads = 0
-$lateCallbackInvocations = 0
-$reservationCancelled = $true
-if ($throwingLoadApiCalls -ne 1 -or $throwingLoadRequestedColumns -ne 9 -or
-    $throwingLoadPins -ne 0 -or $throwingLoadUnloads -ne 0 -or
-    -not $reservationCancelled -or $lateCallbackInvocations -ne 0) {
-    throw 'A throwing transient request acquired ownership or left a live callback.'
-}
-
-$callbackBeforeAcceptanceArrived = $true
-$callbackInvocationsAfterAcceptance = if ($callbackBeforeAcceptanceArrived) { 1 } else { 0 }
-$callbackInvocationsAfterReset = 0
-if ($callbackInvocationsAfterAcceptance -ne 1 -or $callbackInvocationsAfterReset -ne 0) {
-    throw 'Transient callback acceptance/reset interleaving is not single-shot.'
+$callbackGateReport = (& (Join-Path $PSScriptRoot 'Test-L00CTransientCallbackGate.ps1') -RepositoryRoot $RepositoryRoot |
+    Out-String | ConvertFrom-Json)
+if ($callbackGateReport.Status -ne 'PASS') {
+    throw 'The production transient callback gate oracle did not pass.'
 }
 
 $persistedMapExistenceChecks = $modelCoordinates.Count
@@ -251,13 +245,13 @@ if ($persistedMapExistenceChecks -ne 9 -or $persistedBlockingLoads -ne 9 -or $pe
     DisabledWitnessLoadCount = 0
     DisabledWitnessRefreshCount = 0
     PreloadedRequestCount = $preloadedApiCalls
-    ThrowingLoadApiCalls = $throwingLoadApiCalls
-    ThrowingLoadRequestedColumns = $throwingLoadRequestedColumns
-    ThrowingLoadPins = $throwingLoadPins
-    ThrowingLoadUnloads = $throwingLoadUnloads
-    LateCallbackInvocationCount = $lateCallbackInvocations
-    CallbackBeforeAcceptanceInvocationCount = $callbackInvocationsAfterAcceptance
-    CallbackAfterResetInvocationCount = $callbackInvocationsAfterReset
+    CallbackGateAssemblySha256 = $callbackGateReport.AssemblySha256
+    SynchronousCallbackCount = $callbackGateReport.SynchronousAfterAccept
+    AsynchronousCallbackCount = $callbackGateReport.AsynchronousInvocationCount
+    LateCallbackInvocationCount = $callbackGateReport.LateAfterTransitionCount
+    RejectedCallbackInvocationCount = $callbackGateReport.RejectedInvocationCount
+    DisposeCallbackInvocationCount = $callbackGateReport.LateAfterDisposeCount
+    NextRunCallbackInvocationCount = $callbackGateReport.NextRunInvocationCount
     PersistedMapExistenceChecks = $persistedMapExistenceChecks
     PersistedBlockingLoads = $persistedBlockingLoads
     PersistedBlockingChunkDisposals = $persistedBlockingChunkDisposals

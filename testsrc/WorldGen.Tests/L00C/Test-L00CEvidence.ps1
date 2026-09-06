@@ -57,6 +57,9 @@ function Assert-Artifact {
 if ([string]$evidence.TestedCommit -notmatch '^[0-9a-f]{40}$') {
     throw 'TestedCommit must be a full lowercase Git commit id.'
 }
+if ([string]$evidence.CampaignId -notmatch '^[0-9a-f]{32}$') {
+    throw 'CampaignId must be a fresh 32-character lowercase identifier.'
+}
 & git -C $RepositoryRoot cat-file -e "$($evidence.TestedCommit)^{commit}" 2>$null
 if ($LASTEXITCODE -ne 0) {
     throw "TestedCommit is unavailable locally: $($evidence.TestedCommit)"
@@ -101,33 +104,40 @@ Assert-Equal $artifactDirectoryName $evidence.TestedCommit 'Assembly artifact di
 Assert-Equal (Split-Path -Parent $pdb) (Split-Path -Parent $dll) 'Assembly/symbol directory'
 
 $recordedDatabaseReport = Get-Content -LiteralPath $open1DatabaseReportPath -Raw | ConvertFrom-Json
-$liveDatabaseReport = (& (Join-Path $PSScriptRoot 'Test-L00CPersistedDatabase.ps1') `
-    -DatabasePath $open1DatabasePath `
-    -FixtureChunkX ([int]$evidence.Parameters.FixtureChunkX) `
-    -FixtureChunkZ ([int]$evidence.Parameters.FixtureChunkZ) `
-    -WorldHeight ([int]$evidence.Parameters.WorldHeight) `
-    -ChunkSize ([int]$evidence.Parameters.ChunkSize) `
-    -Dimension ([int]$evidence.Parameters.Dimension) | Out-String | ConvertFrom-Json)
-foreach ($report in @($recordedDatabaseReport, $liveDatabaseReport)) {
-    Assert-Equal $report.Status 'PASS' 'Open1 persisted database status'
-    Assert-Equal $report.OpenMode 'ReadOnly' 'Open1 persisted database mode'
-    Assert-Equal $report.Packing '(y<<54)|(z<<27)|(dimension<<22)|x' 'Open1 persisted database packing'
-    Assert-Equal ([int]$report.ExpectedMapChunks) 9 'Open1 expected mapchunks'
-    Assert-Equal ([int]$report.ActualMapChunks) 9 'Open1 persisted mapchunks'
-    Assert-Equal ([int]$report.ExpectedChunks) 72 'Open1 expected chunks'
-    Assert-Equal ([int]$report.ActualChunks) 72 'Open1 persisted chunks'
-    Assert-Equal (@($report.MissingMapChunks).Count) 0 'Open1 missing mapchunks'
-    Assert-Equal (@($report.MissingChunks).Count) 0 'Open1 missing chunks'
-    Assert-Equal ([string]$report.DatabaseSha256) ([string]$evidence.Artifacts.Open1Database.Sha256) 'Open1 database/report hash'
-}
+Assert-Equal $recordedDatabaseReport.Status 'PASS' 'Open1 persisted database status'
+Assert-Equal $recordedDatabaseReport.OpenMode 'ReadOnly' 'Open1 persisted database mode'
+Assert-Equal $recordedDatabaseReport.Packing '(y<<54)|(z<<27)|(dimension<<22)|x' 'Open1 persisted database packing'
+Assert-Equal ([int]$recordedDatabaseReport.ExpectedMapChunks) 9 'Open1 expected mapchunks'
+Assert-Equal ([int]$recordedDatabaseReport.ActualMapChunks) 9 'Open1 persisted mapchunks'
+Assert-Equal ([int]$recordedDatabaseReport.ExpectedChunks) 72 'Open1 expected chunks'
+Assert-Equal ([int]$recordedDatabaseReport.ActualChunks) 72 'Open1 persisted chunks'
+Assert-Equal (@($recordedDatabaseReport.MissingMapChunks).Count) 0 'Open1 missing mapchunks'
+Assert-Equal (@($recordedDatabaseReport.MissingChunks).Count) 0 'Open1 missing chunks'
+Assert-Equal ([string]$recordedDatabaseReport.DatabaseSha256) ([string]$evidence.Artifacts.Open1Database.Sha256) 'Open1 database/report hash'
+Assert-Equal ([string]$recordedDatabaseReport.OracleSha256) ((Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Test-L00CPersistedDatabase.ps1') -Algorithm SHA256).Hash) 'Open1 persistence oracle hash'
 
 $expectedBeforeInventory = '0=[null];1=[0:Vintagestory.ServerMods.GenTerra::OnChunkColumnGen,1:Vintagestory.ServerMods.GenRockStrataNew::GenChunkColumn,2:ISRWorldGen.L00BDebugProbeModSystem::OnChunkColumnGeneration,3:Vintagestory.ServerMods.GenCaves::GenChunkColumn,4:Vintagestory.ServerMods.GenDevastationLayer::OnChunkColumnGeneration,5:Vintagestory.ServerMods.GenBlockLayers::OnChunkColumnGeneration];2=[0:Vintagestory.ServerMods.GenTerraPostProcess::OnChunkColumnGen,1:Vintagestory.ServerMods.GenHotSprings::GenChunkColumn,2:Vintagestory.ServerMods.GenDungeons::onChunkColumnGen,3:Vintagestory.ServerMods.GenDeposits::GenChunkColumn,4:Vintagestory.ServerMods.GenStructures::OnChunkColumnGen,5:Vintagestory.ServerMods.GenPonds::OnChunkColumnGen,6:Vintagestory.ServerMods.GenStructures::OnChunkColumnGenPostPass];3=[0:Vintagestory.GameContent.GenStoryStructures::OnChunkColumnGen,1:Vintagestory.ServerMods.GenVegetationAndPatches::OnChunkColumnGen,2:Vintagestory.ServerMods.GenRivulets::OnChunkColumnGen,3:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration];4=[0:Vintagestory.ServerMods.GenSnowLayer::OnChunkColumnGen,1:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGenerationFlood];5=[0:Vintagestory.ServerMods.GenCreatures::OnChunkColumnGen]'
 $expectedAfterInventory = '0=[null];1=[0:L00CWrapper(original=Vintagestory.ServerMods.GenTerra::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenRockStrataNew::GenChunkColumn@index=1),2:ISRWorldGen.L00BDebugProbeModSystem::OnChunkColumnGeneration,3:L00CWrapper(original=Vintagestory.ServerMods.GenCaves::GenChunkColumn@index=3),4:L00CWrapper(original=Vintagestory.ServerMods.GenDevastationLayer::OnChunkColumnGeneration@index=4),5:L00CWrapper(original=Vintagestory.ServerMods.GenBlockLayers::OnChunkColumnGeneration@index=5)];2=[0:L00CWrapper(original=Vintagestory.ServerMods.GenTerraPostProcess::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenHotSprings::GenChunkColumn@index=1),2:L00CWrapper(original=Vintagestory.ServerMods.GenDungeons::onChunkColumnGen@index=2),3:L00CWrapper(original=Vintagestory.ServerMods.GenDeposits::GenChunkColumn@index=3),4:L00CWrapper(original=Vintagestory.ServerMods.GenStructures::OnChunkColumnGen@index=4),5:L00CWrapper(original=Vintagestory.ServerMods.GenPonds::OnChunkColumnGen@index=5),6:L00CWrapper(original=Vintagestory.ServerMods.GenStructures::OnChunkColumnGenPostPass@index=6)];3=[0:L00CWrapper(original=Vintagestory.GameContent.GenStoryStructures::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenVegetationAndPatches::OnChunkColumnGen@index=1),2:L00CWrapper(original=Vintagestory.ServerMods.GenRivulets::OnChunkColumnGen@index=2),3:L00CFinalizer(before=Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration@index=3),4:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration];4=[0:L00CWrapper(original=Vintagestory.ServerMods.GenSnowLayer::OnChunkColumnGen@index=0),1:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGenerationFlood];5=[0:Vintagestory.ServerMods.GenCreatures::OnChunkColumnGen]'
+
+$allSessions = @($evidence.Sessions)
+$orderedEvidenceSessions = @($allSessions | Sort-Object { [int]$_.EvidenceSequence })
+$priorCompleted = $null
+for ($index = 0; $index -lt $orderedEvidenceSessions.Count; $index++) {
+    $session = $orderedEvidenceSessions[$index]
+    Assert-Equal ([int]$session.EvidenceSequence) ($index + 1) "Session monotonic evidence sequence $($index + 1)"
+    $started = [DateTimeOffset]::Parse([string]$session.StartedUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    $completed = [DateTimeOffset]::Parse([string]$session.CompletedUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    if ($started -ge $completed -or ($null -ne $priorCompleted -and $started -le $priorCompleted)) {
+        throw "Session $($session.Cycle) timestamps are not strictly monotonic and non-overlapping."
+    }
+    $priorCompleted = $completed
+}
 
 $sessionLogPaths = @()
 foreach ($session in @($evidence.Sessions)) {
     if ([int]$session.ProcessId -le 0) { throw 'Every session must record a real process id.' }
     if ([string]$session.InstanceId -notmatch '^[0-9a-f]{32}$') { throw 'Every session must record a 32-character instance id.' }
+    if ([long]$session.WorldRunId -le 0) { throw 'Every session must record a positive world run id.' }
     if ($session.WorldRole -like 'activated-*' -and [string]$session.MarkerId -notmatch '^[0-9a-f]{32}$') {
         throw 'Every activated session must record a 32-character marker id.'
     }
@@ -142,6 +152,7 @@ foreach ($session in @($evidence.Sessions)) {
     $instance = [regex]::Escape([string]$session.InstanceId)
     $pidPattern = [regex]::Escape([string]$session.ProcessId)
     $savegame = [regex]::Escape([string]$session.SavegameIdentifier)
+    $worldRun = [regex]::Escape([string]$session.WorldRunId)
     if ($log -notmatch "L00C_PROBE_READY instance=$instance pid=$pidPattern ") {
         throw "Session $($session.Cycle) log does not correlate instance and process id."
     }
@@ -195,7 +206,7 @@ foreach ($session in @($evidence.Sessions)) {
         $requiredPatterns = @(
             "L00C_HANDLERS phase=before instance=$instance ",
             "L00C_HANDLERS phase=after instance=$instance ",
-            "L00C_ACTIVATED instance=$instance marker=$marker open=$open isnew=$isNew ",
+            "L00C_ACTIVATED instance=$instance marker=$marker run=$worldRun open=$open isnew=$isNew ",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded ",
             "L00C_HALO_VALID instance=$instance marker=$marker phase=loaded radius=1 columns=8 ",
             "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker ",
@@ -210,7 +221,7 @@ foreach ($session in @($evidence.Sessions)) {
                 "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks ",
                 "L00C_HALO_VALID instance=$instance marker=$marker phase=afterticks radius=1 columns=8 ",
                 "L00C_HALO_STABLE instance=$instance marker=$marker ticks=40 columns=8 ",
-                "L00C_TICKS_STABLE instance=$instance marker=$marker ticks=40 ",
+                "L00C_TICKS_STABLE instance=$instance marker=$marker run=$worldRun ticks=40 ",
                 "L00C_TRANSIENT_LIFECYCLE_STABLE instance=$instance marker=$marker loadpriority=1 transientrequests=9 refreshpasses=41 refreshedmapchunks=369 keeploaded=0 unload=0"
             )
         }
@@ -218,7 +229,7 @@ foreach ($session in @($evidence.Sessions)) {
             $requiredPatterns += @(
                 "L00C_PERSISTED_PRECHECK instance=$instance marker=$marker maps=9 exact=True",
                 "L00C_PERSISTED_COLUMNS_DISPOSED instance=$instance marker=$marker columns=9 chunks=72 exact=True",
-                "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0"
+                "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker run=$worldRun loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0"
             )
         }
         foreach ($pattern in $requiredPatterns) {
@@ -327,7 +338,7 @@ foreach ($session in @($evidence.Sessions)) {
             throw "Reopen session $($session.Cycle) unexpectedly revalidated the halo through ticks."
         }
         if (-not [bool]$session.IsNew) {
-            $persistedStable = [regex]::Match($log, "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0 center=([0-9A-F]{64}) halo=([0-9A-F]{64})")
+            $persistedStable = [regex]::Match($log, "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker run=$worldRun loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0 center=([0-9A-F]{64}) halo=([0-9A-F]{64})")
             if (-not $persistedStable.Success) {
                 throw "Reopen session $($session.Cycle) lacks its zero-mutation persisted snapshot attestation."
             }
@@ -384,7 +395,6 @@ foreach ($session in @($evidence.Sessions)) {
     Assert-Equal $session.ProcessAbsent $true "Session $($session.Cycle) process absent"
 }
 
-$allSessions = @($evidence.Sessions)
 for ($index = 0; $index -lt $allSessions.Count; $index++) {
     $currentLog = Get-Content -LiteralPath $sessionLogPaths[$index] -Raw
     for ($otherIndex = 0; $otherIndex -lt $allSessions.Count; $otherIndex++) {
@@ -437,6 +447,29 @@ for ($index = 0; $index -lt $orderedPrimary.Count; $index++) {
     Assert-Equal ([bool]$orderedPrimary[$index].IsNew) ($index -eq 0) "Primary cycle $($index + 1) IsNew"
 }
 
+$primaryOpen1 = $orderedPrimary[0]
+$primaryOpen2 = $orderedPrimary[1]
+$primaryOpen1Index = [Array]::IndexOf($allSessions, $primaryOpen1)
+$primaryOpen1LogPath = $sessionLogPaths[$primaryOpen1Index]
+Import-Module (Join-Path $PSScriptRoot 'L00CPersistenceAttestation.psm1') -Force
+$persistenceAttestation = Assert-L00CPersistenceAttestation `
+    -Report $recordedDatabaseReport `
+    -ReportPath $open1DatabaseReportPath `
+    -DatabasePath $open1DatabasePath `
+    -Open1LogPath $primaryOpen1LogPath `
+    -Open1Session $primaryOpen1 `
+    -Open2Session $primaryOpen2 `
+    -CampaignId ([string]$evidence.CampaignId) `
+    -TestedCommit ([string]$evidence.TestedCommit) `
+    -AssemblySha256 ([string]$evidence.Artifacts.Assembly.Sha256)
+Assert-Equal $persistenceAttestation.Status 'PASS' 'Open1 pre-open2 persistence attestation'
+Assert-Equal ([string]$recordedDatabaseReport.AssemblyProductVersion) "1.0.0+$($evidence.TestedCommit)" 'Open1 attested assembly ProductVersion'
+Assert-Equal ([int]$recordedDatabaseReport.Dimension) ([int]$evidence.Parameters.Dimension) 'Open1 attested dimension'
+Assert-Equal ([int]$recordedDatabaseReport.FixtureChunkX) ([int]$evidence.Parameters.FixtureChunkX) 'Open1 attested fixture X'
+Assert-Equal ([int]$recordedDatabaseReport.FixtureChunkZ) ([int]$evidence.Parameters.FixtureChunkZ) 'Open1 attested fixture Z'
+Assert-Equal ([int]$recordedDatabaseReport.WorldHeight) ([int]$evidence.Parameters.WorldHeight) 'Open1 attested world height'
+Assert-Equal ([int]$recordedDatabaseReport.ChunkSize) ([int]$evidence.Parameters.ChunkSize) 'Open1 attested chunk size'
+
 $primaryMarkers = @($cycleSessions | Select-Object -ExpandProperty MarkerId -Unique)
 if ($primaryMarkers.Count -ne 1) {
     throw 'The five primary cycles must reload the same persistent marker.'
@@ -487,6 +520,7 @@ $result = [ordered]@{
     DistinctProcessCount = $processIds.Count
     PrimaryMarker = $primaryMarkers[0]
     SecondaryMarker = $second[0].MarkerId
+    PersistenceAttestationId = $persistenceAttestation.AttestationId
     Assembly = $dll
     Symbols = $pdb
 }

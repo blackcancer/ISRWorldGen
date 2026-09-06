@@ -44,12 +44,11 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private readonly string instanceId = Guid.NewGuid().ToString("N");
     private readonly object runGate = new();
-    private readonly object transientLoadGate = new();
+    private readonly TransientLoadCallbackGate transientLoadCallbacks = new();
     private readonly MarkerPublicationGate markerPublication = new();
 
     private ICoreServerAPI? api;
     private HandlerOwnershipState? ownershipState;
-    private TransientLoadReservation? activeTransientLoadReservation;
     private L00CProbeConfig config = new();
     private ProbeMarker? marker;
     private FixtureSnapshot? preLightingSnapshot;
@@ -68,7 +67,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private int shutdownIssued;
     private int disposalStarted;
     private bool active;
-    private bool transientLoadClosing;
     private long worldRunId;
 
     /// <inheritdoc />
@@ -102,10 +100,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ICoreServerAPI serverApi = RequireApi();
         long runId = Interlocked.Increment(ref worldRunId);
         BeginWorldTransition();
-        lock (transientLoadGate)
-        {
-            transientLoadClosing = false;
-        }
+        transientLoadCallbacks.Open();
         IWorldGenHandler handlers = serverApi.Event.GetRegisteredWorldGenHandlers(WorldType)
             ?? throw new InvalidOperationException("L00-C could not obtain the standard worldgen handler set.");
 
@@ -184,7 +179,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             active = true;
 
             LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
-            Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} open={marker.OpenCount} isnew=False save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
+            Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} run={runId} open={marker.OpenCount} isnew=False save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
             SchedulePersistedReopen(runId, persistedSnapshot);
             return;
         }
@@ -196,7 +191,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         active = true;
 
         LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
-        Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} open={marker.OpenCount} isnew={saveGame.IsNew} save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
+        Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} run={runId} open={marker.OpenCount} isnew={saveGame.IsNew} save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
         ScheduleProbeColumn(runId);
     }
 
@@ -450,11 +445,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             int refreshPasses = Volatile.Read(ref footprintRefreshInvocationCount);
             int refreshedMapChunks = Volatile.Read(ref refreshedMapChunkCount);
             int fixtureWrites = Volatile.Read(ref fixtureWriteCount);
-            bool transientPending;
-            lock (transientLoadGate)
-            {
-                transientPending = activeTransientLoadReservation is not null;
-            }
+            bool transientPending = transientLoadCallbacks.PendingCount != 0;
             if (!active || requestIssued != 0 || fixtureCallbackCount != 0 || fixtureWrites != 0 ||
                 priorityLoads != 0 || transientRequests != 0 || refreshPasses != 0 || refreshedMapChunks != 0 ||
                 transientPending || ownershipState is not null)
@@ -465,7 +456,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                     new InvalidOperationException($"L00-C persisted reopen mutated generation state: active={active}, requests={requestIssued}, callbacks={fixtureCallbackCount}, writes={fixtureWrites}, priorityloads={priorityLoads}, transientrequests={transientRequests}, refreshpasses={refreshPasses}, refreshedmapchunks={refreshedMapChunks}, transientpending={transientPending}, handlersowned={ownershipState is not null}."));
             }
 
-            Log($"L00C_PERSISTED_REOPEN_STABLE instance={instanceId} marker={marker!.MarkerId} loadpriority={priorityLoads} transientrequests={transientRequests} refreshpasses={refreshPasses} refreshedmapchunks={refreshedMapChunks} keeploaded=0 unload=0 fixturewrites={fixtureWrites} callbacks={fixtureCallbackCount} center={persistedSnapshot.Fixture.Hash} halo={persistedSnapshot.Halo.Hash}");
+            Log($"L00C_PERSISTED_REOPEN_STABLE instance={instanceId} marker={marker!.MarkerId} run={runId} loadpriority={priorityLoads} transientrequests={transientRequests} refreshpasses={refreshPasses} refreshedmapchunks={refreshedMapChunks} keeploaded=0 unload=0 fixturewrites={fixtureWrites} callbacks={fixtureCallbackCount} center={persistedSnapshot.Fixture.Hash} halo={persistedSnapshot.Halo.Hash}");
             RequestShutdownIfConfigured("persisted-reopen-stable");
         }
     }
@@ -578,109 +569,59 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void LoadTransientChunkColumns(IWorldManagerAPI worldManager, IReadOnlyList<TransientColumnRequest> requests, Action onLoaded)
     {
-        bool invokeLoadedAfterAcceptance = false;
-        var reservation = new TransientLoadReservation(onLoaded);
-        lock (transientLoadGate)
+        if (Volatile.Read(ref disposalStarted) != 0)
         {
-            if (transientLoadClosing || Volatile.Read(ref disposalStarted) != 0)
-            {
-                throw new InvalidOperationException("L00-C refused a transient column request after callback cleanup started.");
-            }
-            if (activeTransientLoadReservation is not null)
-            {
-                throw new InvalidOperationException("L00-C already has a pending transient column request.");
-            }
-            if (requests.Count != 9 || requests.Select(item => item.Coordinate).Distinct().Count() != requests.Count)
-            {
-                throw new InvalidOperationException($"L00-C requires the exact nine-column fixture footprint, got {requests.Count} request(s).");
-            }
-
-            foreach (TransientColumnRequest request in requests)
-            {
-                if (IsColumnAlreadyLoaded(worldManager, request.Coordinate))
-                {
-                    Log($"L00C_COLUMN_PREEXISTING_REJECTED instance={instanceId} marker={marker?.MarkerId ?? "none"} role={request.Role} chunk=({request.Coordinate.X},{request.Coordinate.Z})");
-                    throw new InvalidOperationException($"L00-C refuses a non-deterministic transient request for preloaded column ({request.Coordinate.X},{request.Coordinate.Z}).");
-                }
-            }
-            Log($"L00C_TRANSIENT_PRECONDITION instance={instanceId} marker={marker?.MarkerId ?? "none"} unloaded={requests.Count} exact=True");
-            activeTransientLoadReservation = reservation;
-
-            try
-            {
-                var options = new ChunkLoadOptions
-                {
-                    KeepLoaded = false,
-                    OnLoaded = () => OnTransientLoadCompleted(reservation)
-                };
-                int minX = requests.Min(item => item.Coordinate.X);
-                int minZ = requests.Min(item => item.Coordinate.Z);
-                int maxX = requests.Max(item => item.Coordinate.X);
-                int maxZ = requests.Max(item => item.Coordinate.Z);
-                if ((maxX - minX + 1) * (maxZ - minZ + 1) != requests.Count)
-                {
-                    throw new InvalidOperationException("L00-C transient footprint is not the exact requested rectangle.");
-                }
-                Interlocked.Increment(ref priorityLoadInvocationCount);
-                Interlocked.Add(ref transientColumnRequestCount, requests.Count);
-                worldManager.LoadChunkColumnPriority(minX, minZ, maxX, maxZ, options);
-            }
-            catch (Exception loadException)
-            {
-                reservation.Cancelled = true;
-                activeTransientLoadReservation = null;
-                Log($"L00C_TRANSIENT_LOAD_REJECTED instance={instanceId} marker={marker?.MarkerId ?? "none"} columns={requests.Count} keeploaded=False pinned=0 callbackcancelled=True");
-                throw new InvalidOperationException("L00-C transient range request failed without acquiring column ownership.", loadException);
-            }
-
-            reservation.Accepted = true;
-            Log($"L00C_TRANSIENT_LOAD_ACCEPTED instance={instanceId} marker={marker?.MarkerId ?? "none"} columns={requests.Count} keeploaded=False pinned=0 exact=True");
-            if (reservation.CallbackArrived && !reservation.CallbackInvoked)
-            {
-                reservation.CallbackInvoked = true;
-                activeTransientLoadReservation = null;
-                invokeLoadedAfterAcceptance = true;
-            }
+            throw new InvalidOperationException("L00-C refused a transient column request after disposal started.");
+        }
+        if (requests.Count != 9 || requests.Select(item => item.Coordinate).Distinct().Count() != requests.Count)
+        {
+            throw new InvalidOperationException($"L00-C requires the exact nine-column fixture footprint, got {requests.Count} request(s).");
         }
 
-        if (invokeLoadedAfterAcceptance)
+        foreach (TransientColumnRequest request in requests)
         {
-            reservation.OnLoaded();
+            if (IsColumnAlreadyLoaded(worldManager, request.Coordinate))
+            {
+                Log($"L00C_COLUMN_PREEXISTING_REJECTED instance={instanceId} marker={marker?.MarkerId ?? "none"} role={request.Role} chunk=({request.Coordinate.X},{request.Coordinate.Z})");
+                throw new InvalidOperationException($"L00-C refuses a non-deterministic transient request for preloaded column ({request.Coordinate.X},{request.Coordinate.Z}).");
+            }
         }
+        Log($"L00C_TRANSIENT_PRECONDITION instance={instanceId} marker={marker?.MarkerId ?? "none"} unloaded={requests.Count} exact=True");
+        TransientLoadReservation reservation = transientLoadCallbacks.Begin(onLoaded);
+
+        try
+        {
+            var options = new ChunkLoadOptions
+            {
+                KeepLoaded = false,
+                OnLoaded = () => OnTransientLoadCompleted(reservation)
+            };
+            int minX = requests.Min(item => item.Coordinate.X);
+            int minZ = requests.Min(item => item.Coordinate.Z);
+            int maxX = requests.Max(item => item.Coordinate.X);
+            int maxZ = requests.Max(item => item.Coordinate.Z);
+            if ((maxX - minX + 1) * (maxZ - minZ + 1) != requests.Count)
+            {
+                throw new InvalidOperationException("L00-C transient footprint is not the exact requested rectangle.");
+            }
+            Interlocked.Increment(ref priorityLoadInvocationCount);
+            Interlocked.Add(ref transientColumnRequestCount, requests.Count);
+            worldManager.LoadChunkColumnPriority(minX, minZ, maxX, maxZ, options);
+        }
+        catch (Exception loadException)
+        {
+            transientLoadCallbacks.Reject(reservation);
+            Log($"L00C_TRANSIENT_LOAD_REJECTED instance={instanceId} marker={marker?.MarkerId ?? "none"} columns={requests.Count} keeploaded=False pinned=0 callbackcancelled=True");
+            throw new InvalidOperationException("L00-C transient range request failed without acquiring column ownership.", loadException);
+        }
+
+        Log($"L00C_TRANSIENT_LOAD_ACCEPTED instance={instanceId} marker={marker?.MarkerId ?? "none"} columns={requests.Count} keeploaded=False pinned=0 exact=True");
+        transientLoadCallbacks.Accept(reservation);
     }
 
     private void OnTransientLoadCompleted(TransientLoadReservation reservation)
     {
-        bool invokeLoaded = false;
-        lock (transientLoadGate)
-        {
-            if (reservation.Cancelled || reservation.CallbackInvoked)
-            {
-                return;
-            }
-            if (transientLoadClosing || Volatile.Read(ref disposalStarted) != 0)
-            {
-                reservation.Cancelled = true;
-                reservation.CallbackInvoked = true;
-                if (ReferenceEquals(activeTransientLoadReservation, reservation))
-                {
-                    activeTransientLoadReservation = null;
-                }
-                return;
-            }
-            reservation.CallbackArrived = true;
-            if (reservation.Accepted)
-            {
-                reservation.CallbackInvoked = true;
-                activeTransientLoadReservation = null;
-                invokeLoaded = true;
-            }
-        }
-
-        if (invokeLoaded)
-        {
-            reservation.OnLoaded();
-        }
+        transientLoadCallbacks.Complete(reservation);
     }
 
     private static bool IsColumnAlreadyLoaded(IWorldManagerAPI worldManager, ChunkCoordinate coordinate)
@@ -702,21 +643,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void ResetTransientLoadCallbacks(string reason)
     {
-        lock (transientLoadGate)
-        {
-            transientLoadClosing = true;
-            int cancelled = 0;
-            if (activeTransientLoadReservation is not null)
-            {
-                if (!activeTransientLoadReservation.Cancelled && !activeTransientLoadReservation.CallbackInvoked)
-                {
-                    activeTransientLoadReservation.Cancelled = true;
-                    cancelled = 1;
-                }
-                activeTransientLoadReservation = null;
-            }
-            Log($"L00C_TRANSIENT_CALLBACK_RESET reason={reason} instance={instanceId} cancelled={cancelled} pending=0 exact=True");
-        }
+        int cancelled = transientLoadCallbacks.Reset();
+        Log($"L00C_TRANSIENT_CALLBACK_RESET reason={reason} instance={instanceId} cancelled={cancelled} pending={transientLoadCallbacks.PendingCount} exact={transientLoadCallbacks.PendingCount == 0}");
     }
 
     private bool IsCurrentRun(long runId) =>
@@ -1088,7 +1016,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 throw new InvalidOperationException($"L00-C protected first ring changed after {StableTickTarget} ticks: {initialHaloSnapshot?.Hash ?? "none"} -> {afterTicksHalo.Hash}.");
             }
 
-            Log($"L00C_TICKS_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} snapshot={afterTicks.Hash} fluids={afterTicks.FluidCount} fresh={afterTicks.FreshCount} salt={afterTicks.SaltCount} unexpected={afterTicks.UnexpectedCount}");
+            Log($"L00C_TICKS_STABLE instance={instanceId} marker={marker!.MarkerId} run={runId} ticks={StableTickTarget} snapshot={afterTicks.Hash} fluids={afterTicks.FluidCount} fresh={afterTicks.FreshCount} salt={afterTicks.SaltCount} unexpected={afterTicks.UnexpectedCount}");
             Log($"L00C_HALO_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} columns={afterTicksHalo.ColumnCount} snapshot={afterTicksHalo.Hash}");
             int priorityLoads = Volatile.Read(ref priorityLoadInvocationCount);
             int transientRequests = Volatile.Read(ref transientColumnRequestCount);
@@ -1727,15 +1655,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private sealed record FixtureSnapshot(string Hash, int SolidCount, int FluidCount, int FreshCount, int SaltCount, int UnexpectedCount, ushort YMax);
     private sealed record HaloSnapshot(string Hash, int ColumnCount);
     private sealed record PersistedFootprintSnapshot(FixtureSnapshot Fixture, HaloSnapshot Halo);
-
-    private sealed class TransientLoadReservation(Action onLoaded)
-    {
-        public Action OnLoaded { get; } = onLoaded;
-        public bool Accepted { get; set; }
-        public bool CallbackArrived { get; set; }
-        public bool CallbackInvoked { get; set; }
-        public bool Cancelled { get; set; }
-    }
 
     private sealed class OwnedHandler
     {

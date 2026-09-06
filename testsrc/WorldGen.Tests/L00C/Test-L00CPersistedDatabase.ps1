@@ -3,19 +3,97 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$DatabasePath,
 
+    [Parameter(Mandatory = $true)]
+    [string]$Open1LogPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$AssemblyPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$TestedCommit,
+
+    [Parameter(Mandatory = $true)]
+    [string]$CampaignId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SavegameIdentifier,
+
+    [Parameter(Mandatory = $true)]
+    [string]$MarkerId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$InstanceId,
+
+    [Parameter(Mandatory = $true)]
+    [long]$WorldRunId,
+
+    [Parameter(Mandatory = $true)]
+    [int]$Open1EvidenceSequence,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Open1CompletedUtc,
+
+    [Parameter(Mandatory = $true)]
+    [string]$OutputPath,
+
     [int]$FixtureChunkX = 31990,
     [int]$FixtureChunkZ = 31990,
     [int]$WorldHeight = 256,
     [int]$ChunkSize = 32,
     [int]$Dimension = 0,
     [string]$GamePath = 'D:\Jeux\Vintagestory',
-    [string]$OutputPath
+    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $resolvedDatabase = (Resolve-Path -LiteralPath $DatabasePath).Path
+$resolvedOpen1Log = (Resolve-Path -LiteralPath $Open1LogPath).Path
+$resolvedAssembly = (Resolve-Path -LiteralPath $AssemblyPath).Path
+$resolvedOutput = [IO.Path]::GetFullPath($OutputPath)
+if (Test-Path -LiteralPath $resolvedOutput) {
+    throw "Persistence attestation output already exists and cannot be replayed or overwritten: $resolvedOutput"
+}
+if ($TestedCommit -notmatch '^[0-9a-f]{40}$' -or $CampaignId -notmatch '^[0-9a-f]{32}$' -or
+    $MarkerId -notmatch '^[0-9a-f]{32}$' -or $InstanceId -notmatch '^[0-9a-f]{32}$' -or
+    $SavegameIdentifier -notmatch '^[0-9a-fA-F-]{36}$' -or $WorldRunId -le 0 -or $Open1EvidenceSequence -le 0) {
+    throw 'Persistence attestation identity fields are malformed.'
+}
+$repositoryHead = (& git -C $RepositoryRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $repositoryHead -ne $TestedCommit) {
+    throw "Persistence attestation candidate '$TestedCommit' is not the repository HEAD '$repositoryHead'."
+}
+$trackedStatus = (& git -C $RepositoryRoot status --porcelain=v1 --untracked-files=no)
+if ($LASTEXITCODE -ne 0 -or @($trackedStatus).Count -ne 0) {
+    throw 'Persistence attestation requires a clean tracked worktree for the exact candidate commit.'
+}
+$completedInstant = [DateTimeOffset]::MinValue
+if (-not [DateTimeOffset]::TryParse(
+    $Open1CompletedUtc,
+    [Globalization.CultureInfo]::InvariantCulture,
+    [Globalization.DateTimeStyles]::RoundtripKind,
+    [ref]$completedInstant)) {
+    throw "Open1CompletedUtc is not a round-trip timestamp: $Open1CompletedUtc"
+}
+$completedInstant = $completedInstant.ToUniversalTime()
+$attestedInstant = [DateTimeOffset]::UtcNow
+if ($completedInstant -gt $attestedInstant) {
+    throw 'Persistence attestation cannot precede open1 completion.'
+}
+$assemblyProductVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($resolvedAssembly).ProductVersion
+if ($assemblyProductVersion -ne "1.0.0+$TestedCommit") {
+    throw "Candidate assembly ProductVersion '$assemblyProductVersion' does not match commit '$TestedCommit'."
+}
+$open1Log = Get-Content -LiteralPath $resolvedOpen1Log -Raw
+$escapedInstance = [regex]::Escape($InstanceId)
+$escapedMarker = [regex]::Escape($MarkerId)
+$escapedSave = [regex]::Escape($SavegameIdentifier)
+if ($open1Log -notmatch "L00C_ACTIVATED instance=$escapedInstance marker=$escapedMarker run=$WorldRunId open=1 isnew=True save=$escapedSave " -or
+    $open1Log -notmatch "L00C_TICKS_STABLE instance=$escapedInstance marker=$escapedMarker run=$WorldRunId ticks=40 " -or
+    $open1Log -notmatch 'World saved!') {
+    throw 'Open1 log does not prove the bound instance, marker, world run, save, stable fixture, and completed save.'
+}
 if ($WorldHeight -le 0 -or $ChunkSize -le 0 -or $WorldHeight % $ChunkSize -ne 0) {
     throw "WorldHeight must be a positive multiple of ChunkSize: height=$WorldHeight chunk=$ChunkSize."
 }
@@ -125,8 +203,26 @@ $status = if ($mapChunkCount -eq $expectedMapChunks -and $chunkCount -eq $expect
 $result = [ordered]@{
     TestId = 'L00-C-PERSISTED-DATABASE'
     Status = $status
+    SchemaVersion = 1
+    EvidenceOrder = 'open1-complete<attestation<open2-start'
+    CampaignId = $CampaignId
+    TestedCommit = $TestedCommit
+    OracleSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
+    AssemblySha256 = (Get-FileHash -LiteralPath $resolvedAssembly -Algorithm SHA256).Hash
+    AssemblyProductVersion = $assemblyProductVersion
+    SavegameIdentifier = $SavegameIdentifier
+    MarkerId = $MarkerId
+    InstanceId = $InstanceId
+    WorldRunId = $WorldRunId
+    Open1EvidenceSequence = $Open1EvidenceSequence
+    ExpectedOpen2EvidenceSequence = $Open1EvidenceSequence + 1
+    Open1CompletedUtc = $completedInstant.ToString('o')
+    AttestedUtc = $attestedInstant.ToString('o')
     DatabasePath = $resolvedDatabase
     DatabaseSha256 = (Get-FileHash -LiteralPath $resolvedDatabase -Algorithm SHA256).Hash
+    DatabaseLength = (Get-Item -LiteralPath $resolvedDatabase).Length
+    Open1LogSha256 = (Get-FileHash -LiteralPath $resolvedOpen1Log -Algorithm SHA256).Hash
+    Open1LogLength = (Get-Item -LiteralPath $resolvedOpen1Log).Length
     OpenMode = 'ReadOnly'
     Packing = '(y<<54)|(z<<27)|(dimension<<22)|x'
     Dimension = $Dimension
@@ -143,15 +239,16 @@ $result = [ordered]@{
     MissingChunks = @($missingChunks)
     Columns = @($rows)
 }
+$attestationModule = Join-Path $PSScriptRoot 'L00CPersistenceAttestation.psm1'
+Import-Module $attestationModule -Force
+$result.Add('AttestationId', (Get-L00CAttestationId $result))
 
 $json = $result | ConvertTo-Json -Depth 6
-if ($OutputPath) {
-    $directory = Split-Path -Parent $OutputPath
-    if ($directory -and -not (Test-Path -LiteralPath $directory)) {
-        [void](New-Item -ItemType Directory -Path $directory -Force)
-    }
-    Set-Content -LiteralPath $OutputPath -Value $json -Encoding UTF8
+$directory = Split-Path -Parent $resolvedOutput
+if ($directory -and -not (Test-Path -LiteralPath $directory)) {
+    [void](New-Item -ItemType Directory -Path $directory)
 }
+Set-Content -LiteralPath $resolvedOutput -Value $json -Encoding UTF8 -NoNewline
 
 $json
 if ($status -ne 'PASS') {
