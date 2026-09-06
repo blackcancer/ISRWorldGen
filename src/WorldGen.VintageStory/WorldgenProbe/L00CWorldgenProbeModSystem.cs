@@ -562,19 +562,28 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 }
                 worldManager.LoadChunkColumnPriority(minX, minZ, maxX, maxZ, options);
             }
-            catch
+            catch (Exception loadException)
             {
                 reservation.Cancelled = true;
                 foreach (OwnedColumnRequest request in requests)
                 {
-                    ownedLoadedColumns.Remove(request.Coordinate);
+                    ownedLoadedColumns[request.Coordinate] = ColumnOwnershipState.Owned;
                 }
-                if (ownedLoadedColumns.Count == 0)
+                Log($"L00C_COLUMN_LOAD_REJECTED instance={instanceId} marker={marker?.MarkerId ?? "none"} columns={requests.Count} rollbackrequired={ownedLoadedColumns.Count}");
+
+                Exception? rollbackFailure = null;
+                try
                 {
-                    ownedColumnWorldManager = null;
+                    ReleaseOwnedColumns("load-rollback");
                 }
-                Log($"L00C_COLUMN_LOAD_REJECTED instance={instanceId} marker={marker?.MarkerId ?? "none"} columns={requests.Count} remainingowned={ownedLoadedColumns.Count}");
-                throw;
+                catch (Exception exception)
+                {
+                    rollbackFailure = exception;
+                }
+                int remaining = ownedLoadedColumns.Count;
+                Log($"L00C_COLUMN_LOAD_ROLLBACK instance={instanceId} marker={marker?.MarkerId ?? "none"} attempted={requests.Count} remainingowned={remaining} exact={remaining == 0}");
+                Exception cause = rollbackFailure is null ? loadException : new AggregateException(loadException, rollbackFailure);
+                throw new ColumnLoadRollbackException("L00-C range KeepLoaded request failed and required exact compensation.", cause);
             }
 
             int ownedCount = ownedLoadedColumns.Count(item => item.Value == ColumnOwnershipState.Owned);
@@ -716,7 +725,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             Exception result = exception;
             try
             {
-                ReleaseOwnedColumns(stage);
+                if (exception is not ColumnLoadRollbackException)
+                {
+                    ReleaseOwnedColumns(stage);
+                }
             }
             catch (Exception cleanupException)
             {
@@ -1520,6 +1532,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         public bool CallbackArrived { get; set; }
         public bool CallbackInvoked { get; set; }
         public bool Cancelled { get; set; }
+    }
+
+    private sealed class ColumnLoadRollbackException(string message, Exception innerException) : Exception(message, innerException)
+    {
     }
 
     private sealed class OwnedHandler

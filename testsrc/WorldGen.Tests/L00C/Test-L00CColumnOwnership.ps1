@@ -21,9 +21,11 @@ $requiredSourceFragments = @(
     'ColumnOwnershipState.Owned',
     'IsColumnAlreadyLoaded',
     'L00C_COLUMN_PREEXISTING_REJECTED',
+    'L00C_COLUMN_LOAD_ROLLBACK',
+    'ColumnLoadRollbackException',
     'L00C_COLUMN_RELEASE',
     'remainingowned=',
-    'IsCurrentRun'
+    'IsCurrentRun',
     'L00C_WITNESS_NO_REQUEST'
 )
 foreach ($fragment in $requiredSourceFragments) {
@@ -86,7 +88,7 @@ function Invoke-LoadModel {
         [Collections.Generic.Dictionary[string,string]]$States,
         [string[]]$Coordinates,
         [Collections.Generic.HashSet[string]]$Preloaded,
-        [switch]$ThrowFromLoad,
+        [int]$ThrowAfterAddition,
         [switch]$DisposeDuringLoad,
         [Collections.Generic.List[string]]$UnloadCalls
     )
@@ -95,9 +97,14 @@ function Invoke-LoadModel {
         return 'preexisting-rejected'
     }
     foreach ($coordinate in $Coordinates) { $States.Add($coordinate, 'Pending') }
-    if ($ThrowFromLoad) {
-        foreach ($coordinate in $Coordinates) { [void]$States.Remove($coordinate) }
-        return 'load-rejected'
+    if ($ThrowAfterAddition -gt 0) {
+        if ($ThrowAfterAddition -gt $Coordinates.Count) { throw 'Synthetic throw point exceeds the transaction size.' }
+        foreach ($coordinate in $Coordinates) { $States[$coordinate] = 'Owned' }
+        foreach ($coordinate in @($States.Keys | Sort-Object)) {
+            [void]$UnloadCalls.Add($coordinate)
+            [void]$States.Remove($coordinate)
+        }
+        return "load-rolled-back-$ThrowAfterAddition"
     }
     foreach ($coordinate in $Coordinates) { $States[$coordinate] = 'Owned' }
     if ($DisposeDuringLoad) {
@@ -127,12 +134,16 @@ if ($preloadedResult -ne 'preexisting-rejected' -or $preloadedStates.Count -ne 0
     throw 'A preloaded/no-effect column was incorrectly claimed or unloaded.'
 }
 
-$throwStates = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-$throwUnloads = [Collections.Generic.List[string]]::new()
 $emptyPreloaded = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-$throwResult = Invoke-LoadModel $throwStates $modelCoordinates $emptyPreloaded -ThrowFromLoad -UnloadCalls $throwUnloads
-if ($throwResult -ne 'load-rejected' -or $throwStates.Count -ne 0 -or $throwUnloads.Count -ne 0) {
-    throw 'A throwing load call was incorrectly promoted to ownership or unloaded.'
+$throwCompensationCounts = [Collections.Generic.List[int]]::new()
+foreach ($throwAfter in @(1, 5, 9)) {
+    $throwStates = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+    $throwUnloads = [Collections.Generic.List[string]]::new()
+    $throwResult = Invoke-LoadModel $throwStates $modelCoordinates $emptyPreloaded -ThrowAfterAddition $throwAfter -UnloadCalls $throwUnloads
+    if ($throwResult -ne "load-rolled-back-$throwAfter" -or $throwStates.Count -ne 0 -or $throwUnloads.Count -ne 9) {
+        throw "A load throwing after $throwAfter additions was not compensated across all nine potentially forced coordinates."
+    }
+    [void]$throwCompensationCounts.Add($throwUnloads.Count)
 }
 
 $disposeStates = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
@@ -241,7 +252,8 @@ if ($releasedOnRetry -ne 1 -or $retryOwned.Count -ne 0) {
     DisabledWitnessLoadCount = 0
     DisabledWitnessReleaseCount = 0
     PreloadedNoEffectUnloadCount = $preloadedUnloads.Count
-    ThrowingLoadUnloadCount = $throwUnloads.Count
+    ThrowAfterAdditions = @(1, 5, 9)
+    ThrowCompensationCounts = @($throwCompensationCounts)
     DisposeInterleaveReleaseCount = $disposeUnloads.Count
     LatePriorWorldCallbackInvocationCount = $lateCallbackInvocationCount
     StaleFailureReleaseCount = $staleFailureReleaseCount

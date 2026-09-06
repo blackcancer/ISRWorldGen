@@ -79,6 +79,7 @@ $required = @(
     'L00C_COLUMN_RELEASE_RESULT',
     'L00C_COLUMN_PRECONDITION',
     'L00C_COLUMN_LOAD_ACCEPTED',
+    'L00C_COLUMN_LOAD_ROLLBACK',
     'L00C_LIGHTING_STABLE',
     'L00C_RESTORE_RESULT',
     'for (int y = 0; y < worldHeight; y++)',
