@@ -133,30 +133,23 @@ foreach ($session in @($evidence.Sessions)) {
 
     if ($session.WorldRole -eq 'disabled-witness') {
         Assert-Equal $session.GracefulShutdown $true "Session $($session.Cycle) graceful shutdown"
-        if ($log -notmatch "L00C_INACTIVE instance=$instance " -or $log -notmatch "L00C_WITNESS_LOADED instance=$instance ") {
-            throw 'Disabled witness log is missing its inactive or inspection marker.'
+        if ($log -notmatch "L00C_INACTIVE instance=$instance " -or
+            $log -notmatch "L00C_WITNESS_NO_REQUEST instance=$instance save=$savegame loadrequests=0 owned=0 fixturewrites=0 markers=0") {
+            throw 'Disabled witness log is missing its inactive no-request attestation.'
         }
-        if ($log -match "L00C_FIXTURE_WRITTEN instance=$instance " -or $log -match "L00C_ACTIVATED instance=$instance ") {
-            throw 'Disabled witness unexpectedly ran the L00-C fixture writer.'
+        if ($log -match "L00C_(?:FIXTURE_WRITTEN|ACTIVATED|COLUMN_REQUEST|COLUMN_OWNED|COLUMN_LOAD_ACCEPTED|COLUMN_PRECONDITION|COLUMN_RELEASE reason=|MARKER_SAVED) instance=$instance " -or
+            $log -match "L00C_HALO_.* instance=$instance ") {
+            throw 'Disabled witness emitted a chunk request, ownership, fixture, or marker mutation.'
         }
-        $ownedLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_OWNED instance=$instance marker=none role=inactive-witness chunk=\(([-0-9]+),([-0-9]+)\) owned=1.*$")
-        $releaseLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_RELEASE reason=inactive-witness-complete instance=$instance marker=none chunk=\(([-0-9]+),([-0-9]+)\) released=1.*$")
-        Assert-Equal $ownedLines.Count 1 "Session $($session.Cycle) witness owned-column count"
-        Assert-Equal $releaseLines.Count 1 "Session $($session.Cycle) witness release count"
-        Assert-Equal $releaseLines[0].Groups[1].Value $ownedLines[0].Groups[1].Value "Session $($session.Cycle) witness release X"
-        Assert-Equal $releaseLines[0].Groups[2].Value $ownedLines[0].Groups[2].Value "Session $($session.Cycle) witness release Z"
-        if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=inactive-witness-complete instance=$instance released=1 remainingowned=0 exact=True") {
-            throw "Disabled witness did not release its sole KeepLoaded column exactly."
-        }
-        if ($log -notmatch "L00C_COLUMN_PRECONDITION instance=$instance marker=none unloaded=1 exact=True" -or
-            $log -notmatch "L00C_COLUMN_LOAD_ACCEPTED instance=$instance marker=none columns=1 owned=1 exact=True") {
-            throw 'Disabled witness did not prove an unloaded, accepted, solely owned request.'
-        }
-        if ($log.IndexOf("L00C_COLUMN_RELEASE reason=inactive-witness-complete instance=$instance", [StringComparison]::Ordinal) -le
-            $log.IndexOf("L00C_WITNESS_LOADED instance=$instance", [StringComparison]::Ordinal) -or
-            $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal) -le
-            $log.IndexOf("L00C_COLUMN_RELEASE_RESULT reason=inactive-witness-complete instance=$instance", [StringComparison]::Ordinal)) {
-            throw 'Disabled witness did not release its KeepLoaded column between validation and shutdown.'
+        $beforeLine = [regex]::Match($log, "(?m)^.*L00C_HANDLERS phase=before instance=$instance .*$").Value
+        $inactiveLine = [regex]::Match($log, "(?m)^.*L00C_HANDLERS phase=inactive instance=$instance .*$").Value
+        $beforeInventory = [regex]::Match($beforeLine, ' column=(.*)$').Groups[1].Value.TrimEnd([char]13)
+        $inactiveInventory = [regex]::Match($inactiveLine, ' column=(.*)$').Groups[1].Value.TrimEnd([char]13)
+        Assert-Equal $beforeInventory $expectedBeforeInventory 'Disabled witness inventory before decision'
+        Assert-Equal $inactiveInventory $expectedBeforeInventory 'Disabled witness unchanged inventory'
+        if ($log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal) -le
+            $log.IndexOf("L00C_WITNESS_NO_REQUEST instance=$instance", [StringComparison]::Ordinal)) {
+            throw 'Disabled witness shutdown was not requested after its no-request attestation.'
         }
     }
     elseif ($session.WorldRole -eq 'missing-handler') {
@@ -295,7 +288,7 @@ foreach ($session in @($evidence.Sessions)) {
         throw "Session $($session.Cycle) disposal did not prove zero retained KeepLoaded ownership."
     }
     $successfulReleaseCount = [regex]::Matches($log, "L00C_COLUMN_RELEASE reason=").Count
-    $expectedReleaseCount = if ($session.WorldRole -eq 'disabled-witness') { 1 } elseif ($session.WorldRole -like 'activated-*') { 9 } else { 0 }
+    $expectedReleaseCount = if ($session.WorldRole -like 'activated-*') { 9 } else { 0 }
     Assert-Equal $successfulReleaseCount $expectedReleaseCount "Session $($session.Cycle) total successful release count"
 
     Assert-Equal $session.DebuggerFinalMode 'Design' "Session $($session.Cycle) debugger final mode"

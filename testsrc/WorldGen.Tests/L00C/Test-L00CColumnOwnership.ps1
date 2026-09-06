@@ -24,22 +24,30 @@ $requiredSourceFragments = @(
     'L00C_COLUMN_RELEASE',
     'remainingowned=',
     'IsCurrentRun'
+    'L00C_WITNESS_NO_REQUEST'
 )
 foreach ($fragment in $requiredSourceFragments) {
     if (-not $source.Contains($fragment)) {
         throw "Production ownership implementation is missing: $fragment"
     }
 }
-foreach ($reason in @('fixture-stable', 'inactive-witness-complete', 'dispose', 'world-initialize')) {
+foreach ($reason in @('fixture-stable', 'dispose', 'world-initialize')) {
     if ($source -notmatch ('ReleaseOwnedColumns\("' + [regex]::Escape($reason) + '"\)')) {
         throw "Production cleanup path is missing: $reason"
     }
 }
 $requiredFailurePaths = @(
-    'HandleAsynchronousFailure("probe-request-error"',
-    'HandleAsynchronousFailure("halo-chain-error"',
-    'HandleAsynchronousFailure("probe-loaded-error"',
-    'HandleAsynchronousFailure("tick-validation-error"',
+    'HandleAsynchronousFailure(runId, "probe-request-error"',
+    'HandleAsynchronousFailure(runId, "halo-chain-error"',
+    'HandleAsynchronousFailure(runId, "probe-loaded-error"',
+    'HandleAsynchronousFailure(runId, "tick-validation-error"',
+    'HandleAsynchronousFailure(owned.RunId, "worldgen-handler-error"',
+    'HandleAsynchronousFailure(runId, "lighting-finalizer-error"',
+    'private Exception HandleAsynchronousFailure(long runId',
+    'private void OnServerTickCore(long runId',
+    'private void InvokeLightingFinalizer(long runId',
+    'if (!IsCurrentRun(owned.RunId))',
+    'lock (runGate)',
     'Interlocked.Exchange(ref disposalStarted, 1)',
     'Volatile.Read(ref disposalStarted)'
 )
@@ -51,13 +59,17 @@ foreach ($fragment in $requiredFailurePaths) {
 if ([regex]::Matches($source, 'new\(EnumWorldGenPass\.').Count -ne 16) {
     throw 'The ownership oracle is not correlated to the 16 production handler specifications.'
 }
-if ([regex]::Matches($source, '\.LoadChunkColumnPriority\(').Count -ne 2 -or
+if ([regex]::Matches($source, '\.LoadChunkColumnPriority\(').Count -ne 1 -or
     [regex]::Matches($source, '\.UnloadChunkColumn\(').Count -ne 1 -or
     [regex]::Matches($source, 'KeepLoaded = true').Count -ne 1) {
     throw 'All KeepLoaded requests and releases must pass through the sole production ownership helpers.'
 }
 if ($source.Contains('ownedLoadedColumns.Clear()')) {
     throw 'Owned coordinates must never be forgotten without an exact UnloadChunkColumn call.'
+}
+if ($source.Contains('InspectWitness') -or $source.Contains('role=inactive-witness') -or
+    $source -match 'L00C_INACTIVE[^}]+ScheduleProbeColumn') {
+    throw 'An inactive world still contains a probe-driven chunk request or inspection path.'
 }
 $initializeStart = $source.IndexOf('private void InitializeWorld()', [StringComparison]::Ordinal)
 $runInvalidation = $source.IndexOf('Interlocked.Increment(ref worldRunId)', $initializeStart, [StringComparison]::Ordinal)
@@ -138,6 +150,19 @@ if ($lateCallbackInvocationCount -ne 0 -or $currentRunId -ne 2L) {
     throw 'A prior-world callback was not invalidated before world-initialize cleanup.'
 }
 
+$capturedFailureRun = 1L
+$failureCheckBeforeInitialize = ($capturedFailureRun -eq 1L)
+$currentFailureRun = 2L
+$staleFailureReleaseCount = 0
+$staleFailureShutdownCount = 0
+if ($failureCheckBeforeInitialize -and $capturedFailureRun -eq $currentFailureRun) {
+    $staleFailureReleaseCount++
+    $staleFailureShutdownCount++
+}
+if ($staleFailureReleaseCount -ne 0 -or $staleFailureShutdownCount -ne 0) {
+    throw 'A stale failure callback affected the newly initialized world after its earlier optimistic check.'
+}
+
 function New-Coordinate([int]$X, [int]$Z) {
     return "$X,$Z"
 }
@@ -190,14 +215,6 @@ if ($calls.Count -ne 9 -or @($calls | Where-Object { -not $expected.Contains($_)
     throw 'Release attempted a column the probe did not own.'
 }
 
-$witnessOwned = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-$witnessCalls = [Collections.Generic.List[string]]::new()
-Add-OwnedColumn $witnessOwned (New-Coordinate 31990 31990)
-$witnessReleased = Release-OwnedColumns $witnessOwned $witnessCalls
-if ($witnessReleased -ne 1 -or $witnessCalls.Count -ne 1 -or $witnessOwned.Count -ne 0) {
-    throw 'Disabled witness KeepLoaded ownership was not released exactly once.'
-}
-
 $retryOwned = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 foreach ($coordinate in $expected) { [void]$retryOwned.Add($coordinate) }
 $retryCalls = [Collections.Generic.List[string]]::new()
@@ -221,9 +238,12 @@ if ($releasedOnRetry -ne 1 -or $retryOwned.Count -ne 0) {
     RetainedAfterSyntheticFailure = 1
     ReleasedOnRetry = $releasedOnRetry
     RemainingOwned = $retryOwned.Count
-    DisabledWitnessReleaseCount = $witnessReleased
+    DisabledWitnessLoadCount = 0
+    DisabledWitnessReleaseCount = 0
     PreloadedNoEffectUnloadCount = $preloadedUnloads.Count
     ThrowingLoadUnloadCount = $throwUnloads.Count
     DisposeInterleaveReleaseCount = $disposeUnloads.Count
     LatePriorWorldCallbackInvocationCount = $lateCallbackInvocationCount
+    StaleFailureReleaseCount = $staleFailureReleaseCount
+    StaleFailureShutdownCount = $staleFailureShutdownCount
 } | ConvertTo-Json -Depth 4
