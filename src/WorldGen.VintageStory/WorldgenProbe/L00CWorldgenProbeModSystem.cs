@@ -25,12 +25,24 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenRockStrataNew"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenCaves"),
         new(EnumWorldGenPass.Terrain, "Vintagestory.ServerMods.GenBlockLayers"),
-        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenTerraPostProcess")
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenTerraPostProcess"),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenHotSprings"),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenDungeons"),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenDeposits"),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenStructures", "OnChunkColumnGen"),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenPonds"),
+        new(EnumWorldGenPass.TerrainFeatures, "Vintagestory.ServerMods.GenStructures", "OnChunkColumnGenPostPass"),
+        new(EnumWorldGenPass.Vegetation, "Vintagestory.GameContent.GenStoryStructures"),
+        new(EnumWorldGenPass.Vegetation, "Vintagestory.ServerMods.GenVegetationAndPatches"),
+        new(EnumWorldGenPass.Vegetation, "Vintagestory.ServerMods.GenRivulets"),
+        new(EnumWorldGenPass.NeighbourSunLightFlood, "Vintagestory.ServerMods.GenSnowLayer")
     ];
 
     private readonly string instanceId = Guid.NewGuid().ToString("N");
     private readonly ChunkColumnGenerationDelegate fixtureHandler;
     private readonly ChunkColumnGenerationDelegate terrainFeaturesHandler;
+    private readonly ChunkColumnGenerationDelegate vegetationHandler;
+    private readonly ChunkColumnGenerationDelegate neighbourFloodHandler;
     private readonly List<RemovedHandler> removedHandlers = [];
 
     private ICoreServerAPI? api;
@@ -52,6 +64,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     {
         fixtureHandler = GenerateFixtureColumn;
         terrainFeaturesHandler = FilterTerrainFeatures;
+        vegetationHandler = FilterVegetation;
+        neighbourFloodHandler = FilterNeighbourFlood;
     }
 
     /// <inheritdoc />
@@ -210,7 +224,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             List<HandlerLocation> matches = FindHandlers(handlers, spec.TargetType, spec.Pass, spec.MethodName);
             if (matches.Count != 1)
             {
-                Fail("expected-handler-cardinality", $"Expected exactly one {spec.TargetType} handler in pass {spec.Pass}, found {matches.Count}; targeted replacement was not applied.");
+                string method = spec.MethodName is null ? string.Empty : $"::{spec.MethodName}";
+                Fail("expected-handler-cardinality", $"Expected exactly one {spec.TargetType}{method} handler in pass {spec.Pass}, found {matches.Count}; targeted replacement was not applied.");
             }
         }
     }
@@ -395,13 +410,28 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void FilterTerrainFeatures(IChunkColumnGenerateRequest request)
     {
+        FilterFixturePass(EnumWorldGenPass.TerrainFeatures, request);
+    }
+
+    private void FilterVegetation(IChunkColumnGenerateRequest request)
+    {
+        FilterFixturePass(EnumWorldGenPass.Vegetation, request);
+    }
+
+    private void FilterNeighbourFlood(IChunkColumnGenerateRequest request)
+    {
+        FilterFixturePass(EnumWorldGenPass.NeighbourSunLightFlood, request);
+    }
+
+    private void FilterFixturePass(EnumWorldGenPass pass, IChunkColumnGenerateRequest request)
+    {
         if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
         {
-            ForwardNative(EnumWorldGenPass.TerrainFeatures, request);
+            ForwardNative(pass, request);
             return;
         }
 
-        Log($"L00C_PASS_SUPPRESSED instance={instanceId} marker={marker!.MarkerId} pass={EnumWorldGenPass.TerrainFeatures} chunk=({request.ChunkX},{request.ChunkZ}) delegates={removedHandlers.Count(item => item.Pass == EnumWorldGenPass.TerrainFeatures)}");
+        Log($"L00C_PASS_SUPPRESSED instance={instanceId} marker={marker!.MarkerId} pass={pass} chunk=({request.ChunkX},{request.ChunkZ}) delegates={removedHandlers.Count(item => item.Pass == pass)}");
     }
 
     private void ForwardNative(EnumWorldGenPass pass, IChunkColumnGenerateRequest request)
@@ -720,13 +750,18 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     {
         EnumWorldGenPass.Terrain => fixtureHandler,
         EnumWorldGenPass.TerrainFeatures => terrainFeaturesHandler,
+        EnumWorldGenPass.Vegetation => vegetationHandler,
+        EnumWorldGenPass.NeighbourSunLightFlood => neighbourFloodHandler,
         _ => throw new InvalidOperationException($"L00-C has no targeted proxy for pass {pass}.")
     };
 
     private bool IsOwnedProxy(ChunkColumnGenerationDelegate candidate)
     {
         return ReferenceEquals(candidate.Target, this) &&
-            (candidate.Method == fixtureHandler.Method || candidate.Method == terrainFeaturesHandler.Method);
+            (candidate.Method == fixtureHandler.Method ||
+             candidate.Method == terrainFeaturesHandler.Method ||
+             candidate.Method == vegetationHandler.Method ||
+             candidate.Method == neighbourFloodHandler.Method);
     }
 
     private static bool Matches(ChunkColumnGenerationDelegate candidate, ReplacementSpec spec)

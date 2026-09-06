@@ -9,8 +9,9 @@ $ErrorActionPreference = 'Stop'
 
 $apiPath = Join-Path $GamePath 'VintagestoryAPI.dll'
 $essentialsPath = Join-Path $GamePath 'Mods\VSEssentials.dll'
+$survivalPath = Join-Path $GamePath 'Mods\VSSurvivalMod.dll'
 
-foreach ($path in @($apiPath, $essentialsPath)) {
+foreach ($path in @($apiPath, $essentialsPath, $survivalPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required local assembly is missing: $path"
     }
@@ -18,6 +19,7 @@ foreach ($path in @($apiPath, $essentialsPath)) {
 
 $api = [Reflection.Assembly]::LoadFrom($apiPath)
 $essentials = [Reflection.Assembly]::LoadFrom($essentialsPath)
+$survival = [Reflection.Assembly]::LoadFrom($survivalPath)
 
 function Require-Type {
     param([Reflection.Assembly]$Assembly, [string]$Name)
@@ -100,15 +102,29 @@ $requiredNativeTypes = @(
     'Vintagestory.ServerMods.GenRockStrataNew',
     'Vintagestory.ServerMods.GenCaves',
     'Vintagestory.ServerMods.GenBlockLayers',
-    'Vintagestory.ServerMods.GenTerraPostProcess'
+    'Vintagestory.ServerMods.GenTerraPostProcess',
+    'Vintagestory.ServerMods.GenHotSprings',
+    'Vintagestory.ServerMods.GenDungeons',
+    'Vintagestory.ServerMods.GenDeposits',
+    'Vintagestory.ServerMods.GenStructures',
+    'Vintagestory.ServerMods.GenPonds',
+    'Vintagestory.ServerMods.GenVegetationAndPatches',
+    'Vintagestory.ServerMods.GenRivulets',
+    'Vintagestory.ServerMods.GenSnowLayer'
 )
 
 $nativeTypeStatus = [ordered]@{}
 foreach ($name in $requiredNativeTypes) {
-    $nativeTypeStatus[$name] = ($null -ne $essentials.GetType($name, $false))
+    $nativeTypeStatus[$name] = ($null -ne $essentials.GetType($name, $false)) -or ($null -ne $survival.GetType($name, $false))
     if (-not $nativeTypeStatus[$name]) {
         throw "Expected native generator type is missing: $name"
     }
+}
+
+$storyType = 'Vintagestory.GameContent.GenStoryStructures'
+$nativeTypeStatus[$storyType] = ($null -ne $survival.GetType($storyType, $false))
+if (-not $nativeTypeStatus[$storyType]) {
+    throw "Expected native generator type is missing: $storyType"
 }
 
 $result = [ordered]@{
@@ -118,6 +134,7 @@ $result = [ordered]@{
     ApiAssemblyVersion = $api.GetName().Version.ToString()
     ApiSha256 = (Get-FileHash -LiteralPath $apiPath -Algorithm SHA256).Hash
     EssentialsSha256 = (Get-FileHash -LiteralPath $essentialsPath -Algorithm SHA256).Hash
+    SurvivalSha256 = (Get-FileHash -LiteralPath $survivalPath -Algorithm SHA256).Hash
     TerrainPassValue = $terrainValue
     HandlerListType = $chunkHandlerProperty.PropertyType.FullName
     RequestProperties = $requiredRequestProperties
