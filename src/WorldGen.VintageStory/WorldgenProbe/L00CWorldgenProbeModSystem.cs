@@ -44,6 +44,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private readonly ChunkColumnGenerationDelegate terrainFeaturesHandler;
     private readonly ChunkColumnGenerationDelegate vegetationHandler;
     private readonly ChunkColumnGenerationDelegate neighbourFloodHandler;
+    private readonly ChunkColumnGenerationDelegate metadataFinalizerHandler;
     private readonly List<RemovedHandler> removedHandlers = [];
 
     private ICoreServerAPI? api;
@@ -67,6 +68,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         terrainFeaturesHandler = FilterTerrainFeatures;
         vegetationHandler = FilterVegetation;
         neighbourFloodHandler = FilterNeighbourFlood;
+        metadataFinalizerHandler = FinalizeFixtureMetadata;
     }
 
     /// <inheritdoc />
@@ -268,6 +270,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             passHandlers.Insert(Math.Clamp(insertionIndex, 0, passHandlers.Count), ProxyForPass(group.Key));
         }
 
+        List<ChunkColumnGenerationDelegate> preDoneHandlers = GetPassHandlers(handlers, EnumWorldGenPass.PreDone);
+        unaffectedBefore[EnumWorldGenPass.PreDone] = preDoneHandlers.ToList();
+        preDoneHandlers.Add(metadataFinalizerHandler);
+
         foreach (KeyValuePair<EnumWorldGenPass, List<ChunkColumnGenerationDelegate>> entry in unaffectedBefore)
         {
             List<ChunkColumnGenerationDelegate> actual = GetPassHandlers(handlers, entry.Key)
@@ -359,6 +365,21 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             throw new InvalidOperationException("L00-C fixture handler ran more than once for the bounded column.");
         }
 
+        WriteCanonicalFixture(request, "terrain");
+    }
+
+    private void FinalizeFixtureMetadata(IChunkColumnGenerateRequest request)
+    {
+        if (request.ChunkX != config.FixtureChunkX || request.ChunkZ != config.FixtureChunkZ)
+        {
+            return;
+        }
+
+        WriteCanonicalFixture(request, "predone");
+    }
+
+    private void WriteCanonicalFixture(IChunkColumnGenerateRequest request, string phase)
+    {
         int chunkSize = RequireApi().WorldManager.ChunkSize;
         int worldHeight = request.Chunks.Length * chunkSize;
         FixtureGeometry geometry = FixtureGeometry.Create(chunkSize, worldHeight);
@@ -406,7 +427,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         mapChunk.YMax = (ushort)geometry.WaterSurface;
         mapChunk.MarkDirty();
 
-        Log($"L00C_FIXTURE_WRITTEN instance={instanceId} marker={marker!.MarkerId} chunk=({request.ChunkX},{request.ChunkZ}) chunksize={chunkSize} worldheight={worldHeight} rock={config.RockBlockId} fresh={config.FreshWaterBlockId} salt={config.SaltWaterBlockId} rocksurface={geometry.RockSurface} watersurface={geometry.WaterSurface} thread={Environment.CurrentManagedThreadId}");
+        Log($"L00C_FIXTURE_WRITTEN instance={instanceId} marker={marker!.MarkerId} phase={phase} chunk=({request.ChunkX},{request.ChunkZ}) chunksize={chunkSize} worldheight={worldHeight} rock={config.RockBlockId} fresh={config.FreshWaterBlockId} salt={config.SaltWaterBlockId} rocksurface={geometry.RockSurface} watersurface={geometry.WaterSurface} thread={Environment.CurrentManagedThreadId}");
     }
 
     private void FilterTerrainFeatures(IChunkColumnGenerateRequest request)
@@ -536,6 +557,11 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         int solidMismatchCount = 0;
         int fluidMismatchCount = 0;
         string firstMismatch = "none";
+        var canonical = new StringBuilder();
+        canonical.Append(chunkSize).Append('|').Append(worldHeight).Append('|')
+            .Append(geometry.RockSurface).Append('|').Append(geometry.WaterSurface).Append('|')
+            .Append(config.RockBlockId).Append('|').Append(config.FreshWaterBlockId).Append('|')
+            .Append(config.SaltWaterBlockId).Append('|');
 
         for (int x = 0; x < chunkSize; x++)
         {
@@ -545,6 +571,9 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 int expectedSolidTop = wall ? geometry.WaterSurface : geometry.RockSurface;
                 int index2d = MapUtil.Index2d(x, z, chunkSize);
                 int expectedTerrainHeight = expectedSolidTop;
+                canonical.Append(mapChunk.WorldGenTerrainHeightMap[index2d]).Append(',')
+                    .Append(mapChunk.RainHeightMap[index2d]).Append(',')
+                    .Append(mapChunk.TopRockIdMap[index2d]).Append(';');
                 if (mapChunk.WorldGenTerrainHeightMap[index2d] != expectedTerrainHeight)
                 {
                     terrainMapMismatchCount++;
@@ -561,13 +590,14 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                     unexpectedCount++;
                 }
 
-                for (int y = 0; y <= geometry.WaterSurface; y++)
+                for (int y = 0; y < worldHeight; y++)
                 {
                     IServerChunk chunk = serverApi.WorldManager.GetChunk(config.FixtureChunkX, y / chunkSize, config.FixtureChunkZ)
                         ?? throw new InvalidOperationException($"L00-C fixture chunk y={y / chunkSize} is not loaded.");
                     int index3d = MapUtil.Index3d(x, y % chunkSize, z, chunkSize, chunkSize);
                     int solid = chunk.Data.GetBlockId(index3d, BlockLayersAccess.Solid);
                     int fluid = chunk.Data.GetBlockId(index3d, BlockLayersAccess.Fluid);
+                    canonical.Append(solid).Append(',').Append(fluid).Append(';');
                     if (solid != 0) solidCount++;
                     if (fluid != 0) fluidCount++;
                     if (fluid == config.FreshWaterBlockId) freshCount++;
@@ -600,8 +630,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             throw new InvalidOperationException($"L00-C fixture validation failed: ymax={mapChunk.YMax}, fresh={freshCount}, salt={saltCount}, unexpected={unexpectedCount}, terrainmap={terrainMapMismatchCount}, rainmap={rainMapMismatchCount}, toprockmap={topRockMapMismatchCount}, solid={solidMismatchCount}, fluid={fluidMismatchCount}, first={firstMismatch}.");
         }
 
-        string canonical = $"{chunkSize}|{worldHeight}|{geometry.RockSurface}|{geometry.WaterSurface}|{config.RockBlockId}|{config.FreshWaterBlockId}|{config.SaltWaterBlockId}|{solidCount}|{fluidCount}|{freshCount}|{saltCount}|{mapChunk.YMax}|{unexpectedCount}";
-        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        canonical.Append("ymax=").Append(mapChunk.YMax);
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())));
         var snapshot = new FixtureSnapshot(hash, solidCount, fluidCount, freshCount, saltCount, unexpectedCount, mapChunk.YMax);
         Log($"L00C_FIXTURE_INSPECTED instance={instanceId} marker={marker!.MarkerId} phase={phase} chunk=({config.FixtureChunkX},{config.FixtureChunkZ}) snapshot={hash} solids={solidCount} fluids={fluidCount} fresh={freshCount} salt={saltCount} terrain={geometry.RockSurface} water={geometry.WaterSurface} ymax={mapChunk.YMax} unexpected={unexpectedCount}");
         return snapshot;
@@ -762,7 +792,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             (candidate.Method == fixtureHandler.Method ||
              candidate.Method == terrainFeaturesHandler.Method ||
              candidate.Method == vegetationHandler.Method ||
-             candidate.Method == neighbourFloodHandler.Method);
+             candidate.Method == neighbourFloodHandler.Method ||
+             candidate.Method == metadataFinalizerHandler.Method);
     }
 
     private static bool Matches(ChunkColumnGenerationDelegate candidate, ReplacementSpec spec)

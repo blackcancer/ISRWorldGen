@@ -35,6 +35,10 @@ $required = @(
     'WorldGenTerrainHeightMap',
     'RainHeightMap',
     'TopRockIdMap',
+    'EnumWorldGenPass.PreDone',
+    'preDoneHandlers.Add(metadataFinalizerHandler)',
+    'for (int y = 0; y < worldHeight; y++)',
+    "canonical.Append(solid).Append(',').Append(fluid)",
     'StoreData',
     'ShutDown',
     'IsNew'
