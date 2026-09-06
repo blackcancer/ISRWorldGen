@@ -1049,7 +1049,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             Log($"L00C_HALO_STABLE instance={instanceId} marker={marker!.MarkerId} ticks={StableTickTarget} columns={afterTicksHalo.ColumnCount} snapshot={afterTicksHalo.Hash}");
             initialSnapshot = null;
             initialHaloSnapshot = null;
-            ReleaseOwnedColumns("fixture-stable");
             RequestShutdownIfConfigured("fixture-stable");
         }
         catch (Exception exception)

@@ -197,7 +197,7 @@ foreach ($session in @($evidence.Sessions)) {
         }
 
         $ownedLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_OWNED instance=$instance marker=$marker role=(?:halo|fixture-center) chunk=\(([-0-9]+),([-0-9]+)\) owned=([1-9]).*$")
-        $releaseLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_RELEASE reason=fixture-stable instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) released=([1-9]).*$")
+        $releaseLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_RELEASE reason=dispose instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) released=([1-9]).*$")
         Assert-Equal $ownedLines.Count 9 "Session $($session.Cycle) owned KeepLoaded footprint"
         Assert-Equal $releaseLines.Count 9 "Session $($session.Cycle) released KeepLoaded footprint"
         $expectedCoordinates = @(
@@ -213,18 +213,26 @@ foreach ($session in @($evidence.Sessions)) {
         Assert-Equal ($releasedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact released coordinates"
         Assert-Equal (($ownedLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) ownership sequence"
         Assert-Equal (($releaseLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) release sequence"
-        if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=fixture-stable instance=$instance released=9 remainingowned=0 exact=True") {
-            throw "Activated session $($session.Cycle) retained KeepLoaded ownership after terminal validation."
+        if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=9 remainingowned=0 exact=True") {
+            throw "Activated session $($session.Cycle) did not release its exact KeepLoaded footprint during Dispose."
         }
         if ($log -notmatch "L00C_COLUMN_PRECONDITION instance=$instance marker=$marker unloaded=9 exact=True" -or
             $log -notmatch "L00C_COLUMN_LOAD_ACCEPTED instance=$instance marker=$marker columns=9 owned=9 exact=True") {
             throw "Activated session $($session.Cycle) did not prove an unloaded and atomically accepted 3x3 ownership request."
         }
-        if ($log.IndexOf("L00C_COLUMN_RELEASE reason=fixture-stable instance=$instance", [StringComparison]::Ordinal) -le
-            $log.IndexOf("L00C_HALO_STABLE instance=$instance", [StringComparison]::Ordinal) -or
-            $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal) -le
-            $log.IndexOf("L00C_COLUMN_RELEASE_RESULT reason=fixture-stable instance=$instance", [StringComparison]::Ordinal)) {
-            throw "Activated session $($session.Cycle) did not release its KeepLoaded footprint between terminal validation and shutdown."
+        $stableIndex = $log.IndexOf("L00C_HALO_STABLE instance=$instance", [StringComparison]::Ordinal)
+        $shutdownRequestIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
+        $shutdownPhaseIndex = $log.IndexOf('Entering runphase Shutdown', [StringComparison]::Ordinal)
+        $disposeReleaseIndex = $log.IndexOf("L00C_COLUMN_RELEASE reason=dispose instance=$instance", [StringComparison]::Ordinal)
+        if ($stableIndex -lt 0 -or $shutdownRequestIndex -le $stableIndex -or $shutdownPhaseIndex -le $shutdownRequestIndex -or $disposeReleaseIndex -le $shutdownPhaseIndex -or
+            $log -match "L00C_COLUMN_RELEASE reason=fixture-stable instance=$instance") {
+            throw "Activated session $($session.Cycle) did not retain its KeepLoaded footprint until shutdown Dispose."
+        }
+        if ([bool]$session.IsNew) {
+            $generatingSave = [regex]::Match($log, '(?m)^.*Saved [0-9]+ generating chunks.*$')
+            if (-not $generatingSave.Success -or $generatingSave.Index -le $shutdownRequestIndex -or $shutdownPhaseIndex -le $generatingSave.Index) {
+                throw "New-world session $($session.Cycle) did not flush generating chunks before shutdown Dispose released the footprint."
+            }
         }
 
         $beforeLine = [regex]::Match($log, "(?m)^.*L00C_HANDLERS phase=before instance=$instance .*$").Value
@@ -284,8 +292,9 @@ foreach ($session in @($evidence.Sessions)) {
         throw "Unknown WorldRole: $($session.WorldRole)"
     }
 
-    if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=0 remainingowned=0 exact=True") {
-        throw "Session $($session.Cycle) disposal did not prove zero retained KeepLoaded ownership."
+    $expectedDisposeRelease = if ($session.WorldRole -like 'activated-*') { 9 } else { 0 }
+    if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=$expectedDisposeRelease remainingowned=0 exact=True") {
+        throw "Session $($session.Cycle) disposal did not prove its exact terminal KeepLoaded release."
     }
     $successfulReleaseCount = [regex]::Matches($log, "L00C_COLUMN_RELEASE reason=").Count
     $expectedReleaseCount = if ($session.WorldRole -like 'activated-*') { 9 } else { 0 }

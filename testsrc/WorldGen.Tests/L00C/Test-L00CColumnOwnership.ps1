@@ -33,10 +33,13 @@ foreach ($fragment in $requiredSourceFragments) {
         throw "Production ownership implementation is missing: $fragment"
     }
 }
-foreach ($reason in @('fixture-stable', 'dispose', 'world-initialize')) {
+foreach ($reason in @('dispose', 'world-initialize')) {
     if ($source -notmatch ('ReleaseOwnedColumns\("' + [regex]::Escape($reason) + '"\)')) {
         throw "Production cleanup path is missing: $reason"
     }
+}
+if ($source -match 'ReleaseOwnedColumns\("fixture-stable"\)') {
+    throw 'Terminal validation must retain the exact KeepLoaded footprint until shutdown Dispose, after the engine flushes generating chunks.'
 }
 $requiredFailurePaths = @(
     'HandleAsynchronousFailure(runId, "probe-request-error"',
@@ -217,6 +220,8 @@ if ($owned.Count -ne 9 -or -not $owned.SetEquals($expected)) {
 }
 
 $calls = [Collections.Generic.List[string]]::new()
+$ownedAfterStableValidation = $owned.Count
+$releaseCallsAfterStableValidation = $calls.Count
 $releasedFirst = Release-OwnedColumns $owned $calls
 $releasedSecond = Release-OwnedColumns $owned $calls
 if ($releasedFirst -ne 9 -or $releasedSecond -ne 0 -or $owned.Count -ne 0) {
@@ -224,6 +229,9 @@ if ($releasedFirst -ne 9 -or $releasedSecond -ne 0 -or $owned.Count -ne 0) {
 }
 if ($calls.Count -ne 9 -or @($calls | Where-Object { -not $expected.Contains($_) }).Count -ne 0) {
     throw 'Release attempted a column the probe did not own.'
+}
+if ($ownedAfterStableValidation -ne 9 -or $releaseCallsAfterStableValidation -ne 0) {
+    throw 'Stable validation did not retain all nine owned columns until Dispose.'
 }
 
 $retryOwned = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -244,6 +252,8 @@ if ($releasedOnRetry -ne 1 -or $retryOwned.Count -ne 0) {
     Status = 'PASS'
     ForcedCoordinateCount = $expected.Count
     FirstReleaseCount = $releasedFirst
+    OwnedAfterStableValidation = $ownedAfterStableValidation
+    ReleaseCallsAfterStableValidation = $releaseCallsAfterStableValidation
     IdempotentSecondReleaseCount = $releasedSecond
     ForeignUnloadCount = @($calls | Where-Object { -not $expected.Contains($_) }).Count
     RetainedAfterSyntheticFailure = 1
