@@ -1,8 +1,12 @@
 # Procédure Visual Studio Community 2026 et MCP
 ## Préparation et limites
-Le MCP Visual Studio est fourni dans l’environnement de développement de Codex, conformément au besoin utilisateur. Cette livraison n’en connaît pas le fournisseur, le schéma ni les noms des outils et ne prétend pas l’avoir invoqué. La première session inventorie ses capacités avant d’écrire une commande. Un MCP d’IDE n’implique pas automatiquement le contrôle du personnage, la capture de la fenêtre de jeu ou la possibilité d’exécuter toutes les commandes de test.
+Le MCP Visual Studio a été qualifié localement le 6 septembre 2026 avec Visual Studio Community 2026 : ouverture/fermeture de solution, build, lancement F5, état du debugger, breakpoints, pile, variables et arrêt fonctionnent. La commande F5 qualifiée sélectionne le projet de démarrage mais n’expose pas de sélecteur de profil ; elle lance le premier profil de `launchSettings.json`. L’ordre des profils est donc intentionnel et fait partie de la configuration vérifiée. Un MCP d’IDE n’implique pas automatiquement le contrôle du personnage, la capture de la fenêtre de jeu ou la possibilité d’exécuter toutes les commandes de test.
+
+Le premier profil lance le **client authentifié exclusivement sous le debugger Visual Studio**, sans argument `--dataPath`, afin de réutiliser la session du profil utilisateur et d’éviter une nouvelle connexion à chaque session de test. Il ne copie, ne lit et n’enregistre aucun token dans le dépôt. Les profils serveur et client isolés restent disponibles pour les laboratoires. Avant un lancement serveur automatisé, l’intégrateur place temporairement le profil serveur en tête, recharge la solution, puis restaure l’ordre client avant publication.
 
 Créer un profil de données de jeu **jetable**, séparé des parties personnelles. Relever dans la version locale la syntaxe de lancement du client/serveur et le mécanisme de datapath/deploy du template. Ne pas inventer des arguments de lancement. Ne pas copier les comptes, tokens ou toutes les sauvegardes pour déboguer.
+
+Le profil client authentifié accède au répertoire utilisateur réel : ne jamais ouvrir une sauvegarde personnelle lorsque le probe laboratoire est activé. Les mondes de recette portent un nom et un marqueur ISRWorldGen dédiés ; aucune purge de sauvegarde personnelle n’est permise.
 
 ## Capacités à vérifier
 | Capacité recherchée | Vérification et preuve |

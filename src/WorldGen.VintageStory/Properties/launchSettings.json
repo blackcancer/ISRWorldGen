@@ -1,5 +1,11 @@
 {
   "profiles": {
+    "ISRWorldGen Client (authenticated user data)": {
+      "commandName": "Executable",
+      "executablePath": "$(VintageStoryPath)\\Vintagestory.exe",
+      "commandLineArgs": "--tracelog --addModPath \"$(ProjectDir)bin\\$(Configuration)\\Mods\" --addOrigin \"$(ProjectDir)assets\"",
+      "workingDirectory": "$(VintageStoryPath)"
+    },
     "ISRWorldGen Server (isolated data)": {
       "commandName": "Executable",
       "executablePath": "$(VintageStoryPath)\\VintagestoryServer.exe",
