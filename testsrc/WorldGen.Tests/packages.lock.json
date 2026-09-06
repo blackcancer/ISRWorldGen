@@ -154,6 +154,12 @@
       },
       "ISRWorldGen.Core": {
         "type": "Project"
+      },
+      "ISRWorldGen.Runtime": {
+        "type": "Project",
+        "dependencies": {
+          "ISRWorldGen.Core": "[1.0.0, )"
+        }
       }
     }
   }
