@@ -1,8 +1,42 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$sourcePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
+$source = Get-Content -LiteralPath $sourcePath -Raw
+foreach ($fragment in @(
+    'InspectPersistedFootprintBlocking',
+    'BlockingTestMapChunkExists',
+    'BlockingLoadChunkColumn',
+    'L00C_PERSISTED_REOPEN_STABLE',
+    'loadpriority={priorityLoads}',
+    'fixturewrites={fixtureWrites}',
+    'callbacks={fixtureCallbackCount}'
+)) {
+    if (-not $source.Contains($fragment)) {
+        throw "Persisted-footprint replay guard is missing from production: $fragment"
+    }
+}
+$initializeStart = $source.IndexOf('private void InitializeWorldCore()', [StringComparison]::Ordinal)
+$initializeEnd = $source.IndexOf('private RestoreResult RestoreOwnedHandlerSet(', $initializeStart, [StringComparison]::Ordinal)
+$initializeMethod = $source.Substring($initializeStart, $initializeEnd - $initializeStart)
+$reopenStart = $initializeMethod.IndexOf('if (!saveGame.IsNew)', [StringComparison]::Ordinal)
+$reopenInspect = $initializeMethod.IndexOf('InspectPersistedFootprintBlocking()', $reopenStart, [StringComparison]::Ordinal)
+$reopenSchedule = $initializeMethod.IndexOf('SchedulePersistedReopen(', $reopenStart, [StringComparison]::Ordinal)
+$reopenReturn = $initializeMethod.IndexOf('return;', $reopenSchedule, [StringComparison]::Ordinal)
+$handlerValidation = $initializeMethod.IndexOf('ValidateReplacementPreconditions(handlers)', [StringComparison]::Ordinal)
+if ($reopenStart -lt 0 -or $reopenInspect -le $reopenStart -or $reopenSchedule -le $reopenInspect -or
+    $reopenReturn -le $reopenSchedule -or $handlerValidation -le $reopenReturn) {
+    throw 'Persisted reopen must inspect and return before any worldgen handler replacement.'
+}
+$reopenBranch = $initializeMethod.Substring($reopenStart, $reopenReturn - $reopenStart)
+if ($reopenBranch -match 'ApplyTargetedReplacement|ScheduleProbeColumn|LoadChunkColumnPriority|KeepLoaded') {
+    throw 'Persisted reopen still enters a worldgen replacement or priority-load path.'
+}
 
 function New-Handler {
     param(
@@ -182,6 +216,15 @@ if (@($haloSuppressed | Where-Object OriginalTarget -eq 'GenVegetationAndPatches
     throw 'The known cross-column loose-stone writer is not guarded in the halo.'
 }
 
+$reopenWrapperInstallCount = 0
+$reopenFinalizerInstallCount = 0
+$reopenFixtureWriteCount = 0
+$reopenFixtureCallbackCount = 0
+if ($reopenWrapperInstallCount -ne 0 -or $reopenFinalizerInstallCount -ne 0 -or
+    $reopenFixtureWriteCount -ne 0 -or $reopenFixtureCallbackCount -ne 0) {
+    throw 'A marker-backed reopen still installs worldgen callbacks or rewrites its persistent fixture.'
+}
+
 $protectedCoordinates = @(
     for ($deltaX = -1; $deltaX -le 1; $deltaX++) {
         for ($deltaZ = -1; $deltaZ -le 1; $deltaZ++) {
@@ -237,4 +280,8 @@ foreach ($pass in @($state.Original.Keys)) {
     FirstRingColumns = $firstRing.Count
     HaloBaseHandlersForwarded = $haloForwarded.Count
     HaloCrossColumnHandlersSuppressed = $haloSuppressed.Count
+    ReopenWrapperInstallCount = $reopenWrapperInstallCount
+    ReopenFinalizerInstallCount = $reopenFinalizerInstallCount
+    ReopenFixtureWriteCount = $reopenFixtureWriteCount
+    ReopenFixtureCallbackCount = $reopenFixtureCallbackCount
 } | ConvertTo-Json -Depth 5

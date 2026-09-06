@@ -73,6 +73,9 @@ $chunkBlocks = Require-Type $api 'Vintagestory.API.Common.IChunkBlocks'
 $mapChunk = Require-Type $api 'Vintagestory.API.Common.IMapChunk'
 $saveGame = Require-Type $api 'Vintagestory.API.Server.ISaveGame'
 $server = Require-Type $api 'Vintagestory.API.Server.IServerAPI'
+$worldManager = Require-Type $api 'Vintagestory.API.Server.IWorldManagerAPI'
+$worldChunk = Require-Type $api 'Vintagestory.API.Common.IWorldChunk'
+$serverChunk = Require-Type $api 'Vintagestory.API.Server.IServerChunk'
 $passType = Require-Type $api 'Vintagestory.API.Server.EnumWorldGenPass'
 
 [void](Require-Method $eventApi 'GetRegisteredWorldGenHandlers' @('System.String'))
@@ -87,16 +90,44 @@ $passType = Require-Type $api 'Vintagestory.API.Server.EnumWorldGenPass'
 [void](Require-Method $saveGame 'GetData' @('System.String'))
 [void](Require-Method $saveGame 'StoreData' @('System.String', 'System.Byte[]'))
 [void](Require-Method $server 'ShutDown' @())
+$blockingExists = Require-Method $worldManager 'BlockingTestMapChunkExists' @('System.Int32', 'System.Int32')
+$blockingLoad = Require-Method $worldManager 'BlockingLoadChunkColumn' @('System.Int32', 'System.Int32')
+if ($blockingExists.ReturnType.FullName -ne 'System.Boolean' -or $blockingLoad.ReturnType.FullName -ne 'Vintagestory.API.Server.IServerChunk[]') {
+    throw 'Blocking persisted-column API return types drifted.'
+}
+[void](Require-Method $worldChunk 'MarkModified' @())
+[void](Require-Method $worldChunk 'Dispose' @())
+[void](Require-Method $mapChunk 'MarkDirty' @())
+if (-not $worldChunk.IsAssignableFrom($serverChunk)) {
+    throw 'IServerChunk must inherit the MarkModified and Dispose contracts.'
+}
 $apiXml = Get-Content -LiteralPath $apiXmlPath -Raw
 $columnOwnershipSignatures = @(
     'M:Vintagestory.API.Server.IWorldManagerAPI.GetMapChunk(System.Int32,System.Int32)',
     'M:Vintagestory.API.Server.IWorldManagerAPI.GetChunk(System.Int32,System.Int32,System.Int32)',
     'M:Vintagestory.API.Server.IWorldManagerAPI.LoadChunkColumnPriority(System.Int32,System.Int32,System.Int32,System.Int32,Vintagestory.API.Server.ChunkLoadOptions)',
     'M:Vintagestory.API.Server.IWorldManagerAPI.UnloadChunkColumn(System.Int32,System.Int32)'
+    'M:Vintagestory.API.Server.IWorldManagerAPI.BlockingTestMapChunkExists(System.Int32,System.Int32)'
+    'M:Vintagestory.API.Server.IWorldManagerAPI.BlockingLoadChunkColumn(System.Int32,System.Int32)'
+    'M:Vintagestory.API.Common.IWorldChunk.MarkModified'
+    'M:Vintagestory.API.Common.IMapChunk.MarkDirty'
 )
 foreach ($signature in $columnOwnershipSignatures) {
     if (-not $apiXml.Contains($signature)) {
         throw "Required local API signature is missing: $signature"
+    }
+}
+foreach ($fragment in @(
+    'BlockingTestMapChunkExists(System.Int32,System.Int32)">',
+    'can only be called before EnumServerRunPhase.RunGame',
+    'BlockingLoadChunkColumn(System.Int32,System.Int32)">',
+    'only loads and deserializes the chunk data',
+    'you need to call .Dispose() after you do not need them anymore',
+    'stored to disk on the next autosave or during shutdown',
+    'Tells the server that it has to save the changes of this chunk to disk'
+)) {
+    if (-not $apiXml.Contains($fragment)) {
+        throw "Blocking persisted-column API contract text is missing: $fragment"
     }
 }
 

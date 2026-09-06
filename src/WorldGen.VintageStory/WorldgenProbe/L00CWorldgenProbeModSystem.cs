@@ -59,6 +59,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private int stableTickCount;
     private int haloPreparedCount;
     private int fixtureCallbackCount;
+    private int fixtureWriteCount;
+    private int priorityLoadInvocationCount;
+    private int keepLoadedColumnRequestCount;
+    private int ownedColumnUnloadCount;
     private int requestIssued;
     private int shutdownIssued;
     private int disposalStarted;
@@ -115,6 +119,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
 
         fixtureCallbackCount = 0;
+        fixtureWriteCount = 0;
+        priorityLoadInvocationCount = 0;
+        keepLoadedColumnRequestCount = 0;
+        ownedColumnUnloadCount = 0;
         requestIssued = 0;
         shutdownIssued = 0;
         stableTickCount = 0;
@@ -169,6 +177,19 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             ValidateMarker(persistedMarker, saveGame);
             persistedMarker.OpenCount++;
             marker = persistedMarker;
+        }
+
+        if (!saveGame.IsNew)
+        {
+            ResolveMaterials();
+            PersistedFootprintSnapshot persistedSnapshot = InspectPersistedFootprintBlocking();
+            active = true;
+            StoreMarker(saveGame, marker!);
+
+            LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
+            Log($"L00C_ACTIVATED instance={instanceId} marker={marker!.MarkerId} open={marker.OpenCount} isnew=False save={saveGame.SavegameIdentifier} chunk=({config.FixtureChunkX},{config.FixtureChunkZ})");
+            SchedulePersistedReopen(runId, persistedSnapshot);
+            return;
         }
 
         ValidateReplacementPreconditions(handlers);
@@ -395,6 +416,50 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         RequireApi().Event.ServerRunPhase(EnumServerRunPhase.RunGame, () => CompleteInactiveWitness(runId));
     }
 
+    private void SchedulePersistedReopen(long runId, PersistedFootprintSnapshot persistedSnapshot)
+    {
+        if (!config.AutoRun)
+        {
+            Log($"L00C_AUTORUN_SKIPPED instance={instanceId} active=True");
+            return;
+        }
+
+        RequireApi().Event.ServerRunPhase(
+            EnumServerRunPhase.RunGame,
+            () => CompletePersistedReopen(runId, persistedSnapshot));
+    }
+
+    private void CompletePersistedReopen(long runId, PersistedFootprintSnapshot persistedSnapshot)
+    {
+        lock (runGate)
+        {
+            if (!IsCurrentRun(runId))
+            {
+                return;
+            }
+            int ownedCount;
+            lock (ownedColumnsGate)
+            {
+                ownedCount = ownedLoadedColumns.Count;
+            }
+            int priorityLoads = Volatile.Read(ref priorityLoadInvocationCount);
+            int keepLoadedRequests = Volatile.Read(ref keepLoadedColumnRequestCount);
+            int unloads = Volatile.Read(ref ownedColumnUnloadCount);
+            int fixtureWrites = Volatile.Read(ref fixtureWriteCount);
+            if (!active || requestIssued != 0 || fixtureCallbackCount != 0 || fixtureWrites != 0 ||
+                priorityLoads != 0 || keepLoadedRequests != 0 || unloads != 0 || ownedCount != 0 || ownershipState is not null)
+            {
+                throw HandleAsynchronousFailure(
+                    runId,
+                    "persisted-reopen-state-error",
+                    new InvalidOperationException($"L00-C persisted reopen mutated generation state: active={active}, requests={requestIssued}, callbacks={fixtureCallbackCount}, writes={fixtureWrites}, priorityloads={priorityLoads}, keeploaded={keepLoadedRequests}, unloads={unloads}, owned={ownedCount}, handlersowned={ownershipState is not null}."));
+            }
+
+            Log($"L00C_PERSISTED_REOPEN_STABLE instance={instanceId} marker={marker!.MarkerId} loadpriority={priorityLoads} keeploaded={keepLoadedRequests} unload={unloads} fixturewrites={fixtureWrites} callbacks={fixtureCallbackCount} center={persistedSnapshot.Fixture.Hash} halo={persistedSnapshot.Halo.Hash}");
+            RequestShutdownIfConfigured("persisted-reopen-stable");
+        }
+    }
+
     private void CompleteInactiveWitness(long runId)
     {
         lock (runGate)
@@ -445,16 +510,11 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             throw new InvalidOperationException("L00-C inactive worlds must never request a chunk column.");
         }
 
-        var footprint = new List<OwnedColumnRequest>();
-        for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
-        {
-            for (int deltaZ = -FixtureProtectionRadius; deltaZ <= FixtureProtectionRadius; deltaZ++)
-            {
-                var coordinate = new ChunkCoordinate(config.FixtureChunkX + deltaX, config.FixtureChunkZ + deltaZ);
-                string role = deltaX == 0 && deltaZ == 0 ? "fixture-center" : "halo";
-                footprint.Add(new OwnedColumnRequest(coordinate, role));
-            }
-        }
+        List<OwnedColumnRequest> footprint = BuildProtectedFootprintCoordinates()
+            .Select(coordinate => new OwnedColumnRequest(
+                coordinate,
+                coordinate.X == config.FixtureChunkX && coordinate.Z == config.FixtureChunkZ ? "fixture-center" : "halo"))
+            .ToList();
         Log($"L00C_HALO_PREPARE_BEGIN instance={instanceId} marker={marker!.MarkerId} radius={FixtureProtectionRadius} columns={footprint.Count - 1}");
         foreach (OwnedColumnRequest request in footprint.Where(item => item.Role == "halo"))
         {
@@ -560,6 +620,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 {
                     throw new InvalidOperationException("L00-C KeepLoaded footprint is not the exact requested rectangle.");
                 }
+                Interlocked.Increment(ref priorityLoadInvocationCount);
+                Interlocked.Add(ref keepLoadedColumnRequestCount, requests.Count);
                 worldManager.LoadChunkColumnPriority(minX, minZ, maxX, maxZ, options);
             }
             catch (Exception loadException)
@@ -680,6 +742,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 try
                 {
                     worldManager!.UnloadChunkColumn(coordinate.X, coordinate.Z);
+                    Interlocked.Increment(ref ownedColumnUnloadCount);
                     if (!ownedLoadedColumns.Remove(coordinate))
                     {
                         throw new InvalidOperationException($"L00-C lost owned coordinate ({coordinate.X},{coordinate.Z}) during release.");
@@ -887,6 +950,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void WriteCanonicalFixture(IChunkColumnGenerateRequest request, string phase)
     {
+        Interlocked.Increment(ref fixtureWriteCount);
         int chunkSize = RequireApi().WorldManager.ChunkSize;
         int worldHeight = request.Chunks.Length * chunkSize;
         FixtureGeometry geometry = FixtureGeometry.Create(chunkSize, worldHeight);
@@ -932,6 +996,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             }
         }
         mapChunk.YMax = (ushort)geometry.WaterSurface;
+        foreach (IServerChunk chunk in request.Chunks)
+        {
+            chunk.MarkModified();
+        }
         mapChunk.MarkDirty();
 
         Log($"L00C_FIXTURE_WRITTEN instance={instanceId} marker={marker!.MarkerId} phase={phase} center=({config.FixtureChunkX},{config.FixtureChunkZ}) radius={FixtureProtectionRadius} chunk=({request.ChunkX},{request.ChunkZ}) chunksize={chunkSize} worldheight={worldHeight} rock={config.RockBlockId} fresh={config.FreshWaterBlockId} salt={config.SaltWaterBlockId} rocksurface={geometry.RockSurface} watersurface={geometry.WaterSurface} thread={Environment.CurrentManagedThreadId}");
@@ -1063,6 +1131,129 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
     }
 
+    private PersistedFootprintSnapshot InspectPersistedFootprintBlocking()
+    {
+        ICoreServerAPI serverApi = RequireApi();
+        ValidateFixtureCoordinate(serverApi);
+        IWorldManagerAPI worldManager = serverApi.WorldManager;
+        List<ChunkCoordinate> footprint = BuildProtectedFootprintCoordinates();
+        foreach (ChunkCoordinate coordinate in footprint)
+        {
+            if (!worldManager.BlockingTestMapChunkExists(coordinate.X, coordinate.Z))
+            {
+                string message = $"L00-C persisted footprint map chunk ({coordinate.X},{coordinate.Z}) does not exist before blocking load.";
+                serverApi.Logger.Error($"L00C_ERROR code=persisted-map-missing instance={instanceId} marker={marker!.MarkerId} chunk=({coordinate.X},{coordinate.Z}) message={Sanitize(message)}");
+                throw new InvalidOperationException(message);
+            }
+        }
+        Log($"L00C_PERSISTED_PRECHECK instance={instanceId} marker={marker!.MarkerId} maps={footprint.Count} exact={footprint.Count == 9}");
+
+        int chunkSize = worldManager.ChunkSize;
+        int worldHeight = worldManager.MapSizeY;
+        int expectedChunksPerColumn = worldHeight / chunkSize;
+        var loadedColumns = new Dictionary<ChunkCoordinate, IServerChunk[]>();
+        PersistedFootprintSnapshot? persistedSnapshot = null;
+        Exception? inspectionFailure = null;
+        Exception? disposalFailure = null;
+        int disposedColumns = 0;
+        int disposedChunks = 0;
+
+        try
+        {
+            for (int index = 0; index < footprint.Count; index++)
+            {
+                ChunkCoordinate coordinate = footprint[index];
+                IServerChunk[] chunks = worldManager.BlockingLoadChunkColumn(coordinate.X, coordinate.Z)
+                    ?? throw new InvalidOperationException($"L00-C blocking load returned null for persisted column ({coordinate.X},{coordinate.Z}).");
+                loadedColumns.Add(coordinate, chunks);
+                if (chunks.Length != expectedChunksPerColumn)
+                {
+                    throw new InvalidOperationException($"L00-C blocking load returned {chunks.Length} chunks for ({coordinate.X},{coordinate.Z}), expected {expectedChunksPerColumn}.");
+                }
+                Log($"L00C_PERSISTED_COLUMN_LOADED instance={instanceId} marker={marker!.MarkerId} chunk=({coordinate.X},{coordinate.Z}) sequence={index + 1} chunks={chunks.Length}");
+            }
+
+            foreach (IServerChunk[] chunks in loadedColumns.Values)
+            {
+                foreach (IServerChunk chunk in chunks)
+                {
+                    chunk.Unpack_ReadOnly();
+                }
+            }
+
+            var center = new ChunkCoordinate(config.FixtureChunkX, config.FixtureChunkZ);
+            IServerChunk[] centerChunks = loadedColumns[center];
+            FixtureSnapshot fixture = InspectFixtureData("loaded", centerChunks, centerChunks[0].MapChunk, chunkSize, worldHeight);
+            HaloSnapshot halo = InspectProtectionHaloData("loaded", loadedColumns, chunkSize, worldHeight);
+            persistedSnapshot = new PersistedFootprintSnapshot(fixture, halo);
+        }
+        catch (Exception exception)
+        {
+            inspectionFailure = exception;
+        }
+        finally
+        {
+            foreach (ChunkCoordinate coordinate in footprint)
+            {
+                if (!loadedColumns.TryGetValue(coordinate, out IServerChunk[]? chunks))
+                {
+                    continue;
+                }
+
+                bool columnDisposed = true;
+                foreach (IServerChunk chunk in chunks)
+                {
+                    try
+                    {
+                        chunk.Dispose();
+                        disposedChunks++;
+                    }
+                    catch (Exception exception)
+                    {
+                        columnDisposed = false;
+                        disposalFailure = disposalFailure is null ? exception : new AggregateException(disposalFailure, exception);
+                    }
+                }
+                if (columnDisposed)
+                {
+                    disposedColumns++;
+                }
+            }
+
+            int expectedDisposedChunks = footprint.Count * expectedChunksPerColumn;
+            bool exact = disposalFailure is null && loadedColumns.Count == footprint.Count &&
+                disposedColumns == footprint.Count && disposedChunks == expectedDisposedChunks;
+            Log($"L00C_PERSISTED_COLUMNS_DISPOSED instance={instanceId} marker={marker!.MarkerId} columns={disposedColumns} chunks={disposedChunks} exact={exact}");
+        }
+
+        if (inspectionFailure is not null && disposalFailure is not null)
+        {
+            throw new AggregateException(inspectionFailure, disposalFailure);
+        }
+        if (inspectionFailure is not null)
+        {
+            throw inspectionFailure;
+        }
+        if (disposalFailure is not null)
+        {
+            throw new InvalidOperationException("L00-C could not dispose every blocking-loaded persisted chunk.", disposalFailure);
+        }
+        return persistedSnapshot ?? throw new InvalidOperationException("L00-C persisted footprint inspection completed without a snapshot.");
+    }
+
+    private List<ChunkCoordinate> BuildProtectedFootprintCoordinates()
+    {
+        var footprint = new List<ChunkCoordinate>();
+        for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
+        {
+            for (int deltaZ = -FixtureProtectionRadius; deltaZ <= FixtureProtectionRadius; deltaZ++)
+            {
+                footprint.Add(new ChunkCoordinate(config.FixtureChunkX + deltaX, config.FixtureChunkZ + deltaZ));
+            }
+        }
+        return footprint;
+    }
+
     private FixtureSnapshot InspectFixture(string phase)
     {
         ICoreServerAPI serverApi = RequireApi();
@@ -1089,8 +1280,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         int chunkSize = serverApi.WorldManager.ChunkSize;
         int worldHeight = serverApi.WorldManager.MapSizeY;
         int chunkCount = worldHeight / chunkSize;
-        var aggregate = new StringBuilder();
-        int inspectedColumns = 0;
+        var columns = new Dictionary<ChunkCoordinate, IServerChunk[]>();
 
         for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
         {
@@ -1113,6 +1303,45 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                     chunk.Unpack_ReadOnly();
                     chunks[chunkY] = chunk;
                 }
+                columns.Add(new ChunkCoordinate(chunkX, chunkZ), chunks);
+            }
+        }
+
+        return InspectProtectionHaloData(phase, columns, chunkSize, worldHeight);
+    }
+
+    private HaloSnapshot InspectProtectionHaloData(
+        string phase,
+        IReadOnlyDictionary<ChunkCoordinate, IServerChunk[]> columns,
+        int chunkSize,
+        int worldHeight)
+    {
+        ICoreServerAPI serverApi = RequireApi();
+        var aggregate = new StringBuilder();
+        int inspectedColumns = 0;
+
+        for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
+        {
+            for (int deltaZ = -FixtureProtectionRadius; deltaZ <= FixtureProtectionRadius; deltaZ++)
+            {
+                if (deltaX == 0 && deltaZ == 0)
+                {
+                    continue;
+                }
+
+                int chunkX = config.FixtureChunkX + deltaX;
+                int chunkZ = config.FixtureChunkZ + deltaZ;
+                var coordinate = new ChunkCoordinate(chunkX, chunkZ);
+                if (!columns.TryGetValue(coordinate, out IServerChunk[]? chunks))
+                {
+                    throw new InvalidOperationException($"L00-C protected halo column ({chunkX},{chunkZ}) is unavailable for inspection.");
+                }
+                int expectedChunkCount = worldHeight / chunkSize;
+                if (chunks.Length != expectedChunkCount)
+                {
+                    throw new InvalidOperationException($"L00-C protected halo column ({chunkX},{chunkZ}) has {chunks.Length} vertical chunks, expected {expectedChunkCount}.");
+                }
+                IMapChunk mapChunk = chunks[0].MapChunk;
 
                 var canonical = new StringBuilder();
                 var blockIds = new HashSet<int>();
@@ -1517,6 +1746,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private readonly record struct OwnedColumnRequest(ChunkCoordinate Coordinate, string Role);
     private sealed record FixtureSnapshot(string Hash, int SolidCount, int FluidCount, int FreshCount, int SaltCount, int UnexpectedCount, ushort YMax);
     private sealed record HaloSnapshot(string Hash, int ColumnCount);
+    private sealed record PersistedFootprintSnapshot(FixtureSnapshot Fixture, HaloSnapshot Halo);
 
     private enum ColumnOwnershipState
     {

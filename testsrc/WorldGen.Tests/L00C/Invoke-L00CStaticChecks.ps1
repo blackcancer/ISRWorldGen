@@ -82,6 +82,12 @@ $required = @(
     'L00C_COLUMN_LOAD_ROLLBACK',
     'L00C_LIGHTING_STABLE',
     'L00C_RESTORE_RESULT',
+    'InspectPersistedFootprintBlocking',
+    'BlockingTestMapChunkExists',
+    'BlockingLoadChunkColumn',
+    'L00C_PERSISTED_REOPEN_STABLE',
+    'chunk.MarkModified()',
+    'mapChunk.MarkDirty()',
     'for (int y = 0; y < worldHeight; y++)',
     'chunk.Unpack_ReadOnly()',
     "canonical.Append(solid).Append(',').Append(fluid)",
@@ -93,6 +99,18 @@ foreach ($fragment in $required) {
     if (-not $source.Contains($fragment)) {
         throw "Required L00-C fragment is missing: $fragment"
     }
+}
+
+$writeStart = $source.IndexOf('private void WriteCanonicalFixture(', [StringComparison]::Ordinal)
+$writeEnd = $source.IndexOf('private bool IsProtectedFixtureRequest(', $writeStart, [StringComparison]::Ordinal)
+if ($writeStart -lt 0 -or $writeEnd -le $writeStart) {
+    throw 'L00-C canonical write method boundary is unavailable.'
+}
+$writeMethod = $source.Substring($writeStart, $writeEnd - $writeStart)
+if ($writeMethod -notmatch 'foreach \(IServerChunk chunk in request\.Chunks\)\s*\{\s*chunk\.MarkModified\(\);\s*\}' -or
+    $writeMethod.IndexOf('chunk.MarkModified()', [StringComparison]::Ordinal) -le $writeMethod.LastIndexOf('SetFluid(', [StringComparison]::Ordinal) -or
+    $writeMethod.IndexOf('mapChunk.MarkDirty()', [StringComparison]::Ordinal) -le $writeMethod.IndexOf('chunk.MarkModified()', [StringComparison]::Ordinal)) {
+    throw 'Canonical voxel writes must mark every rewritten server chunk modified before marking map metadata dirty.'
 }
 
 & dotnet build $projectPath -c $Configuration --nologo

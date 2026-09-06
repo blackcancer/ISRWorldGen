@@ -169,37 +169,46 @@ foreach ($session in @($evidence.Sessions)) {
             "L00C_HANDLERS phase=before instance=$instance ",
             "L00C_HANDLERS phase=after instance=$instance ",
             "L00C_ACTIVATED instance=$instance marker=$marker open=$open isnew=$isNew ",
-            "L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded ",
-            "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks ",
             "L00C_HALO_VALID instance=$instance marker=$marker phase=loaded radius=1 columns=8 ",
-            "L00C_HALO_VALID instance=$instance marker=$marker phase=afterticks radius=1 columns=8 ",
-            "L00C_HALO_STABLE instance=$instance marker=$marker ticks=40 columns=8 ",
-            "L00C_TICKS_STABLE instance=$instance marker=$marker ticks=40 ",
             "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker ",
             'Forced: Shutdown through Server API',
             'World saved!'
         )
+        if ([bool]$session.IsNew) {
+            $requiredPatterns += @(
+                "L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8",
+                "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks ",
+                "L00C_HALO_VALID instance=$instance marker=$marker phase=afterticks radius=1 columns=8 ",
+                "L00C_HALO_STABLE instance=$instance marker=$marker ticks=40 columns=8 ",
+                "L00C_TICKS_STABLE instance=$instance marker=$marker ticks=40 "
+            )
+        }
+        else {
+            $requiredPatterns += @(
+                "L00C_PERSISTED_PRECHECK instance=$instance marker=$marker maps=9 exact=True",
+                "L00C_PERSISTED_COLUMNS_DISPOSED instance=$instance marker=$marker columns=9 chunks=72 exact=True",
+                "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker loadpriority=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0"
+            )
+        }
         foreach ($pattern in $requiredPatterns) {
             if ($log -notmatch $pattern) {
                 throw "Activated session $($session.Cycle) is missing log pattern: $pattern"
             }
         }
-        $haloBeginIndex = $log.IndexOf("L00C_HALO_PREPARE_BEGIN instance=$instance marker=$marker radius=1 columns=8", [StringComparison]::Ordinal)
-        $centerRequestIndex = $log.IndexOf("L00C_COLUMN_REQUEST instance=$instance active=True", [StringComparison]::Ordinal)
-        $haloCompleteIndex = $log.IndexOf("L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8", [StringComparison]::Ordinal)
-        $loadedInspectionIndex = $log.IndexOf("L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded", [StringComparison]::Ordinal)
-        if ($haloBeginIndex -lt 0 -or $centerRequestIndex -le $haloBeginIndex -or $haloCompleteIndex -le $centerRequestIndex -or $loadedInspectionIndex -le $haloCompleteIndex) {
-            throw "Activated session $($session.Cycle) did not atomically request, fully load, and inspect the exact protected footprint in order."
-        }
-        if ($log -notmatch "L00C_TICKS_STABLE instance=$instance .* unexpected=0") {
-            throw "Activated session $($session.Cycle) did not preserve the exact fixture after bounded ticks."
+        if ([bool]$session.IsNew) {
+            $haloBeginIndex = $log.IndexOf("L00C_HALO_PREPARE_BEGIN instance=$instance marker=$marker radius=1 columns=8", [StringComparison]::Ordinal)
+            $centerRequestIndex = $log.IndexOf("L00C_COLUMN_REQUEST instance=$instance active=True", [StringComparison]::Ordinal)
+            $haloCompleteIndex = $log.IndexOf("L00C_HALO_PREPARE_COMPLETE instance=$instance marker=$marker radius=1 columns=8", [StringComparison]::Ordinal)
+            $loadedInspectionIndex = $log.IndexOf("L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded", [StringComparison]::Ordinal)
+            if ($haloBeginIndex -lt 0 -or $centerRequestIndex -le $haloBeginIndex -or $haloCompleteIndex -le $centerRequestIndex -or $loadedInspectionIndex -le $haloCompleteIndex) {
+                throw "New-world session $($session.Cycle) did not atomically request, fully load, and inspect the exact protected footprint in order."
+            }
+            if ($log -notmatch "L00C_TICKS_STABLE instance=$instance .* unexpected=0") {
+                throw "New-world session $($session.Cycle) did not preserve the exact fixture after bounded ticks."
+            }
         }
 
-        $ownedLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_OWNED instance=$instance marker=$marker role=(?:halo|fixture-center) chunk=\(([-0-9]+),([-0-9]+)\) owned=([1-9]).*$")
-        $releaseLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_RELEASE reason=dispose instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) released=([1-9]).*$")
-        Assert-Equal $ownedLines.Count 9 "Session $($session.Cycle) owned KeepLoaded footprint"
-        Assert-Equal $releaseLines.Count 9 "Session $($session.Cycle) released KeepLoaded footprint"
         $expectedCoordinates = @(
             for ($deltaX = -1; $deltaX -le 1; $deltaX++) {
                 for ($deltaZ = -1; $deltaZ -le 1; $deltaZ++) {
@@ -207,31 +216,54 @@ foreach ($session in @($evidence.Sessions)) {
                 }
             }
         ) | Sort-Object
-        $ownedCoordinates = @($ownedLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
-        $releasedCoordinates = @($releaseLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
-        Assert-Equal ($ownedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact owned coordinates"
-        Assert-Equal ($releasedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact released coordinates"
-        Assert-Equal (($ownedLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) ownership sequence"
-        Assert-Equal (($releaseLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) release sequence"
-        if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=9 remainingowned=0 exact=True") {
-            throw "Activated session $($session.Cycle) did not release its exact KeepLoaded footprint during Dispose."
-        }
-        if ($log -notmatch "L00C_COLUMN_PRECONDITION instance=$instance marker=$marker unloaded=9 exact=True" -or
-            $log -notmatch "L00C_COLUMN_LOAD_ACCEPTED instance=$instance marker=$marker columns=9 owned=9 exact=True") {
-            throw "Activated session $($session.Cycle) did not prove an unloaded and atomically accepted 3x3 ownership request."
-        }
-        $stableIndex = $log.IndexOf("L00C_HALO_STABLE instance=$instance", [StringComparison]::Ordinal)
-        $shutdownRequestIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
-        $shutdownPhaseIndex = $log.IndexOf('Entering runphase Shutdown', [StringComparison]::Ordinal)
-        $disposeReleaseIndex = $log.IndexOf("L00C_COLUMN_RELEASE reason=dispose instance=$instance", [StringComparison]::Ordinal)
-        if ($stableIndex -lt 0 -or $shutdownRequestIndex -le $stableIndex -or $shutdownPhaseIndex -le $shutdownRequestIndex -or $disposeReleaseIndex -le $shutdownPhaseIndex -or
-            $log -match "L00C_COLUMN_RELEASE reason=fixture-stable instance=$instance") {
-            throw "Activated session $($session.Cycle) did not retain its KeepLoaded footprint until shutdown Dispose."
-        }
         if ([bool]$session.IsNew) {
+            $ownedLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_OWNED instance=$instance marker=$marker role=(?:halo|fixture-center) chunk=\(([-0-9]+),([-0-9]+)\) owned=([1-9]).*$")
+            $releaseLines = [regex]::Matches($log, "(?m)^.*L00C_COLUMN_RELEASE reason=dispose instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) released=([1-9]).*$")
+            Assert-Equal $ownedLines.Count 9 "Session $($session.Cycle) owned KeepLoaded footprint"
+            Assert-Equal $releaseLines.Count 9 "Session $($session.Cycle) released KeepLoaded footprint"
+            $ownedCoordinates = @($ownedLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
+            $releasedCoordinates = @($releaseLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
+            Assert-Equal ($ownedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact owned coordinates"
+            Assert-Equal ($releasedCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact released coordinates"
+            Assert-Equal (($ownedLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) ownership sequence"
+            Assert-Equal (($releaseLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) release sequence"
+            if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=9 remainingowned=0 exact=True" -or
+                $log -notmatch "L00C_COLUMN_PRECONDITION instance=$instance marker=$marker unloaded=9 exact=True" -or
+                $log -notmatch "L00C_COLUMN_LOAD_ACCEPTED instance=$instance marker=$marker columns=9 owned=9 exact=True") {
+                throw "New-world session $($session.Cycle) lacks its exact KeepLoaded ownership lifecycle."
+            }
+            $stableIndex = $log.IndexOf("L00C_HALO_STABLE instance=$instance", [StringComparison]::Ordinal)
+            $shutdownRequestIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
+            $shutdownPhaseIndex = $log.IndexOf('Entering runphase Shutdown', [StringComparison]::Ordinal)
+            $disposeReleaseIndex = $log.IndexOf("L00C_COLUMN_RELEASE reason=dispose instance=$instance", [StringComparison]::Ordinal)
+            if ($stableIndex -lt 0 -or $shutdownRequestIndex -le $stableIndex -or $shutdownPhaseIndex -le $shutdownRequestIndex -or $disposeReleaseIndex -le $shutdownPhaseIndex -or
+                $log -match "L00C_COLUMN_RELEASE reason=fixture-stable instance=$instance") {
+                throw "New-world session $($session.Cycle) did not retain its KeepLoaded footprint until shutdown Dispose."
+            }
             $generatingSave = [regex]::Match($log, '(?m)^.*Saved [0-9]+ generating chunks.*$')
             if (-not $generatingSave.Success -or $generatingSave.Index -le $shutdownRequestIndex -or $shutdownPhaseIndex -le $generatingSave.Index) {
                 throw "New-world session $($session.Cycle) did not flush generating chunks before shutdown Dispose released the footprint."
+            }
+        }
+        else {
+            $blockingLines = [regex]::Matches($log, "(?m)^.*L00C_PERSISTED_COLUMN_LOADED instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) sequence=([1-9]) chunks=8.*$")
+            Assert-Equal $blockingLines.Count 9 "Session $($session.Cycle) blocking-loaded persisted footprint"
+            $blockingCoordinates = @($blockingLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
+            Assert-Equal ($blockingCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact blocking-loaded coordinates"
+            Assert-Equal (($blockingLines | ForEach-Object { $_.Groups[3].Value }) -join '|') '1|2|3|4|5|6|7|8|9' "Session $($session.Cycle) blocking-load sequence"
+            if ($log -match "L00C_(?:COLUMN_REQUEST|COLUMN_PRECONDITION|COLUMN_OWNED|COLUMN_LOAD_ACCEPTED|FIXTURE_WRITTEN|HANDLER_SUPPRESSED|HALO_NATIVE_FORWARD|LIGHTING_STABLE|TICKS_STABLE|HALO_STABLE) instance=$instance " -or
+                $log -match "L00C_HALO_PREPARE_(?:BEGIN|COMPLETE) instance=$instance ") {
+                throw "Reopen session $($session.Cycle) used a generation, KeepLoaded, fixture-write, or wrapper path."
+            }
+            $precheckIndex = $log.IndexOf("L00C_PERSISTED_PRECHECK instance=$instance", [StringComparison]::Ordinal)
+            $firstBlockingIndex = $log.IndexOf("L00C_PERSISTED_COLUMN_LOADED instance=$instance", [StringComparison]::Ordinal)
+            $loadedInspectionIndex = $log.IndexOf("L00C_FIXTURE_INSPECTED instance=$instance", [StringComparison]::Ordinal)
+            $disposeBlockingIndex = $log.IndexOf("L00C_PERSISTED_COLUMNS_DISPOSED instance=$instance", [StringComparison]::Ordinal)
+            $stableIndex = $log.IndexOf("L00C_PERSISTED_REOPEN_STABLE instance=$instance", [StringComparison]::Ordinal)
+            $shutdownRequestIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
+            if ($precheckIndex -lt 0 -or $firstBlockingIndex -le $precheckIndex -or $loadedInspectionIndex -le $firstBlockingIndex -or
+                $disposeBlockingIndex -le $loadedInspectionIndex -or $stableIndex -le $disposeBlockingIndex -or $shutdownRequestIndex -le $stableIndex) {
+                throw "Reopen session $($session.Cycle) did not precheck, deserialize, inspect, dispose, attest, and shut down in order."
             }
         }
 
@@ -243,18 +275,40 @@ foreach ($session in @($evidence.Sessions)) {
         $beforeInventory = [regex]::Match($beforeLine, ' column=(.*)$').Groups[1].Value.TrimEnd("`r")
         $afterInventory = [regex]::Match($afterLine, ' column=(.*)$').Groups[1].Value.TrimEnd("`r")
         Assert-Equal $beforeInventory $expectedBeforeInventory "Session $($session.Cycle) exact inventory before installation"
-        Assert-Equal $afterInventory $expectedAfterInventory "Session $($session.Cycle) exact per-delegate wrapper inventory"
+        $expectedSessionAfterInventory = if ([bool]$session.IsNew) { $expectedAfterInventory } else { $expectedBeforeInventory }
+        Assert-Equal $afterInventory $expectedSessionAfterInventory "Session $($session.Cycle) exact post-activation inventory"
 
         $loaded = [regex]::Match($log, "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded .* snapshot=([0-9A-F]{64}) .* unexpected=0")
         $afterTicks = [regex]::Match($log, "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=afterticks .* snapshot=([0-9A-F]{64}) .* unexpected=0")
-        if (-not $loaded.Success -or -not $afterTicks.Success) {
-            throw "Activated session $($session.Cycle) lacks exact loaded/afterticks snapshots."
+        if (-not $loaded.Success -or ([bool]$session.IsNew -and -not $afterTicks.Success)) {
+            throw "Activated session $($session.Cycle) lacks its required exact fixture snapshots."
         }
-        Assert-Equal $loaded.Groups[1].Value $afterTicks.Groups[1].Value "Session $($session.Cycle) tick-stable full snapshot"
+        if ([bool]$session.IsNew) {
+            Assert-Equal $loaded.Groups[1].Value $afterTicks.Groups[1].Value "Session $($session.Cycle) tick-stable full snapshot"
+        }
+        elseif ($afterTicks.Success) {
+            throw "Reopen session $($session.Cycle) unexpectedly entered the tick validation path."
+        }
         Assert-Equal $loaded.Groups[1].Value ([string]$evidence.Parameters.FixtureSnapshotSha256) "Session $($session.Cycle) canonical full snapshot"
         $haloLoaded = [regex]::Match($log, "L00C_HALO_VALID instance=$instance marker=$marker phase=loaded radius=1 columns=8 snapshot=([0-9A-F]{64})")
         $haloAfterTicks = [regex]::Match($log, "L00C_HALO_VALID instance=$instance marker=$marker phase=afterticks radius=1 columns=8 snapshot=([0-9A-F]{64})")
-        Assert-Equal $haloLoaded.Groups[1].Value $haloAfterTicks.Groups[1].Value "Session $($session.Cycle) valid/stable first-ring snapshot"
+        if (-not $haloLoaded.Success -or ([bool]$session.IsNew -and -not $haloAfterTicks.Success)) {
+            throw "Activated session $($session.Cycle) lacks its required exact halo snapshots."
+        }
+        if ([bool]$session.IsNew) {
+            Assert-Equal $haloLoaded.Groups[1].Value $haloAfterTicks.Groups[1].Value "Session $($session.Cycle) valid/stable first-ring snapshot"
+        }
+        elseif ($haloAfterTicks.Success) {
+            throw "Reopen session $($session.Cycle) unexpectedly revalidated the halo through ticks."
+        }
+        if (-not [bool]$session.IsNew) {
+            $persistedStable = [regex]::Match($log, "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker loadpriority=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0 center=([0-9A-F]{64}) halo=([0-9A-F]{64})")
+            if (-not $persistedStable.Success) {
+                throw "Reopen session $($session.Cycle) lacks its zero-mutation persisted snapshot attestation."
+            }
+            Assert-Equal $persistedStable.Groups[1].Value $loaded.Groups[1].Value "Session $($session.Cycle) disposed center snapshot attestation"
+            Assert-Equal $persistedStable.Groups[2].Value $haloLoaded.Groups[1].Value "Session $($session.Cycle) disposed halo snapshot attestation"
+        }
         if ($log -notmatch "L00C_FIXTURE_INSPECTED instance=$instance .* solids=67022 fluids=2610 fresh=1350 salt=1260 .* ymax=67 unexpected=0") {
             throw "Activated session $($session.Cycle) does not retain the expected distinct block IDs/counts and height metadata."
         }
@@ -263,14 +317,18 @@ foreach ($session in @($evidence.Sessions)) {
         $expectedWrites = if ([bool]$session.IsNew) { 2 } else { 0 }
         Assert-Equal $writeCount $expectedWrites "Session $($session.Cycle) fixture write count"
         $expectedCallbacks = if ([bool]$session.IsNew) { 1 } else { 0 }
-        if ($log -notmatch "L00C_DISPOSED instance=$instance removedowned=17 restorednative=16 exact=True callbacks=$expectedCallbacks ") {
+        $expectedRemovedOwned = if ([bool]$session.IsNew) { 17 } else { 0 }
+        $expectedRestoredNative = if ([bool]$session.IsNew) { 16 } else { 0 }
+        if ($log -notmatch "L00C_DISPOSED instance=$instance removedowned=$expectedRemovedOwned restorednative=$expectedRestoredNative exact=True callbacks=$expectedCallbacks ") {
             throw "Activated session $($session.Cycle) disposal did not prove exact delegate cleanup/callback ownership."
         }
-        $restoreLine = [regex]::Match($log, "(?m)^.*L00C_RESTORE_RESULT reason=dispose instance=$instance removedowned=17 restorednative=16 exact=True inventory=(.*)$")
-        if (-not $restoreLine.Success) {
-            throw "Activated session $($session.Cycle) lacks its exact post-restoration inventory."
+        if ([bool]$session.IsNew) {
+            $restoreLine = [regex]::Match($log, "(?m)^.*L00C_RESTORE_RESULT reason=dispose instance=$instance removedowned=17 restorednative=16 exact=True inventory=(.*)$")
+            if (-not $restoreLine.Success) {
+                throw "New-world session $($session.Cycle) lacks its exact post-restoration inventory."
+            }
+            Assert-Equal $restoreLine.Groups[1].Value.TrimEnd("`r") $expectedBeforeInventory "Session $($session.Cycle) inventory after restoration"
         }
-        Assert-Equal $restoreLine.Groups[1].Value.TrimEnd("`r") $expectedBeforeInventory "Session $($session.Cycle) inventory after restoration"
 
         if ([bool]$session.IsNew) {
             $preLighting = [regex]::Match($log, "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=prelighting .* snapshot=([0-9A-F]{64}) .* unexpected=0")
@@ -292,12 +350,12 @@ foreach ($session in @($evidence.Sessions)) {
         throw "Unknown WorldRole: $($session.WorldRole)"
     }
 
-    $expectedDisposeRelease = if ($session.WorldRole -like 'activated-*') { 9 } else { 0 }
+    $expectedDisposeRelease = if ($session.WorldRole -like 'activated-*' -and [bool]$session.IsNew) { 9 } else { 0 }
     if ($log -notmatch "L00C_COLUMN_RELEASE_RESULT reason=dispose instance=$instance released=$expectedDisposeRelease remainingowned=0 exact=True") {
         throw "Session $($session.Cycle) disposal did not prove its exact terminal KeepLoaded release."
     }
     $successfulReleaseCount = [regex]::Matches($log, "L00C_COLUMN_RELEASE reason=").Count
-    $expectedReleaseCount = if ($session.WorldRole -like 'activated-*') { 9 } else { 0 }
+    $expectedReleaseCount = if ($session.WorldRole -like 'activated-*' -and [bool]$session.IsNew) { 9 } else { 0 }
     Assert-Equal $successfulReleaseCount $expectedReleaseCount "Session $($session.Cycle) total successful release count"
 
     Assert-Equal $session.DebuggerFinalMode 'Design' "Session $($session.Cycle) debugger final mode"
@@ -360,6 +418,24 @@ for ($index = 0; $index -lt $orderedPrimary.Count; $index++) {
 $primaryMarkers = @($cycleSessions | Select-Object -ExpandProperty MarkerId -Unique)
 if ($primaryMarkers.Count -ne 1) {
     throw 'The five primary cycles must reload the same persistent marker.'
+}
+
+$primaryCenterSnapshots = [Collections.Generic.List[string]]::new()
+$primaryHaloSnapshots = [Collections.Generic.List[string]]::new()
+foreach ($session in $cycleSessions) {
+    $sessionIndex = [Array]::IndexOf($allSessions, $session)
+    $cycleLog = Get-Content -LiteralPath $sessionLogPaths[$sessionIndex] -Raw
+    $cycleInstance = [regex]::Escape([string]$session.InstanceId)
+    $centerMatch = [regex]::Match($cycleLog, "L00C_FIXTURE_INSPECTED instance=$cycleInstance .* phase=loaded .* snapshot=([0-9A-F]{64})")
+    $haloMatch = [regex]::Match($cycleLog, "L00C_HALO_VALID instance=$cycleInstance .* phase=loaded radius=1 columns=8 snapshot=([0-9A-F]{64})")
+    if (-not $centerMatch.Success -or -not $haloMatch.Success) {
+        throw "Primary cycle $($session.Cycle) lacks persisted footprint fingerprints."
+    }
+    [void]$primaryCenterSnapshots.Add($centerMatch.Groups[1].Value)
+    [void]$primaryHaloSnapshots.Add($haloMatch.Groups[1].Value)
+}
+if (@($primaryCenterSnapshots | Select-Object -Unique).Count -ne 1 -or @($primaryHaloSnapshots | Select-Object -Unique).Count -ne 1) {
+    throw 'The complete center/halo fingerprints drifted across the five primary opens.'
 }
 
 $processIds = @($evidence.Sessions | Select-Object -ExpandProperty ProcessId -Unique)

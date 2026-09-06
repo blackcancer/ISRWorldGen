@@ -26,7 +26,15 @@ $requiredSourceFragments = @(
     'L00C_COLUMN_RELEASE',
     'remainingowned=',
     'IsCurrentRun',
-    'L00C_WITNESS_NO_REQUEST'
+    'L00C_WITNESS_NO_REQUEST',
+    'InspectPersistedFootprintBlocking',
+    'BlockingTestMapChunkExists',
+    'BlockingLoadChunkColumn',
+    'L00C_PERSISTED_COLUMNS_DISPOSED',
+    'priorityLoadInvocationCount',
+    'keepLoadedColumnRequestCount',
+    'ownedColumnUnloadCount',
+    'fixtureWriteCount'
 )
 foreach ($fragment in $requiredSourceFragments) {
     if (-not $source.Contains($fragment)) {
@@ -69,12 +77,40 @@ if ([regex]::Matches($source, '\.LoadChunkColumnPriority\(').Count -ne 1 -or
     [regex]::Matches($source, 'KeepLoaded = true').Count -ne 1) {
     throw 'All KeepLoaded requests and releases must pass through the sole production ownership helpers.'
 }
+$priorityCounterIndex = $source.IndexOf('Interlocked.Increment(ref priorityLoadInvocationCount)', [StringComparison]::Ordinal)
+$priorityCallIndex = $source.IndexOf('worldManager.LoadChunkColumnPriority(', [StringComparison]::Ordinal)
+$keepCounterIndex = $source.IndexOf('Interlocked.Add(ref keepLoadedColumnRequestCount, requests.Count)', [StringComparison]::Ordinal)
+$unloadCallIndex = $source.IndexOf('worldManager!.UnloadChunkColumn(', [StringComparison]::Ordinal)
+$unloadCounterIndex = $source.IndexOf('Interlocked.Increment(ref ownedColumnUnloadCount)', $unloadCallIndex, [StringComparison]::Ordinal)
+if ($priorityCounterIndex -lt 0 -or $keepCounterIndex -lt 0 -or $priorityCallIndex -le $priorityCounterIndex -or
+    $priorityCallIndex -le $keepCounterIndex -or $unloadCallIndex -lt 0 -or $unloadCounterIndex -le $unloadCallIndex) {
+    throw 'Production counters do not reflect actual priority, KeepLoaded, and Unload API calls.'
+}
 if ($source.Contains('ownedLoadedColumns.Clear()')) {
     throw 'Owned coordinates must never be forgotten without an exact UnloadChunkColumn call.'
 }
 if ($source.Contains('InspectWitness') -or $source.Contains('role=inactive-witness') -or
     $source -match 'L00C_INACTIVE[^}]+ScheduleProbeColumn') {
     throw 'An inactive world still contains a probe-driven chunk request or inspection path.'
+}
+$persistedStart = $source.IndexOf('private PersistedFootprintSnapshot InspectPersistedFootprintBlocking()', [StringComparison]::Ordinal)
+$persistedEnd = $source.IndexOf('private List<ChunkCoordinate> BuildProtectedFootprintCoordinates()', $persistedStart, [StringComparison]::Ordinal)
+if ($persistedStart -lt 0 -or $persistedEnd -le $persistedStart) {
+    throw 'Blocking persisted-footprint method boundary is unavailable.'
+}
+$persistedMethod = $source.Substring($persistedStart, $persistedEnd - $persistedStart)
+$existsIndex = $persistedMethod.IndexOf('BlockingTestMapChunkExists(', [StringComparison]::Ordinal)
+$loadIndex = $persistedMethod.IndexOf('BlockingLoadChunkColumn(', [StringComparison]::Ordinal)
+$finallyIndex = $persistedMethod.IndexOf('finally', [StringComparison]::Ordinal)
+$disposeIndex = $persistedMethod.IndexOf('chunk.Dispose()', [StringComparison]::Ordinal)
+$disposedLogIndex = $persistedMethod.IndexOf('L00C_PERSISTED_COLUMNS_DISPOSED', [StringComparison]::Ordinal)
+if ($existsIndex -lt 0 -or $loadIndex -le $existsIndex -or $finallyIndex -le $loadIndex -or
+    $disposeIndex -le $finallyIndex -or $disposedLogIndex -le $disposeIndex -or
+    $source -notmatch 'L00C_PERSISTED_REOPEN_STABLE') {
+    throw 'Blocking-loaded persisted chunks are not deterministically disposed and attested.'
+}
+if ($persistedMethod -match 'LoadChunkColumnPriority|KeepLoaded|UnloadChunkColumn|WriteCanonicalFixture|ApplyTargetedReplacement') {
+    throw 'Marker-backed reopen must be a deserialize/inspect/dispose-only path.'
 }
 $initializeStart = $source.IndexOf('private void InitializeWorld()', [StringComparison]::Ordinal)
 $runInvalidation = $source.IndexOf('Interlocked.Increment(ref worldRunId)', $initializeStart, [StringComparison]::Ordinal)
@@ -135,6 +171,17 @@ $preloadedUnloads = [Collections.Generic.List[string]]::new()
 $preloadedResult = Invoke-LoadModel $preloadedStates $modelCoordinates $preloaded -UnloadCalls $preloadedUnloads
 if ($preloadedResult -ne 'preexisting-rejected' -or $preloadedStates.Count -ne 0 -or $preloadedUnloads.Count -ne 0) {
     throw 'A preloaded/no-effect column was incorrectly claimed or unloaded.'
+}
+
+$persistedMapExistenceChecks = $modelCoordinates.Count
+$persistedBlockingLoads = $modelCoordinates.Count
+$persistedBlockingChunkDisposals = $modelCoordinates.Count * 8
+$persistedPriorityLoads = 0
+$persistedKeepLoadedRequests = 0
+$persistedUnloads = 0
+if ($persistedMapExistenceChecks -ne 9 -or $persistedBlockingLoads -ne 9 -or $persistedBlockingChunkDisposals -ne 72 -or
+    $persistedPriorityLoads -ne 0 -or $persistedKeepLoadedRequests -ne 0 -or $persistedUnloads -ne 0) {
+    throw 'Marker-backed reopen model did not stay on the blocking deserialize-only path.'
 }
 
 $emptyPreloaded = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -268,4 +315,10 @@ if ($releasedOnRetry -ne 1 -or $retryOwned.Count -ne 0) {
     LatePriorWorldCallbackInvocationCount = $lateCallbackInvocationCount
     StaleFailureReleaseCount = $staleFailureReleaseCount
     StaleFailureShutdownCount = $staleFailureShutdownCount
+    PersistedMapExistenceChecks = $persistedMapExistenceChecks
+    PersistedBlockingLoads = $persistedBlockingLoads
+    PersistedBlockingChunkDisposals = $persistedBlockingChunkDisposals
+    PersistedPriorityLoads = $persistedPriorityLoads
+    PersistedKeepLoadedRequests = $persistedKeepLoadedRequests
+    PersistedUnloads = $persistedUnloads
 } | ConvertTo-Json -Depth 4
