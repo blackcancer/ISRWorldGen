@@ -16,7 +16,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private const string WorldType = "standard";
     private const string ConfigFileName = "isrworldgen-l00c.json";
     private const string MarkerKey = "isrworldgen:l00c:marker:v1";
-    private const string MarkerVersion = "l00c-flat-v1";
+    private const string MarkerVersion = "l00c-flat-v2-map-snapshot";
     private const int StableTickTarget = 40;
     private const int FixtureProtectionRadius = 1;
     private const string LightingAnchorType = "Vintagestory.ServerMods.GenLightSurvival";
@@ -63,6 +63,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private int transientColumnRequestCount;
     private int footprintRefreshInvocationCount;
     private int refreshedMapChunkCount;
+    private int mapSnapshotWriteCount;
     private int requestIssued;
     private int shutdownIssued;
     private int disposalStarted;
@@ -119,6 +120,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         transientColumnRequestCount = 0;
         footprintRefreshInvocationCount = 0;
         refreshedMapChunkCount = 0;
+        mapSnapshotWriteCount = 0;
         requestIssued = 0;
         shutdownIssued = 0;
         stableTickCount = 0;
@@ -187,7 +189,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ValidateReplacementPreconditions(handlers);
         ResolveMaterials();
         ApplyTargetedReplacement(handlers);
-        markerPublication.Commit(payload => saveGame.StoreData(MarkerKey, payload));
         active = true;
 
         LogInventory("after", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
@@ -445,18 +446,19 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             int refreshPasses = Volatile.Read(ref footprintRefreshInvocationCount);
             int refreshedMapChunks = Volatile.Read(ref refreshedMapChunkCount);
             int fixtureWrites = Volatile.Read(ref fixtureWriteCount);
+            int mapSnapshotWrites = Volatile.Read(ref mapSnapshotWriteCount);
             bool transientPending = transientLoadCallbacks.PendingCount != 0;
             if (!active || requestIssued != 0 || fixtureCallbackCount != 0 || fixtureWrites != 0 ||
                 priorityLoads != 0 || transientRequests != 0 || refreshPasses != 0 || refreshedMapChunks != 0 ||
-                transientPending || ownershipState is not null)
+                mapSnapshotWrites != 0 || transientPending || ownershipState is not null)
             {
                 throw HandleAsynchronousFailure(
                     runId,
                     "persisted-reopen-state-error",
-                    new InvalidOperationException($"L00-C persisted reopen mutated generation state: active={active}, requests={requestIssued}, callbacks={fixtureCallbackCount}, writes={fixtureWrites}, priorityloads={priorityLoads}, transientrequests={transientRequests}, refreshpasses={refreshPasses}, refreshedmapchunks={refreshedMapChunks}, transientpending={transientPending}, handlersowned={ownershipState is not null}."));
+                    new InvalidOperationException($"L00-C persisted reopen mutated generation state: active={active}, requests={requestIssued}, callbacks={fixtureCallbackCount}, writes={fixtureWrites}, mapsnapshotwrites={mapSnapshotWrites}, priorityloads={priorityLoads}, transientrequests={transientRequests}, refreshpasses={refreshPasses}, refreshedmapchunks={refreshedMapChunks}, transientpending={transientPending}, handlersowned={ownershipState is not null}."));
             }
 
-            Log($"L00C_PERSISTED_REOPEN_STABLE instance={instanceId} marker={marker!.MarkerId} run={runId} loadpriority={priorityLoads} transientrequests={transientRequests} refreshpasses={refreshPasses} refreshedmapchunks={refreshedMapChunks} keeploaded=0 unload=0 fixturewrites={fixtureWrites} callbacks={fixtureCallbackCount} center={persistedSnapshot.Fixture.Hash} halo={persistedSnapshot.Halo.Hash}");
+            Log($"L00C_PERSISTED_REOPEN_STABLE instance={instanceId} marker={marker!.MarkerId} run={runId} loadpriority={priorityLoads} transientrequests={transientRequests} refreshpasses={refreshPasses} refreshedmapchunks={refreshedMapChunks} keeploaded=0 unload=0 fixturewrites={fixtureWrites} mapsnapshotwrites={mapSnapshotWrites} callbacks={fixtureCallbackCount} center={persistedSnapshot.Fixture.Hash} halo={persistedSnapshot.Halo.Hash}");
             RequestShutdownIfConfigured("persisted-reopen-stable");
         }
     }
@@ -791,7 +793,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         WriteCanonicalFixture(request, "prelighting");
         int chunkSize = RequireApi().WorldManager.ChunkSize;
         int worldHeight = request.Chunks.Length * chunkSize;
-        FixtureSnapshot snapshot = InspectFixtureData("prelighting", request.Chunks, request.Chunks[0].MapChunk, chunkSize, worldHeight);
+        PersistedMapChunkSnapshot mapSnapshot = PersistedMapChunkSnapshot.Capture(request.ChunkX, request.ChunkZ, request.Chunks[0].MapChunk);
+        FixtureSnapshot snapshot = InspectFixtureData("prelighting", request.Chunks, mapSnapshot, chunkSize, worldHeight);
         Volatile.Write(ref preLightingSnapshot, snapshot);
     }
 
@@ -1027,6 +1030,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 throw new InvalidOperationException($"L00-C transient lifecycle counters diverged: loadpriority={priorityLoads}, transientrequests={transientRequests}, refreshpasses={refreshPasses}, refreshedmapchunks={refreshedMapChunks}.");
             }
             Log($"L00C_TRANSIENT_LIFECYCLE_STABLE instance={instanceId} marker={marker!.MarkerId} loadpriority={priorityLoads} transientrequests={transientRequests} refreshpasses={refreshPasses} refreshedmapchunks={refreshedMapChunks} keeploaded=0 unload=0");
+            marker.MapFootprint = CaptureCurrentMapFootprint();
+            markerPublication.Commit(payload => RequireApi().WorldManager.SaveGame.StoreData(MarkerKey, payload));
+            int mapSnapshotWrites = Interlocked.Increment(ref mapSnapshotWriteCount);
+            Log($"L00C_MAP_SNAPSHOT_COMMITTED instance={instanceId} marker={marker.MarkerId} maps={marker.MapFootprint.MapChunks.Count} checksum={marker.MapFootprint.ContentSha256} writes={mapSnapshotWrites}");
             initialSnapshot = null;
             initialHaloSnapshot = null;
             RequestShutdownIfConfigured("fixture-stable");
@@ -1062,6 +1069,20 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         int chunkSize = worldManager.ChunkSize;
         int worldHeight = worldManager.MapSizeY;
+        PersistedMapFootprintSnapshot mapFootprint = marker.MapFootprint
+            ?? throw new InvalidOperationException("L00-C persistent marker does not contain the required bounded map snapshot.");
+        IReadOnlyDictionary<string, PersistedMapChunkSnapshot> mapSnapshots = mapFootprint.ValidateAndCopy(
+            marker.MarkerId,
+            worldManager.SaveGame.SavegameIdentifier,
+            config.FixtureChunkX,
+            config.FixtureChunkZ,
+            chunkSize,
+            worldHeight);
+        foreach (ChunkCoordinate coordinate in footprint)
+        {
+            PersistedMapChunkSnapshot mapSnapshot = mapSnapshots[PersistedMapFootprintSnapshot.CoordinateKey(coordinate.X, coordinate.Z)];
+            Log($"L00C_PERSISTED_MAP_SNAPSHOT_LOADED instance={instanceId} marker={marker.MarkerId} chunk=({coordinate.X},{coordinate.Z}) ymax={mapSnapshot.YMax} checksum={mapFootprint.ContentSha256}");
+        }
         int expectedChunksPerColumn = worldHeight / chunkSize;
         var loadedColumns = new Dictionary<ChunkCoordinate, IServerChunk[]>();
         PersistedFootprintSnapshot? persistedSnapshot = null;
@@ -1095,8 +1116,13 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
             var center = new ChunkCoordinate(config.FixtureChunkX, config.FixtureChunkZ);
             IServerChunk[] centerChunks = loadedColumns[center];
-            FixtureSnapshot fixture = InspectFixtureData("loaded", centerChunks, centerChunks[0].MapChunk, chunkSize, worldHeight);
-            HaloSnapshot halo = InspectProtectionHaloData("loaded", loadedColumns, chunkSize, worldHeight);
+            FixtureSnapshot fixture = InspectFixtureData(
+                "loaded",
+                centerChunks,
+                mapSnapshots[PersistedMapFootprintSnapshot.CoordinateKey(center.X, center.Z)],
+                chunkSize,
+                worldHeight);
+            HaloSnapshot halo = InspectProtectionHaloData("loaded", loadedColumns, mapSnapshots, chunkSize, worldHeight);
             persistedSnapshot = new PersistedFootprintSnapshot(fixture, halo);
         }
         catch (Exception exception)
@@ -1153,6 +1179,27 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         return persistedSnapshot ?? throw new InvalidOperationException("L00-C persisted footprint inspection completed without a snapshot.");
     }
 
+    private PersistedMapFootprintSnapshot CaptureCurrentMapFootprint()
+    {
+        ICoreServerAPI serverApi = RequireApi();
+        var mapSnapshots = new List<PersistedMapChunkSnapshot>();
+        foreach (ChunkCoordinate coordinate in BuildProtectedFootprintCoordinates())
+        {
+            IMapChunk mapChunk = serverApi.WorldManager.GetMapChunk(coordinate.X, coordinate.Z)
+                ?? throw new InvalidOperationException($"L00-C cannot capture unloaded map chunk ({coordinate.X},{coordinate.Z}) after stable validation.");
+            mapSnapshots.Add(PersistedMapChunkSnapshot.Capture(coordinate.X, coordinate.Z, mapChunk));
+        }
+
+        return PersistedMapFootprintSnapshot.Create(
+            marker!.MarkerId,
+            serverApi.WorldManager.SaveGame.SavegameIdentifier,
+            config.FixtureChunkX,
+            config.FixtureChunkZ,
+            serverApi.WorldManager.ChunkSize,
+            serverApi.WorldManager.MapSizeY,
+            mapSnapshots);
+    }
+
     private List<ChunkCoordinate> BuildProtectedFootprintCoordinates()
     {
         var footprint = new List<ChunkCoordinate>();
@@ -1183,7 +1230,12 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             chunks[chunkY] = chunk;
         }
 
-        return InspectFixtureData(phase, chunks, mapChunk, chunkSize, worldHeight);
+        return InspectFixtureData(
+            phase,
+            chunks,
+            PersistedMapChunkSnapshot.Capture(config.FixtureChunkX, config.FixtureChunkZ, mapChunk),
+            chunkSize,
+            worldHeight);
     }
 
     private HaloSnapshot InspectProtectionHalo(string phase)
@@ -1193,6 +1245,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         int worldHeight = serverApi.WorldManager.MapSizeY;
         int chunkCount = worldHeight / chunkSize;
         var columns = new Dictionary<ChunkCoordinate, IServerChunk[]>();
+        var mapSnapshots = new Dictionary<string, PersistedMapChunkSnapshot>(StringComparer.Ordinal);
 
         for (int deltaX = -FixtureProtectionRadius; deltaX <= FixtureProtectionRadius; deltaX++)
         {
@@ -1207,6 +1260,9 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 int chunkZ = config.FixtureChunkZ + deltaZ;
                 IMapChunk mapChunk = serverApi.WorldManager.GetMapChunk(chunkX, chunkZ)
                     ?? throw new InvalidOperationException($"L00-C protected halo map chunk ({chunkX},{chunkZ}) is not loaded.");
+                mapSnapshots.Add(
+                    PersistedMapFootprintSnapshot.CoordinateKey(chunkX, chunkZ),
+                    PersistedMapChunkSnapshot.Capture(chunkX, chunkZ, mapChunk));
                 var chunks = new IServerChunk[chunkCount];
                 for (int chunkY = 0; chunkY < chunkCount; chunkY++)
                 {
@@ -1219,12 +1275,13 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             }
         }
 
-        return InspectProtectionHaloData(phase, columns, chunkSize, worldHeight);
+        return InspectProtectionHaloData(phase, columns, mapSnapshots, chunkSize, worldHeight);
     }
 
     private HaloSnapshot InspectProtectionHaloData(
         string phase,
         IReadOnlyDictionary<ChunkCoordinate, IServerChunk[]> columns,
+        IReadOnlyDictionary<string, PersistedMapChunkSnapshot> mapSnapshots,
         int chunkSize,
         int worldHeight)
     {
@@ -1253,7 +1310,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 {
                     throw new InvalidOperationException($"L00-C protected halo column ({chunkX},{chunkZ}) has {chunks.Length} vertical chunks, expected {expectedChunkCount}.");
                 }
-                IMapChunk mapChunk = chunks[0].MapChunk;
+                PersistedMapChunkSnapshot mapChunk = mapSnapshots[PersistedMapFootprintSnapshot.CoordinateKey(chunkX, chunkZ)];
 
                 var canonical = new StringBuilder();
                 var blockIds = new HashSet<int>();
@@ -1317,7 +1374,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private FixtureSnapshot InspectFixtureData(
         string phase,
         IReadOnlyList<IServerChunk> chunks,
-        IMapChunk mapChunk,
+        PersistedMapChunkSnapshot mapChunk,
         int chunkSize,
         int worldHeight)
     {
@@ -1719,7 +1776,8 @@ internal sealed class MarkerPublicationGate
             MarkerId = source.MarkerId,
             SavegameIdentifier = source.SavegameIdentifier,
             Version = source.Version,
-            OpenCount = source.OpenCount
+            OpenCount = source.OpenCount,
+            MapFootprint = source.MapFootprint?.DeepCopy()
         };
         return candidate;
     }
@@ -1772,6 +1830,7 @@ internal sealed class ProbeMarker
     public string SavegameIdentifier { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public int OpenCount { get; set; }
+    public PersistedMapFootprintSnapshot? MapFootprint { get; set; }
 }
 
 internal sealed class L00CProbeConfig

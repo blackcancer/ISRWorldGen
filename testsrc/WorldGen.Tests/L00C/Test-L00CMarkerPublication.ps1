@@ -18,7 +18,9 @@ foreach ($dependency in @('VintagestoryAPI.dll', 'VintagestoryLib.dll')) {
 $assembly = [Reflection.Assembly]::LoadFrom($assemblyPath)
 $gateType = $assembly.GetType('ISRWorldGen.WorldgenProbe.MarkerPublicationGate', $false)
 $markerType = $assembly.GetType('ISRWorldGen.WorldgenProbe.ProbeMarker', $false)
-if ($null -eq $gateType -or $null -eq $markerType) {
+$footprintType = $assembly.GetType('ISRWorldGen.WorldgenProbe.PersistedMapFootprintSnapshot', $false)
+$mapType = $assembly.GetType('ISRWorldGen.WorldgenProbe.PersistedMapChunkSnapshot', $false)
+if ($null -eq $gateType -or $null -eq $markerType -or $null -eq $footprintType -or $null -eq $mapType) {
     throw 'The Debug assembly does not expose the production marker publication component.'
 }
 
@@ -32,14 +34,35 @@ foreach ($member in @($beginMethod, $beginWorldTransitionMethod, $resetMethod, $
     if ($null -eq $member) { throw 'The production marker publication component contract is incomplete.' }
 }
 
+function New-MapFootprint {
+    $listType = [Collections.Generic.List``1].MakeGenericType($mapType)
+    $maps = [Activator]::CreateInstance($listType)
+    for ($x = 31989; $x -le 31991; $x++) {
+        for ($z = 31989; $z -le 31991; $z++) {
+            $map = [Activator]::CreateInstance($mapType)
+            $mapType.GetProperty('X').SetValue($map, $x)
+            $mapType.GetProperty('Z').SetValue($map, $z)
+            $mapType.GetProperty('WorldGenTerrainHeightMap').SetValue($map, [ushort[]](1..1024 | ForEach-Object { 64 }))
+            $mapType.GetProperty('RainHeightMap').SetValue($map, [ushort[]](1..1024 | ForEach-Object { 67 }))
+            $mapType.GetProperty('TopRockIdMap').SetValue($map, [int[]](1..1024 | ForEach-Object { 11165 }))
+            $mapType.GetProperty('YMax').SetValue($map, [ushort]67)
+            [void]$maps.Add($map)
+        }
+    }
+    return $footprintType.GetMethod('Create').Invoke($null, @('marker-a', 'save-a', 31990, 31990, 32, 256, $maps))
+}
+
 function New-Marker {
-    param([int]$OpenCount)
+    param([int]$OpenCount, [switch]$WithMapFootprint)
 
     $marker = [Activator]::CreateInstance($markerType)
     $markerType.GetProperty('MarkerId').SetValue($marker, 'marker-a')
     $markerType.GetProperty('SavegameIdentifier').SetValue($marker, 'save-a')
-    $markerType.GetProperty('Version').SetValue($marker, 'l00c-flat-v1')
+    $markerType.GetProperty('Version').SetValue($marker, 'l00c-flat-v2-map-snapshot')
     $markerType.GetProperty('OpenCount').SetValue($marker, $OpenCount)
+    if ($WithMapFootprint) {
+        $markerType.GetProperty('MapFootprint').SetValue($marker, (New-MapFootprint))
+    }
     return $marker
 }
 
@@ -103,10 +126,22 @@ if (-not $storeThrew -or [bool]$committedProperty.GetValue($throwGate) -or $post
 }
 
 $successGate = [Activator]::CreateInstance($gateType)
-$successSource = New-Marker 4
+$successSource = New-Marker 4 -WithMapFootprint
 $successCandidate = $beginMethod.Invoke($successGate, @($successSource))
 if ([object]::ReferenceEquals($successSource, $successCandidate)) {
     throw 'Begin returned the persisted marker reference instead of an isolated candidate copy.'
+}
+$sourceFootprint = $markerType.GetProperty('MapFootprint').GetValue($successSource)
+$candidateFootprint = $markerType.GetProperty('MapFootprint').GetValue($successCandidate)
+if ($null -eq $sourceFootprint -or $null -eq $candidateFootprint -or [object]::ReferenceEquals($sourceFootprint, $candidateFootprint)) {
+    throw 'Begin did not preserve the marker-bound map footprint as an isolated copy.'
+}
+$sourceMaps = $footprintType.GetProperty('MapChunks').GetValue($sourceFootprint)
+$sourceTerrain = [ushort[]]$mapType.GetProperty('WorldGenTerrainHeightMap').GetValue($sourceMaps[0])
+$sourceTerrain[0] = 1
+$candidateCopies = $footprintType.GetMethod('ValidateAndCopy').Invoke($candidateFootprint, @('marker-a', 'save-a', 31990, 31990, 32, 256))
+if ([int]$candidateCopies.Count -ne 9) {
+    throw 'Begin retained a shared map array or lost part of the exact marker-bound footprint.'
 }
 $markerType.GetProperty('OpenCount').SetValue($successCandidate, 5)
 $storedPayloads = [Collections.Generic.List[byte[]]]::new()
@@ -127,7 +162,12 @@ $secondJson = [Text.Json.JsonDocument]::Parse([string]$secondJsonText)
 try {
     $firstOpenCount = $firstJson.RootElement.GetProperty('OpenCount').GetInt32()
     $secondOpenCount = $secondJson.RootElement.GetProperty('OpenCount').GetInt32()
+    $firstMapFootprint = $firstJson.RootElement.GetProperty('MapFootprint')
+    $secondMapFootprint = $secondJson.RootElement.GetProperty('MapFootprint')
     if ($firstOpenCount -ne 5 -or $secondOpenCount -ne 5 -or
+        $firstMapFootprint.GetProperty('MapChunks').GetArrayLength() -ne 9 -or
+        $secondMapFootprint.GetProperty('MapChunks').GetArrayLength() -ne 9 -or
+        $firstMapFootprint.GetProperty('ContentSha256').GetString() -ne $secondMapFootprint.GetProperty('ContentSha256').GetString() -or
         [Convert]::ToHexString($storedPayloads[0]) -ne [Convert]::ToHexString($storedPayloads[1])) {
         throw 'Committed marker payload drifted between activation and GameWorldSave persistence.'
     }
@@ -183,6 +223,7 @@ if (-not $cleanupThrew -or $currentWorldSaved -or $script:currentWorldStoreCalls
     PreviousMarkerOpenCount = Get-OpenCount $successSource
     CommittedMarkerOpenCount = 5
     SuccessfulStoreCalls = $storedPayloads.Count
+    MarkerBoundMapCopies = [int]$candidateCopies.Count
     PriorWorldInitialStoreCalls = $script:priorWorldStoreCalls
     CurrentWorldStoreCallsAfterCleanupFailure = $script:currentWorldStoreCalls
 } | ConvertTo-Json -Depth 4

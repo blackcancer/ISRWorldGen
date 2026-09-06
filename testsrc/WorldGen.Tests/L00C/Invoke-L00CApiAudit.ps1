@@ -9,10 +9,12 @@ $ErrorActionPreference = 'Stop'
 
 $apiPath = Join-Path $GamePath 'VintagestoryAPI.dll'
 $apiXmlPath = Join-Path $GamePath 'VintagestoryAPI.xml'
+$libPath = Join-Path $GamePath 'VintagestoryLib.dll'
+$cecilPath = Join-Path $GamePath 'Lib\Mono.Cecil.dll'
 $essentialsPath = Join-Path $GamePath 'Mods\VSEssentials.dll'
 $survivalPath = Join-Path $GamePath 'Mods\VSSurvivalMod.dll'
 
-foreach ($path in @($apiPath, $apiXmlPath, $essentialsPath, $survivalPath)) {
+foreach ($path in @($apiPath, $apiXmlPath, $libPath, $cecilPath, $essentialsPath, $survivalPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required local assembly is missing: $path"
     }
@@ -92,8 +94,12 @@ $passType = Require-Type $api 'Vintagestory.API.Server.EnumWorldGenPass'
 [void](Require-Method $server 'ShutDown' @())
 $blockingExists = Require-Method $worldManager 'BlockingTestMapChunkExists' @('System.Int32', 'System.Int32')
 $blockingLoad = Require-Method $worldManager 'BlockingLoadChunkColumn' @('System.Int32', 'System.Int32')
+$getMapChunk = Require-Method $worldManager 'GetMapChunk' @('System.Int32', 'System.Int32')
 if ($blockingExists.ReturnType.FullName -ne 'System.Boolean' -or $blockingLoad.ReturnType.FullName -ne 'Vintagestory.API.Server.IServerChunk[]') {
     throw 'Blocking persisted-column API return types drifted.'
+}
+if ($getMapChunk.ReturnType.FullName -ne 'Vintagestory.API.Common.IServerMapChunk') {
+    throw 'GetMapChunk return type drifted.'
 }
 [void](Require-Method $worldChunk 'MarkModified' @())
 [void](Require-Method $worldChunk 'Dispose' @())
@@ -109,6 +115,7 @@ $transientColumnSignatures = @(
     'M:Vintagestory.API.Server.IWorldManagerAPI.LoadChunkColumnPriority(System.Int32,System.Int32,System.Int32,System.Int32,Vintagestory.API.Server.ChunkLoadOptions)',
     'M:Vintagestory.API.Server.IWorldManagerAPI.BlockingTestMapChunkExists(System.Int32,System.Int32)'
     'M:Vintagestory.API.Server.IWorldManagerAPI.BlockingLoadChunkColumn(System.Int32,System.Int32)'
+    'M:Vintagestory.API.Server.IWorldManagerAPI.GetMapChunk(System.Int32,System.Int32)'
     'M:Vintagestory.API.Common.IWorldChunk.MarkModified'
     'M:Vintagestory.API.Common.IMapChunk.MarkFresh'
     'M:Vintagestory.API.Common.IMapChunk.MarkDirty'
@@ -124,6 +131,8 @@ foreach ($fragment in @(
     'BlockingLoadChunkColumn(System.Int32,System.Int32)">',
     'only loads and deserializes the chunk data',
     'you need to call .Dispose() after you do not need them anymore',
+    'Gets the Server map chunk at given coordinate. Returns null if it''s not loaded or does not exist yet',
+    'Generates a chunk at a given coordinate from scratch without keeping it in the list of loaded chunks.',
     'Causes the TTL counter to reset so that it the mapchunk does not unload',
     'stored to disk on the next autosave or during shutdown',
     'Tells the server that it has to save the changes of this chunk to disk'
@@ -131,6 +140,40 @@ foreach ($fragment in @(
     if (-not $apiXml.Contains($fragment)) {
         throw "Blocking persisted-column API contract text is missing: $fragment"
     }
+}
+
+[void][Reflection.Assembly]::LoadFrom($cecilPath)
+$lib = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($libPath)
+function Require-CecilType([string]$Name) {
+    $type = $lib.MainModule.Types | Where-Object FullName -eq $Name | Select-Object -First 1
+    if ($null -eq $type) { throw "Required implementation type is missing: $Name" }
+    return $type
+}
+function Require-CecilMethod($Type, [string]$Name, [int]$ParameterCount) {
+    $method = $Type.Methods | Where-Object { $_.Name -eq $Name -and $_.Parameters.Count -eq $ParameterCount } | Select-Object -First 1
+    if ($null -eq $method -or -not $method.HasBody) { throw "Required implementation method is missing: $($Type.FullName).$Name/$ParameterCount" }
+    return $method
+}
+function Get-CecilBodyText($Method) {
+    return (($Method.Body.Instructions | ForEach-Object { "$($_.OpCode) $($_.Operand)" }) -join "`n")
+}
+
+$worldApiImplementation = Require-CecilType 'Vintagestory.Server.WorldAPI'
+$serverMainImplementation = Require-CecilType 'Vintagestory.Server.ServerMain'
+$supplyImplementation = Require-CecilType 'Vintagestory.Server.ServerSystemSupplyChunks'
+$worldApiBlockingBody = Get-CecilBodyText (Require-CecilMethod $worldApiImplementation 'BlockingLoadChunkColumn' 2)
+$serverBlockingBody = Get-CecilBodyText (Require-CecilMethod $serverMainImplementation 'BlockingLoadChunkColumn' 2)
+$tryLoadBody = Get-CecilBodyText (Require-CecilMethod $supplyImplementation 'TryLoadChunkColumn' 1)
+$getMapChunkBody = Get-CecilBodyText (Require-CecilMethod $worldApiImplementation 'GetMapChunk' 2)
+if ($worldApiBlockingBody -notmatch 'ServerMain::BlockingLoadChunkColumn' -or
+    $serverBlockingBody -notmatch 'ServerSystemSupplyChunks::TryLoadChunkColumn' -or
+    $tryLoadBody -notmatch 'GameDatabase::GetChunk' -or $tryLoadBody -notmatch 'ServerChunk::FromBytes' -or
+    $tryLoadBody -match 'TryLoadMapChunk|GetMapChunk|set_MapChunk|loadedMapChunks') {
+    throw 'BlockingLoadChunkColumn no longer proves a chunk-only deserialize path with no attached mapchunk.'
+}
+if ($getMapChunkBody -notmatch 'loadedMapChunks' -or $getMapChunkBody -notmatch 'TryGetValue' -or
+    $getMapChunkBody -match 'TryLoadMapChunk|GameDatabase::GetMapChunk') {
+    throw 'GetMapChunk no longer proves a loaded-cache-only lookup.'
 }
 
 $chunkHandlerProperty = $handler.GetProperty('OnChunkColumnGen')
@@ -216,6 +259,9 @@ $result = [ordered]@{
     StructureHandlers = @($structureMethods | ForEach-Object { "$($_.DeclaringType.FullName)::$($_.Name)" })
     LightingAnchor = "$($lightMethod.DeclaringType.FullName)::$($lightMethod.Name)"
     TransientColumnApi = $transientColumnSignatures
+    BlockingLoadImplementation = 'TryLoadChunkColumn:GetChunk+ServerChunk.FromBytes;no-mapchunk-attachment'
+    GetMapChunkImplementation = 'loadedMapChunks.TryGetValue;no-disk-load'
+    PersistedMapSource = 'versioned-marker-envelope-copy'
 }
 
 $json = $result | ConvertTo-Json -Depth 5

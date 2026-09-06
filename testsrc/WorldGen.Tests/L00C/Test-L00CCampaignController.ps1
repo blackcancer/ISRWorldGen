@@ -39,7 +39,7 @@ function Expand-ProductionTemplate([string]$Template, [hashtable]$Values) {
 $activatedTemplate = Get-ProductionTemplate $activatedSourceLine[0] 'L00C_ACTIVATED'
 $stableTemplate = Get-ProductionTemplate $stableSourceLine[0] 'L00C_PERSISTED_REOPEN_STABLE'
 $expectedActivatedTokens = @('instanceId', 'marker!.MarkerId', 'runId', 'marker.OpenCount', 'saveGame.SavegameIdentifier', 'config.FixtureChunkX', 'config.FixtureChunkZ')
-$expectedStableTokens = @('instanceId', 'marker!.MarkerId', 'runId', 'priorityLoads', 'transientRequests', 'refreshPasses', 'refreshedMapChunks', 'fixtureWrites', 'fixtureCallbackCount', 'persistedSnapshot.Fixture.Hash', 'persistedSnapshot.Halo.Hash')
+$expectedStableTokens = @('instanceId', 'marker!.MarkerId', 'runId', 'priorityLoads', 'transientRequests', 'refreshPasses', 'refreshedMapChunks', 'fixtureWrites', 'mapSnapshotWrites', 'fixtureCallbackCount', 'persistedSnapshot.Fixture.Hash', 'persistedSnapshot.Halo.Hash')
 if (((Get-TemplateTokens $activatedTemplate) -join '|') -ne ($expectedActivatedTokens -join '|') -or
     ((Get-TemplateTokens $stableTemplate) -join '|') -ne ($expectedStableTokens -join '|') -or
     $stableTemplate.Contains(' open=', [StringComparison]::Ordinal)) {
@@ -245,6 +245,7 @@ function Complete-Open2($Fixture, [bool]$UseFalseStableFormat = $false) {
             'refreshPasses' = '0'
             'refreshedMapChunks' = '0'
             'fixtureWrites' = '0'
+            'mapSnapshotWrites' = '0'
             'fixtureCallbackCount' = '0'
             'persistedSnapshot.Fixture.Hash' = 'A' * 64
             'persistedSnapshot.Halo.Hash' = 'B' * 64

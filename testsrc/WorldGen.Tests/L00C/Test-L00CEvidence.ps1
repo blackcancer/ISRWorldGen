@@ -122,6 +122,7 @@ $expectedAfterInventory = '0=[null];1=[0:L00CWrapper(original=Vintagestory.Serve
 $allSessions = @($evidence.Sessions)
 $orderedEvidenceSessions = @($allSessions | Sort-Object { [int]$_.EvidenceSequence })
 $priorCompleted = $null
+$mapSnapshotChecksumsBySave = @{}
 for ($index = 0; $index -lt $orderedEvidenceSessions.Count; $index++) {
     $session = $orderedEvidenceSessions[$index]
     Assert-Equal ([int]$session.EvidenceSequence) ($index + 1) "Session monotonic evidence sequence $($index + 1)"
@@ -134,7 +135,7 @@ for ($index = 0; $index -lt $orderedEvidenceSessions.Count; $index++) {
 }
 
 $sessionLogPaths = @()
-foreach ($session in @($evidence.Sessions)) {
+foreach ($session in $orderedEvidenceSessions) {
     if ([int]$session.ProcessId -le 0) { throw 'Every session must record a real process id.' }
     if ([string]$session.InstanceId -notmatch '^[0-9a-f]{32}$') { throw 'Every session must record a 32-character instance id.' }
     if ([long]$session.WorldRunId -le 0) { throw 'Every session must record a positive world run id.' }
@@ -173,7 +174,7 @@ foreach ($session in @($evidence.Sessions)) {
             $log -notmatch "L00C_WITNESS_NO_REQUEST instance=$instance save=$savegame loadrequests=0 transientrequests=0 refreshpasses=0 fixturewrites=0 markers=0") {
             throw 'Disabled witness log is missing its inactive no-request attestation.'
         }
-        if ($log -match "L00C_(?:FIXTURE_WRITTEN|ACTIVATED|COLUMN_REQUEST|TRANSIENT_LOAD_ACCEPTED|TRANSIENT_PRECONDITION|FOOTPRINT_REFRESH|MARKER_SAVED) instance=$instance " -or
+        if ($log -match "L00C_(?:FIXTURE_WRITTEN|ACTIVATED|COLUMN_REQUEST|TRANSIENT_LOAD_ACCEPTED|TRANSIENT_PRECONDITION|FOOTPRINT_REFRESH|MARKER_SAVED|MAP_SNAPSHOT_COMMITTED|PERSISTED_MAP_SNAPSHOT_LOADED) instance=$instance " -or
             $log -match "L00C_HALO_.* instance=$instance ") {
             throw 'Disabled witness emitted a chunk request, ownership, fixture, or marker mutation.'
         }
@@ -194,7 +195,7 @@ foreach ($session in @($evidence.Sessions)) {
         }
         if ($log -match "L00C_ACTIVATED instance=$instance " -or
             $log -match "L00C_FIXTURE_WRITTEN instance=$instance " -or
-            $log -match "L00C_MARKER_SAVED instance=$instance ") {
+            $log -match "L00C_(?:MARKER_SAVED|MAP_SNAPSHOT_COMMITTED|PERSISTED_MAP_SNAPSHOT_LOADED) instance=$instance ") {
             throw 'Missing-handler session silently activated, wrote the fixture, or published a marker candidate.'
         }
     }
@@ -209,6 +210,7 @@ foreach ($session in @($evidence.Sessions)) {
             "L00C_ACTIVATED instance=$instance marker=$marker run=$worldRun open=$open isnew=$isNew ",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded ",
             "L00C_HALO_VALID instance=$instance marker=$marker phase=loaded radius=1 columns=8 ",
+            "L00C_MARKER_SAVED instance=$instance marker=$marker open=$open",
             "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker ",
             'Forced: Shutdown through Server API',
             'World saved!'
@@ -222,14 +224,15 @@ foreach ($session in @($evidence.Sessions)) {
                 "L00C_HALO_VALID instance=$instance marker=$marker phase=afterticks radius=1 columns=8 ",
                 "L00C_HALO_STABLE instance=$instance marker=$marker ticks=40 columns=8 ",
                 "L00C_TICKS_STABLE instance=$instance marker=$marker run=$worldRun ticks=40 ",
-                "L00C_TRANSIENT_LIFECYCLE_STABLE instance=$instance marker=$marker loadpriority=1 transientrequests=9 refreshpasses=41 refreshedmapchunks=369 keeploaded=0 unload=0"
+                "L00C_TRANSIENT_LIFECYCLE_STABLE instance=$instance marker=$marker loadpriority=1 transientrequests=9 refreshpasses=41 refreshedmapchunks=369 keeploaded=0 unload=0",
+                "L00C_MAP_SNAPSHOT_COMMITTED instance=$instance marker=$marker maps=9 checksum=[0-9A-F]{64} writes=1"
             )
         }
         else {
             $requiredPatterns += @(
                 "L00C_PERSISTED_PRECHECK instance=$instance marker=$marker maps=9 exact=True",
                 "L00C_PERSISTED_COLUMNS_DISPOSED instance=$instance marker=$marker columns=9 chunks=72 exact=True",
-                "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker run=$worldRun loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0"
+                "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker run=$worldRun loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 mapsnapshotwrites=0 callbacks=0"
             )
         }
         foreach ($pattern in $requiredPatterns) {
@@ -273,15 +276,33 @@ foreach ($session in @($evidence.Sessions)) {
                 throw "New-world session $($session.Cycle) acquired or explicitly unloaded a column."
             }
             $stableIndex = $log.IndexOf("L00C_HALO_STABLE instance=$instance", [StringComparison]::Ordinal)
+            $snapshotCommitIndex = $log.IndexOf("L00C_MAP_SNAPSHOT_COMMITTED instance=$instance", [StringComparison]::Ordinal)
             $shutdownRequestIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
             $shutdownPhaseIndex = $log.IndexOf('Entering runphase Shutdown', [StringComparison]::Ordinal)
+            $markerSavedIndex = $log.IndexOf("L00C_MARKER_SAVED instance=$instance marker=$marker open=$open", [StringComparison]::Ordinal)
             $worldSavedIndex = $log.LastIndexOf('World saved!', [StringComparison]::Ordinal)
-            if ($stableIndex -lt 0 -or $shutdownRequestIndex -le $stableIndex -or
-                $shutdownPhaseIndex -le $shutdownRequestIndex -or $worldSavedIndex -le $shutdownPhaseIndex) {
+            if ($stableIndex -lt 0 -or $snapshotCommitIndex -le $stableIndex -or $shutdownRequestIndex -le $snapshotCommitIndex -or
+                $shutdownPhaseIndex -le $shutdownRequestIndex -or $markerSavedIndex -le $shutdownPhaseIndex -or $worldSavedIndex -le $markerSavedIndex) {
                 throw "New-world session $($session.Cycle) did not validate, request shutdown, retain native ownership, and save in order."
             }
+            $snapshotCommit = [regex]::Match($log, "L00C_MAP_SNAPSHOT_COMMITTED instance=$instance marker=$marker maps=9 checksum=([0-9A-F]{64}) writes=1")
+            if (-not $snapshotCommit.Success -or [regex]::Matches($log, "L00C_MAP_SNAPSHOT_COMMITTED instance=$instance ").Count -ne 1) {
+                throw "New-world session $($session.Cycle) did not commit exactly one bounded map snapshot."
+            }
+            $mapSnapshotChecksumsBySave[[string]$session.SavegameIdentifier] = $snapshotCommit.Groups[1].Value
         }
         else {
+            $mapSnapshotLines = [regex]::Matches($log, "(?m)^.*L00C_PERSISTED_MAP_SNAPSHOT_LOADED instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) ymax=([0-9]+) checksum=([0-9A-F]{64}).*$")
+            Assert-Equal $mapSnapshotLines.Count 9 "Session $($session.Cycle) persisted map snapshot copies"
+            $mapSnapshotCoordinates = @($mapSnapshotLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
+            Assert-Equal ($mapSnapshotCoordinates -join '|') ($expectedCoordinates -join '|') "Session $($session.Cycle) exact persisted map snapshot coordinates"
+            $mapSnapshotChecksums = @($mapSnapshotLines | ForEach-Object { $_.Groups[4].Value } | Select-Object -Unique)
+            Assert-Equal $mapSnapshotChecksums.Count 1 "Session $($session.Cycle) persisted map snapshot checksum count"
+            $saveKey = [string]$session.SavegameIdentifier
+            if (-not $mapSnapshotChecksumsBySave.ContainsKey($saveKey)) {
+                throw "Reopen session $($session.Cycle) has no prior new-world map snapshot attestation for save $saveKey."
+            }
+            Assert-Equal $mapSnapshotChecksums[0] $mapSnapshotChecksumsBySave[$saveKey] "Session $($session.Cycle) marker-bound map snapshot checksum"
             $blockingLines = [regex]::Matches($log, "(?m)^.*L00C_PERSISTED_COLUMN_LOADED instance=$instance marker=$marker chunk=\(([-0-9]+),([-0-9]+)\) sequence=([1-9]) chunks=8.*$")
             Assert-Equal $blockingLines.Count 9 "Session $($session.Cycle) blocking-loaded persisted footprint"
             $blockingCoordinates = @($blockingLines | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" } | Sort-Object)
@@ -292,12 +313,13 @@ foreach ($session in @($evidence.Sessions)) {
                 throw "Reopen session $($session.Cycle) used a generation, transient-load, refresh, fixture-write, or wrapper path."
             }
             $precheckIndex = $log.IndexOf("L00C_PERSISTED_PRECHECK instance=$instance", [StringComparison]::Ordinal)
+            $firstMapSnapshotIndex = $log.IndexOf("L00C_PERSISTED_MAP_SNAPSHOT_LOADED instance=$instance", [StringComparison]::Ordinal)
             $firstBlockingIndex = $log.IndexOf("L00C_PERSISTED_COLUMN_LOADED instance=$instance", [StringComparison]::Ordinal)
             $loadedInspectionIndex = $log.IndexOf("L00C_FIXTURE_INSPECTED instance=$instance", [StringComparison]::Ordinal)
             $disposeBlockingIndex = $log.IndexOf("L00C_PERSISTED_COLUMNS_DISPOSED instance=$instance", [StringComparison]::Ordinal)
             $stableIndex = $log.IndexOf("L00C_PERSISTED_REOPEN_STABLE instance=$instance", [StringComparison]::Ordinal)
             $shutdownRequestIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
-            if ($precheckIndex -lt 0 -or $firstBlockingIndex -le $precheckIndex -or $loadedInspectionIndex -le $firstBlockingIndex -or
+            if ($precheckIndex -lt 0 -or $firstMapSnapshotIndex -le $precheckIndex -or $firstBlockingIndex -le $firstMapSnapshotIndex -or $loadedInspectionIndex -le $firstBlockingIndex -or
                 $disposeBlockingIndex -le $loadedInspectionIndex -or $stableIndex -le $disposeBlockingIndex -or $shutdownRequestIndex -le $stableIndex) {
                 throw "Reopen session $($session.Cycle) did not precheck, deserialize, inspect, dispose, attest, and shut down in order."
             }
@@ -338,7 +360,7 @@ foreach ($session in @($evidence.Sessions)) {
             throw "Reopen session $($session.Cycle) unexpectedly revalidated the halo through ticks."
         }
         if (-not [bool]$session.IsNew) {
-            $persistedStable = [regex]::Match($log, "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker run=$worldRun loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 callbacks=0 center=([0-9A-F]{64}) halo=([0-9A-F]{64})")
+            $persistedStable = [regex]::Match($log, "L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker run=$worldRun loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 mapsnapshotwrites=0 callbacks=0 center=([0-9A-F]{64}) halo=([0-9A-F]{64})")
             if (-not $persistedStable.Success) {
                 throw "Reopen session $($session.Cycle) lacks its zero-mutation persisted snapshot attestation."
             }

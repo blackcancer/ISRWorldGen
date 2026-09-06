@@ -18,6 +18,7 @@ foreach ($fragment in @(
     'refreshpasses={refreshPasses}',
     'refreshedmapchunks={refreshedMapChunks}',
     'fixturewrites={fixtureWrites}',
+    'mapsnapshotwrites={mapSnapshotWrites}',
     'callbacks={fixtureCallbackCount}',
     'MarkerPublicationGate',
     'markerPublication.Begin(persistedMarker)',
@@ -52,12 +53,14 @@ $reopenSchedule = $initializeMethod.IndexOf('SchedulePersistedReopen(', $reopenS
 $reopenReturn = $initializeMethod.IndexOf('return;', $reopenSchedule, [StringComparison]::Ordinal)
 $handlerValidation = $initializeMethod.IndexOf('ValidateReplacementPreconditions(handlers)', [StringComparison]::Ordinal)
 $newApply = $initializeMethod.IndexOf('ApplyTargetedReplacement(handlers)', $handlerValidation, [StringComparison]::Ordinal)
-$newCommit = $initializeMethod.IndexOf('markerPublication.Commit(', $newApply, [StringComparison]::Ordinal)
 if ($reopenStart -lt 0 -or $reopenInspect -le $reopenStart -or $reopenIncrement -le $reopenInspect -or
     $reopenCommit -le $reopenIncrement -or $reopenSchedule -le $reopenCommit -or
-    $reopenReturn -le $reopenSchedule -or $handlerValidation -le $reopenReturn -or $newApply -le $handlerValidation -or
-    $newCommit -le $newApply) {
+    $reopenReturn -le $reopenSchedule -or $handlerValidation -le $reopenReturn -or $newApply -le $handlerValidation) {
     throw 'Persisted reopen must inspect fully before incrementing and committing OpenCount, then return before any worldgen handler replacement.'
+}
+$newWorldBranch = $initializeMethod.Substring($handlerValidation)
+if ($newWorldBranch.Contains('markerPublication.Commit(', [StringComparison]::Ordinal)) {
+    throw 'A new-world marker must remain unpublished until the map snapshot and fixture pass bounded stability validation.'
 }
 $reopenBranch = $initializeMethod.Substring($reopenStart, $reopenReturn - $reopenStart)
 if ($reopenBranch -match 'ApplyTargetedReplacement|ScheduleProbeColumn|LoadChunkColumnPriority|KeepLoaded') {
@@ -68,6 +71,16 @@ $saveEnd = $source.IndexOf('private static ProbeMarker? ReadMarker(', $saveStart
 $saveMethod = $source.Substring($saveStart, $saveEnd - $saveStart)
 if ($saveMethod -notmatch 'marker is not null\s*&&\s*markerPublication\.SaveIfCommitted\(') {
     throw 'GameWorldSave can still publish an unvalidated marker candidate.'
+}
+$tickStart = $source.IndexOf('private void OnServerTickCore(long runId', [StringComparison]::Ordinal)
+$tickEnd = $source.IndexOf('private PersistedFootprintSnapshot InspectPersistedFootprintBlocking()', $tickStart, [StringComparison]::Ordinal)
+$tickMethod = $source.Substring($tickStart, $tickEnd - $tickStart)
+$snapshotCapture = $tickMethod.IndexOf('marker.MapFootprint = CaptureCurrentMapFootprint()', [StringComparison]::Ordinal)
+$snapshotCommit = $tickMethod.IndexOf('markerPublication.Commit(', $snapshotCapture, [StringComparison]::Ordinal)
+$snapshotLog = $tickMethod.IndexOf('L00C_MAP_SNAPSHOT_COMMITTED', $snapshotCommit, [StringComparison]::Ordinal)
+$shutdown = $tickMethod.IndexOf('RequestShutdownIfConfigured("fixture-stable")', $snapshotLog, [StringComparison]::Ordinal)
+if ($snapshotCapture -lt 0 -or $snapshotCommit -le $snapshotCapture -or $snapshotLog -le $snapshotCommit -or $shutdown -le $snapshotLog) {
+    throw 'The new-world marker/map snapshot must be captured and committed only after bounded stability, before graceful shutdown.'
 }
 
 function New-Handler {

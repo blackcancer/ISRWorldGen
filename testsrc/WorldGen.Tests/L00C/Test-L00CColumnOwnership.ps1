@@ -37,6 +37,9 @@ $requiredSourceFragments = @(
     'InspectPersistedFootprintBlocking',
     'BlockingTestMapChunkExists',
     'BlockingLoadChunkColumn',
+    'PersistedMapFootprintSnapshot',
+    'ValidateAndCopy',
+    'L00C_PERSISTED_MAP_SNAPSHOT_LOADED',
     'L00C_PERSISTED_COLUMNS_DISPOSED',
     'priorityLoadInvocationCount',
     'fixtureWriteCount'
@@ -179,12 +182,18 @@ if ($persistedEnd -le $persistedStart) {
 }
 $persistedMethod = $source.Substring($persistedStart, $persistedEnd - $persistedStart)
 $existsIndex = $persistedMethod.IndexOf('BlockingTestMapChunkExists(', [StringComparison]::Ordinal)
+$mapSnapshotIndex = $persistedMethod.IndexOf('mapFootprint.ValidateAndCopy(', [StringComparison]::Ordinal)
 $blockingLoadIndex = $persistedMethod.IndexOf('BlockingLoadChunkColumn(', [StringComparison]::Ordinal)
 $finallyIndex = $persistedMethod.IndexOf('finally', [StringComparison]::Ordinal)
 $disposeIndex = $persistedMethod.IndexOf('chunk.Dispose()', [StringComparison]::Ordinal)
-if ($existsIndex -lt 0 -or $blockingLoadIndex -le $existsIndex -or $finallyIndex -le $blockingLoadIndex -or
+if ($existsIndex -lt 0 -or $mapSnapshotIndex -le $existsIndex -or $blockingLoadIndex -le $mapSnapshotIndex -or $finallyIndex -le $blockingLoadIndex -or
     $disposeIndex -le $finallyIndex -or $persistedMethod -match 'LoadChunkColumnPriority|KeepLoaded|MarkFresh|UnloadChunkColumn|WriteCanonicalFixture|ApplyTargetedReplacement') {
     throw 'Marker-backed reopen must remain a blocking deserialize/inspect/dispose-only path.'
+}
+if ($persistedMethod -match 'chunks\[0\]\.MapChunk|centerChunks\[0\]\.MapChunk' -or
+    $persistedMethod -notmatch 'mapSnapshots\[PersistedMapFootprintSnapshot\.CoordinateKey\(center\.X, center\.Z\)\]' -or
+    $persistedMethod -notmatch 'InspectProtectionHaloData\("loaded", loadedColumns, mapSnapshots,') {
+    throw 'Blocking-loaded chunks must admit null MapChunk and use the separately persisted bounded map snapshot.'
 }
 
 $modelCoordinates = @(
@@ -226,6 +235,12 @@ if ($callbackGateReport.Status -ne 'PASS') {
     throw 'The production transient callback gate oracle did not pass.'
 }
 
+$mapSnapshotReport = (& (Join-Path $PSScriptRoot 'Test-L00CPersistedMapSnapshot.ps1') -RepositoryRoot $RepositoryRoot |
+    Out-String | ConvertFrom-Json)
+if ($mapSnapshotReport.Status -ne 'PASS' -or $mapSnapshotReport.ExactMapCopies -ne 9) {
+    throw 'The production persisted-map snapshot oracle did not pass.'
+}
+
 $persistedMapExistenceChecks = $modelCoordinates.Count
 $persistedBlockingLoads = $modelCoordinates.Count
 $persistedBlockingChunkDisposals = $modelCoordinates.Count * 8
@@ -255,6 +270,7 @@ if ($persistedMapExistenceChecks -ne 9 -or $persistedBlockingLoads -ne 9 -or $pe
     PersistedMapExistenceChecks = $persistedMapExistenceChecks
     PersistedBlockingLoads = $persistedBlockingLoads
     PersistedBlockingChunkDisposals = $persistedBlockingChunkDisposals
+    PersistedMapSnapshotCopies = $mapSnapshotReport.ExactMapCopies
     PersistedPriorityLoads = 0
     PersistedRefreshes = 0
     PersistedUnloads = 0

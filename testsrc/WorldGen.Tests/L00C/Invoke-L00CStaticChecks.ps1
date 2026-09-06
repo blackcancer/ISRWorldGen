@@ -14,16 +14,17 @@ $ErrorActionPreference = 'Stop'
 
 $sourcePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
 $callbackGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\TransientLoadCallbackGate.cs'
+$mapSnapshotPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\PersistedMapFootprintSnapshot.cs'
 $projectPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
 
-foreach ($path in @($sourcePath, $callbackGatePath)) {
+foreach ($path in @($sourcePath, $callbackGatePath, $mapSnapshotPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "L00-C source is missing: $path"
     }
 }
 
 $source = Get-Content -LiteralPath $sourcePath -Raw
-$allProbeSource = $source + "`n" + (Get-Content -LiteralPath $callbackGatePath -Raw)
+$allProbeSource = $source + "`n" + (Get-Content -LiteralPath $callbackGatePath -Raw) + "`n" + (Get-Content -LiteralPath $mapSnapshotPath -Raw)
 $forbidden = @(
     'WipeAllHandlers',
     'Task.Run(',
@@ -99,6 +100,10 @@ $required = @(
     'InspectPersistedFootprintBlocking',
     'BlockingTestMapChunkExists',
     'BlockingLoadChunkColumn',
+    'PersistedMapFootprintSnapshot',
+    'ValidateAndCopy',
+    'L00C_MAP_SNAPSHOT_COMMITTED',
+    'L00C_PERSISTED_MAP_SNAPSHOT_LOADED',
     'L00C_PERSISTED_REOPEN_STABLE',
     'run={runId}',
     'MarkerPublicationGate',
@@ -169,17 +174,20 @@ finally {
 $probeType = 'ISRWorldGen.WorldgenProbe.L00CWorldgenProbeModSystem'
 $markerGateType = 'ISRWorldGen.WorldgenProbe.MarkerPublicationGate'
 $callbackGateType = 'ISRWorldGen.WorldgenProbe.TransientLoadCallbackGate'
+$mapSnapshotType = 'ISRWorldGen.WorldgenProbe.PersistedMapFootprintSnapshot'
 $probePresent = @($typeNames | Where-Object { $_ -eq $probeType }).Count -eq 1
 $markerGatePresent = @($typeNames | Where-Object { $_ -eq $markerGateType }).Count -eq 1
 $callbackGatePresent = @($typeNames | Where-Object { $_ -eq $callbackGateType }).Count -eq 1
-if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent)) {
+$mapSnapshotPresent = @($typeNames | Where-Object { $_ -eq $mapSnapshotType }).Count -eq 1
+if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent -or -not $mapSnapshotPresent)) {
     throw 'Debug assembly does not contain every L00-C probe, marker, and transient callback type.'
 }
-if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent)) {
+if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent -or $mapSnapshotPresent)) {
     throw 'Release assembly must not contain any L00-C probe, marker, or transient callback type.'
 }
 
 $markerOracleStatus = 'NOT_APPLICABLE'
+$mapSnapshotOracleStatus = 'NOT_APPLICABLE'
 $callbackOracleStatus = 'NOT_APPLICABLE'
 $persistenceAttestationOracleStatus = 'NOT_APPLICABLE'
 $campaignControllerOracleStatus = 'NOT_APPLICABLE'
@@ -190,6 +198,12 @@ if ($Configuration -eq 'Debug') {
         throw 'The production marker publication oracle did not pass against the freshly built Debug assembly.'
     }
     $markerOracleStatus = $markerOracle.Status
+    $mapSnapshotOraclePath = Join-Path $PSScriptRoot 'Test-L00CPersistedMapSnapshot.ps1'
+    $mapSnapshotOracle = (& $mapSnapshotOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($mapSnapshotOracle.Status -ne 'PASS' -or $mapSnapshotOracle.ExactMapCopies -ne 9) {
+        throw 'The production persisted-map snapshot oracle did not pass against the freshly built Debug assembly.'
+    }
+    $mapSnapshotOracleStatus = $mapSnapshotOracle.Status
     $callbackOraclePath = Join-Path $PSScriptRoot 'Test-L00CTransientCallbackGate.ps1'
     $callbackOracle = (& $callbackOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
     if ($callbackOracle.Status -ne 'PASS') {
@@ -218,7 +232,9 @@ $result = [ordered]@{
     ProbeTypePresent = $probePresent
     MarkerGateTypePresent = $markerGatePresent
     TransientCallbackGateTypePresent = $callbackGatePresent
+    PersistedMapSnapshotTypePresent = $mapSnapshotPresent
     MarkerPublicationOracle = $markerOracleStatus
+    PersistedMapSnapshotOracle = $mapSnapshotOracleStatus
     TransientCallbackOracle = $callbackOracleStatus
     PersistenceAttestationOracle = $persistenceAttestationOracleStatus
     CampaignControllerOracle = $campaignControllerOracleStatus
