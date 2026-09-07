@@ -112,6 +112,7 @@ public sealed class LandscapeCompositionTests
         FrozenScaleProfile laboratory = L03BTestSupport.FrozenProfile("laboratory");
         GenerationIdentity identity = L03BTestSupport.Identity(73, balanced);
         (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, balanced);
+        (AtlasMesh wrongAtlas, _) = L03BTestSupport.PlateFixture(74, balanced);
 
         GenerationResult<LandscapeModel> budget = LandscapeModelBuilder.Build(
             identity,
@@ -125,9 +126,16 @@ public sealed class LandscapeCompositionTests
             plates,
             laboratory,
             new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), 128, 4));
+        GenerationResult<LandscapeModel> budgetBeforeProvenance = LandscapeModelBuilder.Build(
+            identity,
+            wrongAtlas,
+            plates,
+            balanced,
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), 1, 4));
 
         AssertFailure(budget, GenerationFailureCode.BudgetExceeded, "geology.landscapes.cell-budget");
         AssertFailure(mismatch, GenerationFailureCode.InvalidInput, "geology.landscapes.profile-hash");
+        AssertFailure(budgetBeforeProvenance, GenerationFailureCode.BudgetExceeded, "geology.landscapes.cell-budget");
     }
 
     [TestMethod]
@@ -210,8 +218,11 @@ public sealed class LandscapeCompositionTests
         GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
         (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
         LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile, new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4)));
-        AtlasSite site = atlas.Sites[0];
-        Assert.IsLessThan(.01, Math.Abs(model.Sample(site.X, site.Z).ModelAltitudeNormalized - model.Sample(Math.Min(site.X + 1, atlas.Bounds.MaxXExclusive - 1), site.Z).ModelAltitudeNormalized));
+        AtlasSite site = atlas.Sites.First(item => item.X > atlas.Bounds.MinX && item.X < atlas.Bounds.MaxXExclusive - 1);
+        double center = model.Sample(site.X, site.Z).ModelAltitudeNormalized;
+        double left = model.Sample(site.X - 1, site.Z).ModelAltitudeNormalized;
+        double right = model.Sample(site.X + 1, site.Z).ModelAltitudeNormalized;
+        Assert.IsLessThan(.01, Math.Max(Math.Abs(center - left), Math.Abs(center - right)), "One block is far below the blend scale; a continuous weighted field cannot jump materially.");
     }
 
     [TestMethod]
