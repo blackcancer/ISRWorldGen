@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using ISRWorldGen.Core.Atlas.Geometry;
 using ISRWorldGen.Core.Atlas.Profiles;
@@ -12,6 +13,8 @@ namespace ISRWorldGen.Tests.L03B;
 public sealed class EvidenceViewContractTests
 {
     private const int FixtureSeed = 20260907;
+    private static readonly int[] TargetedFixtureSeeds =
+        [20260907, -20260907, 731, -731, 196883, -196883, 48731, -48731];
     private static readonly Lazy<L03BPureLandscapeView> PureRangeView = new(BuildPureRangeView);
 
     [TestMethod]
@@ -69,6 +72,60 @@ public sealed class EvidenceViewContractTests
     }
 
     [TestMethod]
+    public void OldMassifTargetedPureCoresHaveMeasurableMultiSummitRelief()
+    {
+        int measuredViews = 0;
+        var failures = new List<string>();
+        var surfaceHashes = new HashSet<Hash256>();
+        foreach (int seed in TargetedFixtureSeeds)
+        {
+            (LandscapeModel model, AtlasMesh atlas) = Build(seed);
+            L03BPureLandscapeView? view = L03BEvidenceViews.TrySelectPureView(
+                model, atlas, LandscapeFamily.OldMassifs, seed, L03BEvidenceViews.BlindMapSide);
+            if (view is null)
+            {
+                continue;
+            }
+
+            measuredViews++;
+            double[] altitudes = L03BEvidenceViews.Altitudes(view).Cast<double>().ToArray();
+            double mean = altitudes.Average();
+            double variance = altitudes.Select(value => (value - mean) * (value - mean)).Average();
+            L03BMorphologyMeasurement morphology = L03BEvidenceViews.MeasureMorphology(view);
+            int saturatedSamples = altitudes.Count(value => Math.Abs(value) >= .999d);
+            surfaceHashes.Add(SurfaceHash(altitudes));
+
+            Console.WriteLine(
+                $"OldMassifs seed={seed}, owner={view.OwnerCellId}, span={view.SpanBlocks:R}, variance={variance:R}, peaks={morphology.ProminentPeaks}, valleys={morphology.ProminentValleys}, anisotropy={morphology.GradientAnisotropy:R}, saturated={saturatedSamples}");
+            // This is the pre-declared campaign alarm, reproduced analytically on
+            // owner-pure views without running or changing the sealed campaign.
+            if (variance <= 0.0001d)
+            {
+                failures.Add($"seed {seed}: variance {variance:R} on {view.SpanBlocks:R} blocks");
+            }
+            if (morphology.ProminentPeaks < 2)
+            {
+                failures.Add($"seed {seed}: {morphology.ProminentPeaks} prominent summit(s)");
+            }
+            if (morphology.ProminentValleys < 1)
+            {
+                failures.Add($"seed {seed}: {morphology.ProminentValleys} prominent valley(s)");
+            }
+            if (saturatedSamples != 0)
+            {
+                failures.Add($"seed {seed}: {saturatedSamples} saturated sample(s)");
+            }
+        }
+
+        Assert.AreEqual(TargetedFixtureSeeds.Length, measuredViews,
+            "Every declared targeted seed must contain an OldMassifs pure-core view.");
+        Assert.HasCount(measuredViews, surfaceHashes,
+            "Centering the massif system must not homogenize its deterministic per-region variants.");
+        Assert.HasCount(0, failures,
+            "Every available OldMassifs pure core must preserve measurable multi-summit relief: " + string.Join("; ", failures));
+    }
+
+    [TestMethod]
     [DataRow("owner")]
     [DataRow("family")]
     [DataRow("is-transition")]
@@ -115,6 +172,18 @@ public sealed class EvidenceViewContractTests
             model, atlas, LandscapeFamily.RuggedRanges, FixtureSeed, L03BEvidenceViews.CorpusMapSide);
         Assert.AreNotEqual(StableId.Zero, view.OwnerCellId);
         return view;
+    }
+
+    private static Hash256 SurfaceHash(IReadOnlyList<double> altitudes)
+    {
+        byte[] canonical = new byte[checked(altitudes.Count * sizeof(long))];
+        for (int index = 0; index < altitudes.Count; index++)
+        {
+            BinaryPrimitives.WriteInt64BigEndian(
+                canonical.AsSpan(index * sizeof(long), sizeof(long)),
+                BitConverter.DoubleToInt64Bits(altitudes[index]));
+        }
+        return Hash256.Compute(canonical);
     }
 
     private static (LandscapeModel Model, AtlasMesh Atlas) Build(int seed)

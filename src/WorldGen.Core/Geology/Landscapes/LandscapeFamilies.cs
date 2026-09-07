@@ -136,12 +136,18 @@ public static class LandscapeSignatureSampler
 
     private static double Massifs(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
     {
-        var q = Local(x, z, seed, s, 20, p.MacroWavelengthBlocks);
+        // Keep the multi-summit system centred in its owning regional frame.  A
+        // second random translation could move every summit outside a small pure
+        // Voronoi core, leaving only an almost-flat Gaussian tail in the evidence
+        // view.  The regional plan already supplies deterministic placement and
+        // orientation; this extra rotation retains per-region variation without
+        // decoupling the morphology from its owner centre.
+        var q = OrientedLocal(x, z, seed, s, 20, p.MacroWavelengthBlocks);
         double scale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
-        double summitA = Gaussian(q.U + .28, q.V - .13, .34, .31);
-        double summitB = .82 * Gaussian(q.U - .32, q.V + .20, .28, .36);
-        double summitC = .56 * Gaussian((q.U + .04) * scale, (q.V + .38) * scale, .64, .58);
-        double valley = -.45 * Gaussian(q.U, q.V, .24, .20);
+        double summitA = Gaussian(q.U + .28, q.V - .13, .34, .34);
+        double summitB = .82 * Gaussian(q.U - .32, q.V + .20, .34, .34);
+        double summitC = .56 * Gaussian((q.U + .04) * scale, (q.V + .38) * scale, .64, .64);
+        double valley = -.45 * Gaussian(q.U, q.V, .23, .23);
         double weathering = .10 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 22) - .5);
         return (p.MacroWeight * (summitA + summitB + valley - .28)) + (p.MesoWeight * (summitC - .10)) + (p.DetailWeight * weathering);
     }
@@ -195,6 +201,7 @@ public static class LandscapeSignatureSampler
         return (p.MacroWeight * ((1.35 * mainCone) - .32)) + (p.MesoWeight * (secondaryCone + caldera + rift - .08)) + (p.DetailWeight * lava);
     }
     private static (double U, double V) Local(double x, double z, int seed, StableId s, ulong c, double scale) { double angle = Phase(seed, s, c); double cos = Math.Cos(angle); double sin = Math.Sin(angle); double ox = Signed(seed, s, c + 1) * scale * .45; double oz = Signed(seed, s, c + 2) * scale * .45; double dx = x - ox; double dz = z - oz; return (((cos * dx) + (sin * dz)) / scale, ((-sin * dx) + (cos * dz)) / scale); }
+    private static (double U, double V) OrientedLocal(double x, double z, int seed, StableId s, ulong c, double scale) { double angle = Phase(seed, s, c); double cos = Math.Cos(angle); double sin = Math.Sin(angle); return (((cos * x) + (sin * z)) / scale, ((-sin * x) + (cos * z)) / scale); }
     private static double Cone(double u, double v, double radius) { double t = Math.Max(0, 1 - (Math.Sqrt((u * u) + (v * v)) / radius)); return t * t; }
     private static double Gaussian(double u, double v, double sx, double sy) => Math.Exp(-((u * u / (sx * sx)) + (v * v / (sy * sy))));
     // Hash-interpolated values are non-periodic: the integer lattice is only a lookup domain and is not a storage tile.
