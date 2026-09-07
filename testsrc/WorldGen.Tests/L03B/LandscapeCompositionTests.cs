@@ -333,18 +333,18 @@ public sealed class LandscapeCompositionTests
             Assert.IsFalse(sample.IsTransition);
         }
 
-        MethodInfo transition = typeof(LandscapeModel).GetMethod("TransitionWeight", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        MethodInfo transition = typeof(LandscapeModel).GetMethod("NeighbourTransitionWeight", BindingFlags.NonPublic | BindingFlags.Instance)!;
         // overlap 1.25 creates a 0.8 nearest/second-nearest core boundary.
         Assert.AreEqual(0d, (double)transition.Invoke(model, [.64d, 1d])!);
         double insideBand = (double)transition.Invoke(model, [.81d, 1d])!;
         double atBoundary = (double)transition.Invoke(model, [1d, 1d])!;
         Assert.IsGreaterThan(0d, insideBand);
-        Assert.IsLessThan(.5d, insideBand);
-        Assert.AreEqual(.5d, atBoundary);
+        Assert.IsLessThan(1d, insideBand);
+        Assert.AreEqual(1d, atBoundary);
         // Smoothstep has zero slope at both explicit band limits: an anti-Voronoi-step probe.
         double epsilon = 1e-5;
         Assert.IsLessThan(1e-5d, (double)transition.Invoke(model, [.64d + epsilon, 1d])!);
-        Assert.IsLessThan(1e-4d, .5d - (double)transition.Invoke(model, [1d - epsilon, 1d])!);
+        Assert.IsLessThan(1e-4d, 1d - (double)transition.Invoke(model, [1d - epsilon, 1d])!);
     }
 
     [TestMethod]

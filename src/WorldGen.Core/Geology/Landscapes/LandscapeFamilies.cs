@@ -106,17 +106,14 @@ public static class LandscapeSignatureSampler
     {
         double dx = x - region.CenterX;
         double dz = z - region.CenterZ;
-        // Family primitives already derive their own deterministic local axes.  The
-        // regional orientation remains published for downstream regional consumers;
-        // applying it a second time would decorrelate the qualified family axes.
-        double cos = 1d;
-        double sin = 0d;
+        double cos = Math.Cos(region.OrientationRadians);
+        double sin = Math.Sin(region.OrientationRadians);
         // Region extents tune the macro scale only within a bounded interval.  This
         // prevents a tiny or unusually broad Voronoi cell from turning a family
         // primitive into an unrecognisable global wave while still making the
         // regional footprint a real input to the primitive.
         double regionalScale = Math.Sqrt(region.TransitionExtentUBlocks * region.TransitionExtentVBlocks);
-        double extentFactor = Math.Clamp(regionalScale / profile.MacroWavelengthBlocks, .999999d, 1.000001d);
+        double extentFactor = Math.Clamp(regionalScale / profile.MacroWavelengthBlocks, .75d, 1.25d);
         double scale = profile.MacroWavelengthBlocks * extentFactor;
         double u = ((cos * dx) + (sin * dz)) / scale;
         double v = ((-sin * dx) + (cos * dz)) / scale;
@@ -131,7 +128,7 @@ public static class LandscapeSignatureSampler
             u * profile.MacroWavelengthBlocks,
             v * profile.MacroWavelengthBlocks,
             seed,
-            streamOrdinal,
+            streamOrdinal ^ region.VariantOrdinal,
             0,
             0);
     }

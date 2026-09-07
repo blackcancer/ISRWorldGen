@@ -136,9 +136,7 @@ public sealed class LandscapeModel
         }
 
         SiteEntry dominant = sites[0];
-        SiteEntry? secondary = null;
         double dominantDistance = double.PositiveInfinity;
-        double secondaryDistance = double.PositiveInfinity;
         for (int index = 0; index < sites.Length; index++)
         {
             double dx = (double)x - sites[index].X;
@@ -146,28 +144,43 @@ public sealed class LandscapeModel
             double distanceSquared = (dx * dx) + (dz * dz);
             if (distanceSquared < dominantDistance)
             {
-                secondary = dominant;
-                secondaryDistance = dominantDistance;
                 dominantDistance = distanceSquared;
                 dominant = sites[index];
             }
-            else if (distanceSquared < secondaryDistance)
-            {
-                secondaryDistance = distanceSquared;
-                secondary = sites[index];
-            }
         }
 
-        double transition = secondary is null ? 0d : TransitionWeight(dominantDistance, secondaryDistance);
         double primaryResidual = SampleResidual(dominant, x, z);
-        double secondaryResidual = secondary is null ? 0d : SampleResidual(secondary.Value, x, z);
+        double primaryDatum = LandscapeAltitudeBounds.GeologicalDatum(dominant.Cell);
+        double neighbourWeight = 0d;
+        double weightedResidual = primaryResidual;
+        double weightedDatum = primaryDatum;
+        foreach (SiteEntry candidate in sites)
+        {
+            if (candidate.Cell.CellId == dominant.Cell.CellId)
+            {
+                continue;
+            }
+
+            double dx = (double)x - candidate.X;
+            double dz = (double)z - candidate.Z;
+            double weight = NeighbourTransitionWeight(dominantDistance, (dx * dx) + (dz * dz));
+            if (weight == 0d)
+            {
+                continue;
+            }
+
+            // Every eligible neighbour is evaluated.  Thus B/C rank exchanges are
+            // C1 changes in weights, never a strict-second-neighbour switch.
+            neighbourWeight += weight;
+            weightedResidual += weight * SampleResidual(candidate, x, z);
+            weightedDatum += weight * LandscapeAltitudeBounds.GeologicalDatum(candidate.Cell);
+        }
+        double totalWeight = 1d + neighbourWeight;
         // Datum and residual are intentionally different fields.  The datum is
         // continuous across a regional boundary; only residuals participate in the
         // explicit C1 transition band, and never receive distant-site contributions.
-        double primaryDatum = LandscapeAltitudeBounds.GeologicalDatum(dominant.Cell);
-        double secondaryDatum = secondary is null ? primaryDatum : LandscapeAltitudeBounds.GeologicalDatum(secondary.Value.Cell);
-        double geologicalDatum = Lerp(primaryDatum, secondaryDatum, transition);
-        double morphologyResidual = Lerp(primaryResidual, secondaryResidual, transition);
+        double geologicalDatum = weightedDatum / totalWeight;
+        double morphologyResidual = weightedResidual / totalWeight;
         double modelAltitude = geologicalDatum + morphologyResidual;
 
         if (!double.IsFinite(modelAltitude) || modelAltitude is < -1 or > 1)
@@ -185,8 +198,8 @@ public sealed class LandscapeModel
             modelAltitude,
             altitudeBlocks,
             bathymetryBlocks,
-            1d - transition,
-            transition > 0d);
+            1d / totalWeight,
+            neighbourWeight > 0d);
     }
 
     private double SampleResidual(SiteEntry entry, long x, long z)
@@ -213,15 +226,15 @@ public sealed class LandscapeModel
         return geologicalBase + morphologyResidual;
     }
 
-    private double TransitionWeight(double primaryDistanceSquared, double secondaryDistanceSquared)
+    private double NeighbourTransitionWeight(double primaryDistanceSquared, double neighbourDistanceSquared)
     {
-        if (!double.IsFinite(primaryDistanceSquared) || !double.IsFinite(secondaryDistanceSquared) ||
-            primaryDistanceSquared < 0 || secondaryDistanceSquared <= 0)
+        if (!double.IsFinite(primaryDistanceSquared) || !double.IsFinite(neighbourDistanceSquared) ||
+            primaryDistanceSquared < 0 || neighbourDistanceSquared <= 0)
         {
             throw new InvalidOperationException("Regional nearest-site distances must be finite and ordered.");
         }
 
-        double ratio = Math.Sqrt(primaryDistanceSquared / secondaryDistanceSquared);
+        double ratio = Math.Sqrt(primaryDistanceSquared / neighbourDistanceSquared);
         if (ratio <= coreDominanceRatio)
         {
             return 0d;
@@ -230,10 +243,8 @@ public sealed class LandscapeModel
         // ratio==1 is the Voronoi boundary. Smoothstep supplies zero derivative at
         // both band limits, so switching the direct neighbour remains C1.
         double normalized = Math.Min(1d, (ratio - coreDominanceRatio) / (1d - coreDominanceRatio));
-        return normalized * normalized * (3d - (2d * normalized)) * .5d;
+        return normalized * normalized * (3d - (2d * normalized));
     }
-
-    private static double Lerp(double left, double right, double amount) => left + ((right - left) * amount);
 
     private StableId[] ContributorIds(long x, long z) => sites.Where(site =>
     {
