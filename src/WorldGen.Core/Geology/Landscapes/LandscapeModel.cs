@@ -186,6 +186,11 @@ public sealed class LandscapeModel
             cell.CellId.Low ^ cell.CellId.High,
             entry.X,
             entry.Z);
+        return ComposeCellAltitude(cell, family, signature);
+    }
+
+    private static double ComposeCellAltitude(LandscapeCellProfile cell, LandscapeFamilyProfile family, double signature)
+    {
         double continental = cell.ContinentalHeightPpm / 1_000_000d;
         if (continental >= 0)
         {

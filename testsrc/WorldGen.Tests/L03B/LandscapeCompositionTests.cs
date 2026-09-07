@@ -3,7 +3,9 @@ using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Geology.Landscapes;
 using ISRWorldGen.Core.Geology.Plates;
+using ISRWorldGen.Core.Foundation;
 using System.Globalization;
+using System.Reflection;
 
 namespace ISRWorldGen.Tests.L03B;
 
@@ -232,6 +234,20 @@ public sealed class LandscapeCompositionTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 20, 1, .1, .6, .3, .1));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 2, 1, 1.1, .6, .3, .1));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 2, 1, .1, .6, .3, .2));
+    }
+
+    [TestMethod]
+    public void ReliefAmplitudeChangesComposedCellAltitudeWithinEnvelope()
+    {
+        LandscapeFamilyProfile low = new(LandscapeFamily.Plains, 42_000, 12_000, 3_200, .03, .65, .25, .10);
+        LandscapeFamilyProfile high = new(LandscapeFamily.Plains, 42_000, 12_000, 3_200, .20, .65, .25, .10);
+        LandscapeCellProfile cell = new(StableId.Zero, StableId.Zero, LandscapeFamily.Plains, CrustKind.Continental, 10, 100_000, .1, .05, low.ParameterChecksum);
+        MethodInfo compose = typeof(LandscapeModel).GetMethod("ComposeCellAltitude", BindingFlags.NonPublic | BindingFlags.Static)!;
+        double a = (double)compose.Invoke(null, [cell, low, .6])!;
+        double b = (double)compose.Invoke(null, [cell, high, .6])!;
+        Assert.AreNotEqual(low.ParameterChecksum, high.ParameterChecksum);
+        Assert.AreNotEqual(a, b);
+        Assert.IsTrue(double.IsFinite(a) && double.IsFinite(b) && a is >= -1 and <= 1 && b is >= -1 and <= 1);
     }
 
     private static IEnumerable<(long X, long Z)> SampleCoordinates(FrozenScaleProfile profile)
