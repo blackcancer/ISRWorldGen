@@ -93,7 +93,8 @@ function New-CaseObservation {
         [Parameter(Mandatory)][int]$ServerPid,
         [Parameter(Mandatory)][string]$LogPath,
         [Parameter(Mandatory)][DateTimeOffset]$Started,
-        [Parameter(Mandatory)][DateTimeOffset]$BreakpointUtc,
+        [Parameter(Mandatory)][DateTimeOffset]$BreakpointHitUtc,
+        [Parameter(Mandatory)][DateTimeOffset]$DebuggerContinueUtc,
         [Parameter(Mandatory)][DateTimeOffset]$Completed,
         [Parameter(Mandatory)]$AssemblyArtifact,
         [Parameter(Mandatory)]$PdbArtifact,
@@ -104,7 +105,7 @@ function New-CaseObservation {
         'native-profile-game-ready-frozen'
     }
     else {
-        'native-profile-host-shutdown'
+        'native-profile-rejected-before-log'
     }
     $frames = if ($breakpointId -ceq 'native-profile-game-ready-frozen') {
         @(
@@ -115,7 +116,7 @@ function New-CaseObservation {
     }
     else {
         @(
-            'native-profile-host.shutdown',
+            'native-profile-host.log-rejected',
             'native-profile-bridge.reject-and-stop',
             'native-profile-bridge.on-game-ready'
         )
@@ -125,7 +126,8 @@ function New-CaseObservation {
         SessionId = (Get-TextSha256 "session-$CaseName-$ServerPid").Substring(0, 32).ToLowerInvariant()
         ServerPid = $ServerPid
         StartedUtc = $Started.ToUniversalTime().ToString('o')
-        BreakpointUtc = $BreakpointUtc.ToUniversalTime().ToString('o')
+        BreakpointHitUtc = $BreakpointHitUtc.ToUniversalTime().ToString('o')
+        DebuggerContinueUtc = $DebuggerContinueUtc.ToUniversalTime().ToString('o')
         CompletedUtc = $Completed.ToUniversalTime().ToString('o')
         LogSha256 = (Get-FileHash -LiteralPath $LogPath -Algorithm SHA256).Hash
         BreakpointId = $breakpointId
@@ -223,7 +225,10 @@ try {
     $symbolPair = Get-SymbolPair $manifest 'ISRWorldGen.dll'
     $envelopeHash = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
     $envelopeBytes = 406
-    $eventUtc = [DateTimeOffset]::UtcNow.AddSeconds(-1)
+    $nowUtc = [DateTimeOffset]::UtcNow
+    $eventUtc = [DateTimeOffset]::new(
+        $nowUtc.UtcDateTime.AddTicks(-($nowUtc.UtcDateTime.Ticks % [TimeSpan]::TicksPerSecond)),
+        [TimeSpan]::Zero).AddSeconds(-1)
     $logTimestamp = Get-LocalLogTimestamp $eventUtc
     $logs = [ordered]@{
         new = @"
@@ -284,21 +289,23 @@ $logTimestamp [Event] Stopped the server!
         Write-Utf8Fixture $logPaths[$caseName] $logs[$caseName]
     }
 
-    $started = $eventUtc.AddSeconds(-1)
-    $completed = [DateTimeOffset]::UtcNow
+    $started = $eventUtc.AddSeconds(-30)
+    $breakpointHit = $eventUtc.AddSeconds(-20)
+    $debuggerContinue = $eventUtc.AddSeconds(-1)
+    $completed = $eventUtc.AddSeconds(2)
     $observations = [ordered]@{
-        Schema = 'isrworldgen.t02-05.visual-studio-campaign.v2'
+        Schema = 'isrworldgen.t02-05.visual-studio-campaign.v3'
         TestedCommit = $commit
         SnapshotManifestSha256 = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
         VisualStudioProfile = 'ISRWorldGen Server (isolated data)'
         DebuggerTransport = 'visual-studio-debugger'
-        Provenance = 'visual-studio-debugger-session-verified'
+        Provenance = 'visual-studio-debugger-session-verified-v3'
         Cases = [ordered]@{}
     }
     $pids = [ordered]@{ new = 101; reload = 102; height = 103; rectangle = 104 }
     foreach ($caseName in @('new', 'reload', 'height', 'rectangle')) {
         $observations.Cases[$caseName] = New-CaseObservation $caseName $pids[$caseName] $logPaths[$caseName] `
-            $started $eventUtc $completed $assemblyArtifact $pdbArtifact $symbolPair
+            $started $breakpointHit $debuggerContinue $completed $assemblyArtifact $pdbArtifact $symbolPair
     }
     $observationPath = Join-Path $testRoot 'campaign-observation.json'
     Write-JsonFixture $observationPath $observations
@@ -308,11 +315,72 @@ $logTimestamp [Event] Stopped the server!
     $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -DateKind String
     Assert-True ($report.Status -ceq 'PASS') 'Runtime evidence self-test report did not pass.'
     Assert-True ($report.EnvelopeSha256 -ceq $envelopeHash) 'Runtime evidence self-test changed the envelope hash.'
-    Assert-True ($report.VisualStudio.Provenance -ceq 'visual-studio-debugger-session-verified') `
+    Assert-True ($report.Schema -ceq 'isrworldgen.t02-05.runtime-evidence.v3') `
+        'Runtime evidence self-test did not emit the v3 schema.'
+    Assert-True ($report.VisualStudio.Provenance -ceq 'visual-studio-debugger-session-verified-v3') `
         'Runtime evidence self-test did not retain verified Visual Studio provenance.'
+    Assert-True (@($report.Cases).Count -eq 4) 'Runtime evidence self-test did not report all four cases.'
+    Assert-True ($report.Cases[0].InspectionDurationMilliseconds -eq 19000 -and
+        $report.Cases[0].PostContinueMarkerUpperBoundMilliseconds -eq 2000) `
+        'Runtime evidence self-test did not derive the bounded inspection and post-continue windows.'
+    Assert-True ($report.Cases[3].Case -ceq 'rectangle' -and
+        $report.Cases[3].BreakpointId -ceq 'native-profile-rejected-before-log') `
+        'Runtime evidence self-test did not fully attest the rectangle rejection.'
 
     $originalObservationJson = Get-Content -LiteralPath $observationPath -Raw
     $originalNewLog = $logs.new
+    $originalRectangleLog = $logs.rectangle
+
+    $observations.Schema = 'isrworldgen.t02-05.visual-studio-campaign.v2'
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Legacy v2 campaign' 'fresh v3 campaign' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.new.PSObject.Properties.Remove('DebuggerContinueUtc')
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Absent debugger continue timestamp' 'closed schema' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.new.StartedUtc = $eventUtc.AddSeconds(-402).ToString('o')
+    $observations.Cases.new.BreakpointHitUtc = $eventUtc.AddSeconds(-401).ToString('o')
+    $observations.Cases.new.DebuggerContinueUtc = $eventUtc.AddSeconds(-1).ToString('o')
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Excessive interactive inspection window' 'inspection window' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.new.DebuggerContinueUtc = $eventUtc.AddSeconds(-21).ToString('o')
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Inverted breakpoint and continue order' 'timestamp order' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.new.DebuggerContinueUtc = $eventUtc.AddSeconds(-10).ToString('o')
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Stale marker after debugger continue' 'post-continue' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.new.ServerPid = 999
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'PID mismatch' 'bootstrap identity' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.reload.SessionId = $observations.Cases.new.SessionId
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Debugger session mismatch' 'session identifiers must be unique' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
 
     $observations.Provenance = 'unverified'
     Write-JsonFixture $observationPath $observations
@@ -392,12 +460,34 @@ $logTimestamp [Event] Stopped the server!
     $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
 
     $staleTimestamp = '1.1.2000 00:00:00'
-    Write-Utf8Fixture $logPaths.new $originalNewLog.Replace($logTimestamp, $staleTimestamp)
+    $newRuntimeTimestampPattern = '(?m)^' + [regex]::Escape($logTimestamp) + '(?= .*L02C_NATIVE_PROFILE_FROZEN)'
+    Write-Utf8Fixture $logPaths.new ($originalNewLog -replace $newRuntimeTimestampPattern, $staleTimestamp)
     $observations.Cases.new.LogSha256 = (Get-FileHash -LiteralPath $logPaths.new -Algorithm SHA256).Hash
     Write-JsonFixture $observationPath $observations
     Assert-ValidationFails 'Stale log' 'timestamp' `
         { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
     Write-Utf8Fixture $logPaths.new $originalNewLog
+    Write-Utf8Fixture $observationPath $originalObservationJson
+
+    $afterSessionTimestamp = Get-LocalLogTimestamp $completed.AddMinutes(1)
+    Write-Utf8Fixture $logPaths.new ($originalNewLog -replace $newRuntimeTimestampPattern, $afterSessionTimestamp)
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+    $observations.Cases.new.LogSha256 = (Get-FileHash -LiteralPath $logPaths.new -Algorithm SHA256).Hash
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Log after debugger session' 'outside the verified debugger session' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $logPaths.new $originalNewLog
+    Write-Utf8Fixture $observationPath $originalObservationJson
+
+    Write-Utf8Fixture $logPaths.rectangle ($originalRectangleLog.Replace(
+        'dimensions=4096x256x8192',
+        'dimensions=4096x256x4096'))
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+    $observations.Cases.rectangle.LogSha256 = (Get-FileHash -LiteralPath $logPaths.rectangle -Algorithm SHA256).Hash
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Rectangle dimensions mismatch' 'dimensions' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $logPaths.rectangle $originalRectangleLog
     Write-Utf8Fixture $observationPath $originalObservationJson
 
     Add-Content -LiteralPath $logPaths.new -Value 'arbitrary stale content'
@@ -450,10 +540,10 @@ $logTimestamp [Event] Stopped the server!
         Status = 'PASS'
         Configuration = $Configuration
         CreateNewReplacementRejected = $duplicateFailed
-        NegativeCases = 16
+        NegativeCases = 25
         BootstrapModuleBinding = $true
         PortablePdbPairing = $true
-        VisualStudioProvenance = 'visual-studio-debugger-session-verified'
+        VisualStudioProvenance = 'visual-studio-debugger-session-verified-v3'
     } | ConvertTo-Json -Depth 4
 }
 finally {

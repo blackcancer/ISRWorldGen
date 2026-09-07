@@ -28,10 +28,12 @@ $maximumEnvelopeBytes = 8192
 $maximumLogBytes = 16 * 1024 * 1024
 $maximumManifestBytes = 64 * 1024
 $maximumCampaignBytes = 64 * 1024
+$maximumInteractiveInspection = [TimeSpan]::FromMinutes(5)
+$maximumPostContinueMarkerDelay = [TimeSpan]::FromSeconds(5)
 $artifactNames = @('ISRWorldGen.dll', 'ISRWorldGen.Core.dll', 'ISRWorldGen.pdb', 'ISRWorldGen.Core.pdb')
 $caseNames = @('new', 'reload', 'height', 'rectangle')
 $expectedProfile = 'ISRWorldGen Server (isolated data)'
-$expectedProvenance = 'visual-studio-debugger-session-verified'
+$expectedProvenance = 'visual-studio-debugger-session-verified-v3'
 
 function Assert-LeafFile {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Evidence)
@@ -290,7 +292,11 @@ function Get-LogLineUtcTimestamp {
 function Assert-MarkerTimestampInSession {
     param([Parameter(Mandatory)][string]$Content, [Parameter(Mandatory)][string]$Marker, [Parameter(Mandatory)][string]$CaseName, [Parameter(Mandatory)][DateTimeOffset]$Started, [Parameter(Mandatory)][DateTimeOffset]$Completed)
     $timestamp = Get-LogLineUtcTimestamp (Get-UniqueMarkerLine $Content $Marker $CaseName) "$CaseName $Marker"
-    if ($timestamp -lt $Started.AddSeconds(-2) -or $timestamp -gt $Completed.AddSeconds(2)) {
+    # Vintage Story log timestamps have one-second resolution. Treat the
+    # timestamp as the closed-open interval [second, second+1) when checking
+    # the lower session boundary, while keeping the captured session end as a
+    # strict upper boundary.
+    if ($timestamp.AddSeconds(1) -le $Started -or $timestamp.AddSeconds(1) -gt $Completed) {
         throw "$CaseName $Marker log timestamp is outside the verified debugger session."
     }
     return $timestamp
@@ -299,13 +305,14 @@ function Assert-MarkerTimestampInSession {
 function Read-CaseObservation {
     param([Parameter(Mandatory)]$Object, [Parameter(Mandatory)][string]$CaseName, [Parameter(Mandatory)]$Manifest, [Parameter(Mandatory)]$Log)
     Assert-ClosedSchema $Object @(
-        'SessionId', 'ServerPid', 'StartedUtc', 'BreakpointUtc', 'CompletedUtc', 'LogSha256',
+        'SessionId', 'ServerPid', 'StartedUtc', 'BreakpointHitUtc', 'DebuggerContinueUtc', 'CompletedUtc', 'LogSha256',
         'BreakpointId', 'CallstackFrames', 'CallstackSha256', 'Module'
     ) "$CaseName campaign case"
     $sessionId = [string](Get-RequiredProperty $Object 'SessionId' "$CaseName campaign case")
     $pidValue = [int](Get-RequiredProperty $Object 'ServerPid' "$CaseName campaign case")
     $started = Convert-StrictUtcTimestamp ([string](Get-RequiredProperty $Object 'StartedUtc' "$CaseName campaign case")) "$CaseName StartedUtc"
-    $breakpointUtc = Convert-StrictUtcTimestamp ([string](Get-RequiredProperty $Object 'BreakpointUtc' "$CaseName campaign case")) "$CaseName BreakpointUtc"
+    $breakpointHitUtc = Convert-StrictUtcTimestamp ([string](Get-RequiredProperty $Object 'BreakpointHitUtc' "$CaseName campaign case")) "$CaseName BreakpointHitUtc"
+    $debuggerContinueUtc = Convert-StrictUtcTimestamp ([string](Get-RequiredProperty $Object 'DebuggerContinueUtc' "$CaseName campaign case")) "$CaseName DebuggerContinueUtc"
     $completed = Convert-StrictUtcTimestamp ([string](Get-RequiredProperty $Object 'CompletedUtc' "$CaseName campaign case")) "$CaseName CompletedUtc"
     $logSha = [string](Get-RequiredProperty $Object 'LogSha256' "$CaseName campaign case")
     $breakpointId = [string](Get-RequiredProperty $Object 'BreakpointId' "$CaseName campaign case")
@@ -315,17 +322,21 @@ function Read-CaseObservation {
     if ($sessionId -cnotmatch '^[0-9a-f]{32}$' -or $pidValue -le 0 -or $logSha -cnotmatch '^[0-9A-F]{64}$' -or $callstackSha -cnotmatch '^[0-9A-F]{64}$') {
         throw "$CaseName campaign case contains a non-canonical identifier, PID, or SHA-256."
     }
-    if ($started -gt $breakpointUtc -or $breakpointUtc -gt $completed -or $completed -gt [DateTimeOffset]::UtcNow.AddMinutes(1)) {
+    if ($started -gt $breakpointHitUtc -or $breakpointHitUtc -gt $debuggerContinueUtc -or
+        $debuggerContinueUtc -gt $completed -or $completed -gt [DateTimeOffset]::UtcNow.AddMinutes(1)) {
         throw "$CaseName campaign timestamp order is invalid."
+    }
+    if (($debuggerContinueUtc - $breakpointHitUtc) -gt $maximumInteractiveInspection) {
+        throw "$CaseName debugger inspection window exceeds the five-minute maximum."
     }
     if ($Log.Sha256 -cne $logSha) { throw "$CaseName log SHA-256 differs from the debugger-session observation." }
 
-    $expectedBreakpoint = if ($CaseName -in @('new', 'reload')) { 'native-profile-game-ready-frozen' } else { 'native-profile-host-shutdown' }
+    $expectedBreakpoint = if ($CaseName -in @('new', 'reload')) { 'native-profile-game-ready-frozen' } else { 'native-profile-rejected-before-log' }
     $expectedFrames = if ($expectedBreakpoint -ceq 'native-profile-game-ready-frozen') {
         @('native-profile-host.create-frozen-diagnostic', 'native-profile-bridge.try-log-frozen', 'native-profile-bridge.on-game-ready')
     }
     else {
-        @('native-profile-host.shutdown', 'native-profile-bridge.reject-and-stop', 'native-profile-bridge.on-game-ready')
+        @('native-profile-host.log-rejected', 'native-profile-bridge.reject-and-stop', 'native-profile-bridge.on-game-ready')
     }
     if ($breakpointId -cne $expectedBreakpoint -or ($callstackFrames -join '|') -cne ($expectedFrames -join '|') -or
         (Get-TextSha256 ($callstackFrames -join "`n")) -cne $callstackSha) {
@@ -361,13 +372,24 @@ function Read-CaseObservation {
     $probeTimestamp = Assert-MarkerTimestampInSession $Log.Content 'L00B_DEBUG_PROBE_READY' $CaseName $started $completed
     $runtimeMarker = if ($CaseName -in @('new', 'reload')) { 'L02C_NATIVE_PROFILE_FROZEN' } else { 'L02C_NATIVE_PROFILE_REJECTED' }
     $runtimeTimestamp = Assert-MarkerTimestampInSession $Log.Content $runtimeMarker $CaseName $started $completed
-    if ([Math]::Abs(($runtimeTimestamp - $breakpointUtc).TotalSeconds) -gt 5) {
-        throw "$CaseName breakpoint timestamp is not correlated with the runtime marker."
+    # The process is intentionally suspended between breakpoint hit and MCP
+    # inspection. Correlate the marker to the recorded Continue operation,
+    # not to the hit instant. Because the log has one-second resolution, its
+    # interval must overlap or follow Continue and its upper bound must stay
+    # within the short post-continue window.
+    if ($runtimeTimestamp.AddSeconds(1) -le $debuggerContinueUtc) {
+        throw "$CaseName runtime marker precedes the debugger continue operation."
+    }
+    if (($runtimeTimestamp.AddSeconds(1) - $debuggerContinueUtc) -gt $maximumPostContinueMarkerDelay) {
+        throw "$CaseName runtime marker exceeds the five-second post-continue window."
     }
     if ($probeTimestamp -lt $bootstrapTimestamp.AddSeconds(-2)) { throw "$CaseName bootstrap/probe timestamp order is invalid." }
     return [ordered]@{
         SessionId = $sessionId; ServerPid = $pidValue; StartedUtc = $started.ToString('o')
-        BreakpointUtc = $breakpointUtc.ToString('o'); CompletedUtc = $completed.ToString('o')
+        BreakpointHitUtc = $breakpointHitUtc.ToString('o'); DebuggerContinueUtc = $debuggerContinueUtc.ToString('o')
+        RuntimeMarkerUtc = $runtimeTimestamp.ToString('o'); CompletedUtc = $completed.ToString('o')
+        InspectionDurationMilliseconds = [long][Math]::Round(($debuggerContinueUtc - $breakpointHitUtc).TotalMilliseconds)
+        PostContinueMarkerUpperBoundMilliseconds = [long][Math]::Round(($runtimeTimestamp.AddSeconds(1) - $debuggerContinueUtc).TotalMilliseconds)
         LogSha256 = $logSha; BreakpointId = $expectedBreakpoint; CallstackSha256 = $callstackSha
         BootstrapModuleBinding = $true; PdbPairingVerified = $true
     }
@@ -478,7 +500,10 @@ $logs = [ordered]@{
 $campaignContent = Read-BoundedTextFile $CampaignObservationPath $maximumCampaignBytes 'campaign observation'
 $campaign = $campaignContent | ConvertFrom-Json -DateKind String
 Assert-ClosedSchema $campaign @('Schema', 'TestedCommit', 'SnapshotManifestSha256', 'VisualStudioProfile', 'DebuggerTransport', 'Provenance', 'Cases') 'campaign observation'
-if ($campaign.Schema -cne 'isrworldgen.t02-05.visual-studio-campaign.v2' -or $campaign.TestedCommit -cne $currentCommit -or
+if ($campaign.Schema -ceq 'isrworldgen.t02-05.visual-studio-campaign.v2') {
+    throw 'Campaign v2 lacks DebuggerContinueUtc and remains insufficient; collect a fresh v3 campaign instead of retrofitting legacy evidence.'
+}
+if ($campaign.Schema -cne 'isrworldgen.t02-05.visual-studio-campaign.v3' -or $campaign.TestedCommit -cne $currentCommit -or
     $campaign.SnapshotManifestSha256 -cne (Get-FileHash -LiteralPath $snapshotManifestPath -Algorithm SHA256).Hash -or
     $campaign.VisualStudioProfile -cne $expectedProfile -or $campaign.DebuggerTransport -cne 'visual-studio-debugger' -or
     $campaign.Provenance -cne $expectedProvenance) {
@@ -562,14 +587,17 @@ $caseReports = @()
 foreach ($caseName in $caseNames) {
     $caseReports += [ordered]@{
         Case = $caseName; SessionId = $observations[$caseName].SessionId; ServerPid = $observations[$caseName].ServerPid
-        StartedUtc = $observations[$caseName].StartedUtc; BreakpointUtc = $observations[$caseName].BreakpointUtc
+        StartedUtc = $observations[$caseName].StartedUtc; BreakpointHitUtc = $observations[$caseName].BreakpointHitUtc
+        DebuggerContinueUtc = $observations[$caseName].DebuggerContinueUtc; RuntimeMarkerUtc = $observations[$caseName].RuntimeMarkerUtc
+        InspectionDurationMilliseconds = $observations[$caseName].InspectionDurationMilliseconds
+        PostContinueMarkerUpperBoundMilliseconds = $observations[$caseName].PostContinueMarkerUpperBoundMilliseconds
         CompletedUtc = $observations[$caseName].CompletedUtc; LogSha256 = $observations[$caseName].LogSha256
         BreakpointId = $observations[$caseName].BreakpointId; CallstackSha256 = $observations[$caseName].CallstackSha256
         BootstrapModuleBinding = $true; PdbPairingVerified = $true
     }
 }
 $report = [ordered]@{
-    Schema = 'isrworldgen.t02-05.runtime-evidence.v2'; Status = 'PASS'; Commit = $currentCommit
+    Schema = 'isrworldgen.t02-05.runtime-evidence.v3'; Status = 'PASS'; Commit = $currentCommit
     ExpectedAssemblyInformationalVersion = $expectedInformationalVersion; Server = $serverIdentity
     SnapshotManifestSha256 = (Get-FileHash -LiteralPath $snapshotManifestPath -Algorithm SHA256).Hash
     CampaignObservationSha256 = (Get-FileHash -LiteralPath $CampaignObservationPath -Algorithm SHA256).Hash

@@ -214,3 +214,61 @@ Toutes les entrées textuelles brutes de l'oracle v2 passent désormais par l'un
 - JSON de campagne : maximum 64 KiB.
 
 Trois négatifs distincts créent réellement, par `FileStream.SetLength`, un log, un manifeste et une campagne d'un octet au-delà de leur plafond. Ils exigent le rejet déterministe attendu et vérifient qu'une sentinelle placée dans chaque fichier n'apparaît jamais dans l'exception. Le contrôle statique exige aussi qu'il n'existe qu'un seul appel `Get-Content -Raw` dans l'oracle et qu'il soit situé dans ce lecteur borné. La preuve moteur demeure `NOT_RUN`.
+
+## Erratum provenance v3 — suspension interactive du débogueur
+
+Cet erratum préserve les règles v2 ci-dessus comme historique, mais les rend
+inacceptables pour toute nouvelle promotion. La campagne réelle
+`20260907T033708721`, exécutée sur `2ee6fda`, reste conservée comme `FAIL` de
+harnais et ne doit pas être modifiée : son reload a observé le breakpoint puis
+a volontairement maintenu le serveur suspendu pendant l'inspection MCP. Le
+marqueur Frozen a été écrit 19 secondes après l'heure de hit consignée, ce qui
+a révélé que l'ancien seuil absolu de cinq secondes mesurait le temps
+d'inspection humaine plutôt que la provenance de l'exécution. Aucun champ
+`DebuggerContinueUtc` ne sera inventé rétroactivement pour cette campagne et
+aucun PASS runtime n'en est dérivé.
+
+### Campagne v3 obligatoire
+
+`Invoke-L02CNativeRuntimeEvidence.ps1 -Phase Validate` refuse désormais
+explicitement `isrworldgen.t02-05.visual-studio-campaign.v2` avec demande d'une
+nouvelle campagne. Le schéma fermé v3 conserve la racine historique et impose
+`Provenance=visual-studio-debugger-session-verified-v3`. Chaque cas contient
+exactement les champs précédents, avec `BreakpointUtc` remplacé par
+`BreakpointHitUtc` et le nouveau `DebuggerContinueUtc` obligatoire.
+
+La séquence temporelle vérifiée est :
+
+1. `StartedUtc <= BreakpointHitUtc <= DebuggerContinueUtc <= CompletedUtc` ;
+2. la suspension interactive `DebuggerContinueUtc-BreakpointHitUtc` est bornée
+   à cinq minutes ;
+3. le marqueur runtime du même log/PID/session doit appartenir à la session,
+   suivre le Continue et apparaître au plus cinq secondes après lui ;
+4. le log Vintage Story n'ayant qu'une précision d'une seconde, sa valeur est
+   interprétée comme l'intervalle fermé-ouvert `[seconde,seconde+1)`. Cet
+   intervalle doit chevaucher ou suivre le Continue, et sa borne haute doit
+   rester dans la fenêtre post-Continue de cinq secondes.
+
+Le rapport v3 restitue uniquement les timestamps validés et deux valeurs
+dérivées bornées : `InspectionDurationMilliseconds` et
+`PostContinueMarkerUpperBoundMilliseconds`.
+
+Pour `new` et `reload`, conserver le breakpoint
+`native-profile-game-ready-frozen` avant la journalisation Frozen. Pour les
+refus, déplacer le breakpoint runtime de `ShutDown` vers l'entrée de
+`VintageStoryNativeProfileHost.LogRejected`, avant le log, et consigner
+`BreakpointId=native-profile-rejected-before-log` avec les frames fermées
+`native-profile-host.log-rejected`, `native-profile-bridge.reject-and-stop`,
+`native-profile-bridge.on-game-ready`. Le log ultérieur
+`Server stop requested ... Shutdown through Server API` continue de prouver
+l'appel d'arrêt ; le chemin statique `RejectAndStop` prouve le `finally` vers
+`ShutDown`.
+
+Le harnais v3 ajoute des refus distincts pour : campagne legacy v2, Continue
+absent, log avant ou après la session, suspension supérieure à cinq minutes,
+ordre hit/Continue inversé, marqueur trop tardif après Continue, PID différent,
+SessionId dupliqué et dimensions rectangle altérées. Les contrôles historiques
+de profil, bootstrap, DLL/PDB, callstack, callback, mutation et tailles bornées
+restent inchangés. Cette correction est statique : T02-05 doit être rejoué sous
+Visual Studio/MCP après intégration ; son statut demeure `NOT_RUN` pour le
+nouveau schéma v3.

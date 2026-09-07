@@ -257,7 +257,9 @@ $requiredRuntimeOracleFragments = @(
     "'ISRWorldGen.Core.pdb'",
     "'3AD6294240B9B55D3E0DB3CD323D90C31EC8474EAE6E4E16B58FE76507CB9D0D'",
     "'L00A_BOOTSTRAP'",
-    "'visual-studio-debugger-session-verified'",
+    "'visual-studio-debugger-session-verified-v3'",
+    "'isrworldgen.t02-05.visual-studio-campaign.v3'",
+    "'isrworldgen.t02-05.runtime-evidence.v3'",
     "'ISRWorldGen Server (isolated data)'",
     'ExpectedAssemblyInformationalVersion',
     'AssemblyInformationalVersionAttribute',
@@ -266,6 +268,10 @@ $requiredRuntimeOracleFragments = @(
     '[Reflection.Metadata.BlobContentId]',
     'Assert-ClosedSchema',
     'CallstackSha256',
+    'BreakpointHitUtc',
+    'DebuggerContinueUtc',
+    '$maximumInteractiveInspection = [TimeSpan]::FromMinutes(5)',
+    '$maximumPostContinueMarkerDelay = [TimeSpan]::FromSeconds(5)',
     'BootstrapModuleBinding',
     'PdbPairingVerified',
     '$maximumLogBytes = 16 * 1024 * 1024',
@@ -311,7 +317,16 @@ foreach ($fragment in @(
     "'PDB mismatch'",
     "'Oversized log'",
     "'Oversized manifest'",
-    "'Oversized campaign'"
+    "'Oversized campaign'",
+    "'Legacy v2 campaign'",
+    "'Absent debugger continue timestamp'",
+    "'Excessive interactive inspection window'",
+    "'Inverted breakpoint and continue order'",
+    "'Stale marker after debugger continue'",
+    "'PID mismatch'",
+    "'Debugger session mismatch'",
+    "'Log after debugger session'",
+    "'Rectangle dimensions mismatch'"
 )) {
     if (-not $runtimeOracleTestSource.Contains($fragment)) {
         throw "Required T02-05 runtime evidence negative test is missing: $fragment"
