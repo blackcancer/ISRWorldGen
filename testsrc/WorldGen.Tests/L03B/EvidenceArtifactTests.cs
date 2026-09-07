@@ -71,7 +71,7 @@ public sealed class EvidenceArtifactTests
 
         try
         {
-            RunCampaign(output, reportPath, manifestPath, commit, tree, configuration, nonce, blindOrder, testAssemblyHash, coreAssemblyHash, fixturesBlob);
+            RunCampaign(output, repository, reportPath, manifestPath, commit, tree, configuration, nonce, blindOrder, testAssemblyHash, coreAssemblyHash, fixturesBlob);
         }
         catch (Exception exception)
         {
@@ -95,6 +95,7 @@ public sealed class EvidenceArtifactTests
 
     private static void RunCampaign(
         string output,
+        string repository,
         string reportPath,
         string manifestPath,
         string commit,
@@ -189,10 +190,7 @@ public sealed class EvidenceArtifactTests
         string keyPath = Path.Combine(output, "sealed", "T03-06-S-review-key.json");
         WriteAtomic(keyPath, keyBytes);
 
-        string fixturesPath = Path.Combine(L03BTestSupport.FindRepositoryRoot(), "registry", "fixtures.json");
-        byte[] fixturesBytes = File.ReadAllBytes(fixturesPath);
-        Assert.AreEqual(fixturesBlob, L03BEvidenceProtocol.GitBlobObjectId(fixturesBytes),
-            "The exact fixture bytes consumed by evidence must be the blob committed at HEAD.");
+        byte[] fixturesBytes = L03BEvidenceProtocol.ReadVerifiedGitBlob(repository, fixturesBlob);
         FixtureCorpus fixtureCorpus = FixtureCorpus.Load(fixturesBytes);
         IReadOnlyList<int> calibrationSeeds = fixtureCorpus.CalibrationSeeds;
         IReadOnlyList<int> holdoutSeeds = fixtureCorpus.HoldoutSeeds;

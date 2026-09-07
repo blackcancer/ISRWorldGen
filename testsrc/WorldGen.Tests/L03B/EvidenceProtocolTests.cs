@@ -20,6 +20,25 @@ public sealed class EvidenceProtocolTests
     }
 
     [TestMethod]
+    public void FixtureEvidenceConsumesCommittedBytesInsteadOfCrLfCheckoutBytes()
+    {
+        byte[] committedBytes = Encoding.UTF8.GetBytes("{\n  \"calibration_seeds\": [1],\n  \"holdout_seeds\": [2]\n}\n");
+        byte[] checkoutBytes = Encoding.UTF8.GetBytes("{\r\n  \"calibration_seeds\": [1],\r\n  \"holdout_seeds\": [2]\r\n}\r\n");
+        string committedObjectId = L03BEvidenceProtocol.GitBlobObjectId(committedBytes);
+
+        CollectionAssert.AreEqual(committedBytes,
+            L03BEvidenceProtocol.RequireExactGitBlobBytes(committedObjectId, committedBytes));
+        Assert.AreNotEqual(committedObjectId, L03BEvidenceProtocol.GitBlobObjectId(checkoutBytes));
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            L03BEvidenceProtocol.RequireExactGitBlobBytes(committedObjectId, checkoutBytes));
+
+        string evidenceSource = File.ReadAllText(Path.Combine(L03BTestSupport.FindRepositoryRoot(),
+            "testsrc", "WorldGen.Tests", "L03B", "EvidenceArtifactTests.cs"));
+        StringAssert.Contains(evidenceSource, "ReadVerifiedGitBlob(repository, fixturesBlob)");
+        Assert.IsFalse(evidenceSource.Contains("File.ReadAllBytes(fixturesPath)", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void BlindManifestSignatureCoversEveryPublicPayloadField()
     {
         L03BBlindArtifact[] artifacts =
