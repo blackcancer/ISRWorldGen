@@ -61,14 +61,30 @@ public readonly record struct LandscapeSample(
     LandscapeFamily DominantFamily,
     double ModelAltitudeNormalized,
     double AltitudeBlocks,
-    double BathymetryBlocks);
+    double BathymetryBlocks,
+    double PrimaryResidualWeight,
+    bool IsTransition);
+
+/// <summary>
+/// Immutable regional frame.  The extents describe the owning Voronoi cell in a
+/// deterministic oriented frame; they are inputs to morphology, not a post-sample clamp.
+/// </summary>
+internal readonly record struct LandscapeRegionPlan(
+    long CenterX,
+    long CenterZ,
+    double OrientationRadians,
+    double CoreExtentUBlocks,
+    double CoreExtentVBlocks,
+    double TransitionExtentUBlocks,
+    double TransitionExtentVBlocks,
+    ulong VariantOrdinal);
 
 public sealed class LandscapeModel
 {
     private readonly int nativeSeed;
     private readonly WorldBounds bounds;
     private readonly SiteEntry[] sites;
-    private readonly double supportOverlapFactor;
+    private readonly double coreDominanceRatio;
 
     internal LandscapeModel(
         int nativeSeed,
@@ -85,7 +101,9 @@ public sealed class LandscapeModel
         this.nativeSeed = nativeSeed;
         this.bounds = bounds;
         this.sites = sites.OrderBy(item => item.Cell.CellId, LandscapeStableIdComparer.Instance).ToArray();
-        this.supportOverlapFactor = supportOverlapFactor;
+        // This turns the frozen overlap setting into an explicit regional core.  A
+        // point is pure until its nearest/second-nearest distance ratio reaches it.
+        coreDominanceRatio = 1d / supportOverlapFactor;
         Cells = Array.AsReadOnly(cells.OrderBy(item => item.CellId, LandscapeStableIdComparer.Instance).ToArray());
         VerticalPlan = verticalPlan;
         PlateSnapshotChecksum = plateSnapshotChecksum;
@@ -118,9 +136,9 @@ public sealed class LandscapeModel
         }
 
         SiteEntry dominant = sites[0];
+        SiteEntry? secondary = null;
         double dominantDistance = double.PositiveInfinity;
-        double weighted = 0;
-        double totalWeight = 0;
+        double secondaryDistance = double.PositiveInfinity;
         for (int index = 0; index < sites.Length; index++)
         {
             double dx = (double)x - sites[index].X;
@@ -128,26 +146,29 @@ public sealed class LandscapeModel
             double distanceSquared = (dx * dx) + (dz * dz);
             if (distanceSquared < dominantDistance)
             {
+                secondary = dominant;
+                secondaryDistance = dominantDistance;
                 dominantDistance = distanceSquared;
                 dominant = sites[index];
             }
-            double normalizedDistance = Math.Sqrt(distanceSquared) / sites[index].SupportRadiusBlocks;
-            double weight = CompactSupportWeight(normalizedDistance);
-            if (weight == 0)
+            else if (distanceSquared < secondaryDistance)
             {
-                continue;
+                secondaryDistance = distanceSquared;
+                secondary = sites[index];
             }
-
-            weighted += SampleCell(sites[index], x, z) * weight;
-            totalWeight += weight;
         }
 
-        if (totalWeight <= 0 || !double.IsFinite(totalWeight))
-        {
-            throw new InvalidOperationException("Voronoi-derived landscape supports failed to cover an in-bounds coordinate.");
-        }
-
-        double modelAltitude = weighted / totalWeight;
+        double transition = secondary is null ? 0d : TransitionWeight(dominantDistance, secondaryDistance);
+        double primaryResidual = SampleResidual(dominant, x, z);
+        double secondaryResidual = secondary is null ? 0d : SampleResidual(secondary.Value, x, z);
+        // Datum and residual are intentionally different fields.  The datum is
+        // continuous across a regional boundary; only residuals participate in the
+        // explicit C1 transition band, and never receive distant-site contributions.
+        double primaryDatum = LandscapeAltitudeBounds.GeologicalDatum(dominant.Cell);
+        double secondaryDatum = secondary is null ? primaryDatum : LandscapeAltitudeBounds.GeologicalDatum(secondary.Value.Cell);
+        double geologicalDatum = Lerp(primaryDatum, secondaryDatum, transition);
+        double morphologyResidual = Lerp(primaryResidual, secondaryResidual, transition);
+        double modelAltitude = geologicalDatum + morphologyResidual;
 
         if (!double.IsFinite(modelAltitude) || modelAltitude is < -1 or > 1)
         {
@@ -163,22 +184,23 @@ public sealed class LandscapeModel
             dominant.Cell.Family,
             modelAltitude,
             altitudeBlocks,
-            bathymetryBlocks);
+            bathymetryBlocks,
+            1d - transition,
+            transition > 0d);
     }
 
-    private double SampleCell(SiteEntry entry, long x, long z)
+    private double SampleResidual(SiteEntry entry, long x, long z)
     {
         LandscapeCellProfile cell = entry.Cell;
         LandscapeFamilyProfile family = LandscapeFamilyCatalog.Get(cell.Family);
-        double signature = LandscapeSignatureSampler.Sample(
+        double signature = LandscapeSignatureSampler.SampleRegional(
             family,
             x,
             z,
             nativeSeed,
             cell.CellId.Low ^ cell.CellId.High,
-            entry.X,
-            entry.Z);
-        return ComposeCellAltitude(cell, family, signature);
+            entry.Region);
+        return family.ReliefAmplitudeNormalized * signature;
     }
 
     private static double ComposeCellAltitude(LandscapeCellProfile cell, LandscapeFamilyProfile family, double signature)
@@ -191,6 +213,28 @@ public sealed class LandscapeModel
         return geologicalBase + morphologyResidual;
     }
 
+    private double TransitionWeight(double primaryDistanceSquared, double secondaryDistanceSquared)
+    {
+        if (!double.IsFinite(primaryDistanceSquared) || !double.IsFinite(secondaryDistanceSquared) ||
+            primaryDistanceSquared < 0 || secondaryDistanceSquared <= 0)
+        {
+            throw new InvalidOperationException("Regional nearest-site distances must be finite and ordered.");
+        }
+
+        double ratio = Math.Sqrt(primaryDistanceSquared / secondaryDistanceSquared);
+        if (ratio <= coreDominanceRatio)
+        {
+            return 0d;
+        }
+
+        // ratio==1 is the Voronoi boundary. Smoothstep supplies zero derivative at
+        // both band limits, so switching the direct neighbour remains C1.
+        double normalized = Math.Min(1d, (ratio - coreDominanceRatio) / (1d - coreDominanceRatio));
+        return normalized * normalized * (3d - (2d * normalized)) * .5d;
+    }
+
+    private static double Lerp(double left, double right, double amount) => left + ((right - left) * amount);
+
     private StableId[] ContributorIds(long x, long z) => sites.Where(site =>
     {
         double dx = (double)x - site.X;
@@ -201,11 +245,11 @@ public sealed class LandscapeModel
     private static Hash256 ComputeChecksum(LandscapeModel model, GenerationIdentity identity)
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        AppendString(hash, "ISRW-LANDSCAPE-MODEL-V5-COMPACT-VORONOI-SUPPORT");
+        AppendString(hash, "ISRW-LANDSCAPE-MODEL-V6-REGIONAL-C1-RESIDUALS");
         AppendInt32(hash, identity.NativeSeed); AppendUInt32(hash, identity.AlgorithmVersion); AppendUInt32(hash, identity.SchemaVersion);
         AppendHash(hash, identity.GeographyConfigHash); AppendHash(hash, identity.GenerationAssetHash); AppendString(hash, identity.DeterminismProfileId);
         AppendHash(hash, model.PlateSnapshotChecksum); AppendHash(hash, model.AtlasContentChecksum);
-        AppendString(hash, model.ScaleProfileId); AppendUInt32(hash, model.ScaleProfileVersion); AppendDouble(hash, model.supportOverlapFactor);
+        AppendString(hash, model.ScaleProfileId); AppendUInt32(hash, model.ScaleProfileVersion); AppendDouble(hash, model.coreDominanceRatio);
         AppendInt64(hash, model.VerticalPlan.RockFloorTopBlocks); AppendInt64(hash, model.VerticalPlan.DeepestOceanFloorBlocks);
         AppendInt64(hash, model.VerticalPlan.MaximumCavernCeilingBlocks); AppendInt64(hash, model.VerticalPlan.HighestReliefBlocks);
         AppendInt64(hash, model.VerticalPlan.MaximumOceanDepthBlocks); AppendInt64(hash, model.VerticalPlan.MinimumCavernInteriorHeightBlocks);
@@ -216,12 +260,19 @@ public sealed class LandscapeModel
             AppendInt32(hash, (int)cell.CrustKind); AppendInt32(hash, cell.RelativeAgePpm); AppendInt32(hash, cell.ContinentalHeightPpm);
             AppendDouble(hash, cell.UpliftNormalized); AppendDouble(hash, cell.SubsidenceNormalized); AppendHash(hash, cell.FamilyParameterChecksum);
         }
+        foreach (SiteEntry site in model.sites)
+        {
+            AppendStableId(hash, site.Cell.CellId); AppendInt64(hash, site.Region.CenterX); AppendInt64(hash, site.Region.CenterZ);
+            AppendDouble(hash, site.Region.OrientationRadians); AppendDouble(hash, site.Region.CoreExtentUBlocks); AppendDouble(hash, site.Region.CoreExtentVBlocks);
+            AppendDouble(hash, site.Region.TransitionExtentUBlocks); AppendDouble(hash, site.Region.TransitionExtentVBlocks); AppendUInt64(hash, site.Region.VariantOrdinal);
+        }
         return Hash256.FromCanonicalBytes(hash.GetHashAndReset());
     }
 
     private static void AppendInt32(IncrementalHash hash, int value) { Span<byte> b = stackalloc byte[sizeof(int)]; BinaryPrimitives.WriteInt32BigEndian(b, value); hash.AppendData(b); }
     private static void AppendInt64(IncrementalHash hash, long value) { Span<byte> b = stackalloc byte[sizeof(long)]; BinaryPrimitives.WriteInt64BigEndian(b, value); hash.AppendData(b); }
     private static void AppendUInt32(IncrementalHash hash, uint value) { Span<byte> b = stackalloc byte[sizeof(uint)]; BinaryPrimitives.WriteUInt32BigEndian(b, value); hash.AppendData(b); }
+    private static void AppendUInt64(IncrementalHash hash, ulong value) { Span<byte> b = stackalloc byte[sizeof(ulong)]; BinaryPrimitives.WriteUInt64BigEndian(b, value); hash.AppendData(b); }
     private static void AppendDouble(IncrementalHash hash, double value) => AppendInt64(hash, BitConverter.DoubleToInt64Bits(value));
     private static void AppendHash(IncrementalHash hash, Hash256 value) { Span<byte> b = stackalloc byte[Hash256.ByteWidth]; value.WriteCanonicalBytes(b); hash.AppendData(b); }
     private static void AppendStableId(IncrementalHash hash, StableId value) { Span<byte> b = stackalloc byte[sizeof(ulong) * 2]; BinaryPrimitives.WriteUInt64BigEndian(b[..sizeof(ulong)], value.High); BinaryPrimitives.WriteUInt64BigEndian(b[sizeof(ulong)..], value.Low); hash.AppendData(b); }
@@ -266,7 +317,7 @@ public sealed class LandscapeModel
         return contributors;
     }
 
-    internal readonly record struct SiteEntry(long X, long Z, double SupportRadiusBlocks, LandscapeCellProfile Cell);
+    internal readonly record struct SiteEntry(long X, long Z, double SupportRadiusBlocks, LandscapeCellProfile Cell, LandscapeRegionPlan Region);
 }
 
 internal static class LandscapeChecksumEncoding { internal const int MaximumStringUtf8Bytes = 128; }
@@ -397,6 +448,7 @@ public static class LandscapeModelBuilder
         AtlasSite[] sourceSites = atlas.Sites.ToArray();
         Array.Sort(sourceSites, (left, right) => LandscapeStableIdComparer.Instance.Compare(left.Id, right.Id));
         IReadOnlyDictionary<StableId, double> supportRadii = BuildSupportRadii(atlas, settings.SupportOverlapFactor);
+        IReadOnlyDictionary<StableId, LandscapeRegionPlan> regionPlans = BuildRegionPlans(atlas, identity.NativeSeed, settings.SupportOverlapFactor);
         for (int index = 0; index < sourceSites.Length; index++)
         {
             if (sourceSites[index].Id != sourceCells[index].CellId)
@@ -433,7 +485,8 @@ public static class LandscapeModelBuilder
                 sourceSites[index].X,
                 sourceSites[index].Z,
                 supportRadii[sourceSites[index].Id],
-                cells[index]);
+                cells[index],
+                regionPlans[sourceSites[index].Id]);
         }
 
         return GenerationResult<LandscapeModel>.Success(new LandscapeModel(
@@ -536,6 +589,63 @@ public static class LandscapeModelBuilder
         }
 
         return radii;
+    }
+
+    private static IReadOnlyDictionary<StableId, LandscapeRegionPlan> BuildRegionPlans(
+        AtlasMesh atlas,
+        int nativeSeed,
+        double supportOverlapFactor)
+    {
+        var sites = atlas.Sites.ToDictionary(site => site.Id);
+        var plans = new Dictionary<StableId, LandscapeRegionPlan>(sites.Count);
+        foreach (VoronoiCell cell in atlas.Cells)
+        {
+            AtlasSite site = sites[cell.SiteId];
+            ulong variant = StatelessRandomV1.NextUInt64(nativeSeed, RandomDomain.Geology, site.Id, 701);
+            double orientation = Math.Tau * ((variant >> 11) * (1d / (1UL << 53)));
+            double cos = Math.Cos(orientation);
+            double sin = Math.Sin(orientation);
+            double extentU = 0;
+            double extentV = 0;
+            foreach (ExactPoint vertex in cell.Vertices)
+            {
+                double dx = vertex.X.ToDouble() - site.X;
+                double dz = vertex.Z.ToDouble() - site.Z;
+                extentU = Math.Max(extentU, Math.Abs((cos * dx) + (sin * dz)));
+                extentV = Math.Max(extentV, Math.Abs((-sin * dx) + (cos * dz)));
+            }
+
+            // Degenerate point/linear topology has no enclosing polygon.  The same
+            // finite-world fallback as support calculation gives it a real extent.
+            if (!double.IsFinite(extentU) || extentU <= 0 || !double.IsFinite(extentV) || extentV <= 0)
+            {
+                double fallback = FarthestWorldCornerDistance(atlas.Bounds, site);
+                extentU = fallback;
+                extentV = fallback;
+            }
+
+            double coreRatio = 1d / supportOverlapFactor;
+            plans.Add(site.Id, new LandscapeRegionPlan(
+                site.X,
+                site.Z,
+                orientation,
+                Math.BitIncrement(extentU * coreRatio),
+                Math.BitIncrement(extentV * coreRatio),
+                Math.BitIncrement(extentU),
+                Math.BitIncrement(extentV),
+                variant));
+        }
+
+        if (plans.Count != sites.Count || plans.Values.Any(plan =>
+            !double.IsFinite(plan.CoreExtentUBlocks) || !double.IsFinite(plan.CoreExtentVBlocks) ||
+            !double.IsFinite(plan.TransitionExtentUBlocks) || !double.IsFinite(plan.TransitionExtentVBlocks) ||
+            plan.CoreExtentUBlocks <= 0 || plan.CoreExtentVBlocks <= 0 ||
+            plan.TransitionExtentUBlocks <= 0 || plan.TransitionExtentVBlocks <= 0))
+        {
+            throw new InvalidOperationException("Atlas geometry did not yield finite regional landscape extents.");
+        }
+
+        return plans;
     }
 
     private static double FarthestWorldCornerDistance(WorldBounds bounds, AtlasSite site)

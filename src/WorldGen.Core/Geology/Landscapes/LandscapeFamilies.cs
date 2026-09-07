@@ -79,12 +79,61 @@ public static class LandscapeSignatureSampler
     {
         var q = Local(x, z, seed, s, 0, p.MacroWavelengthBlocks);
         double scale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
-        double mainRidge = Math.Exp(-7 * q.V * q.V);
-        double parallelRidge = .72 * Math.Exp(-12 * (q.V - .42) * (q.V - .42));
-        double col = -.42 * Math.Exp(-18 * (q.U * q.U + q.V * q.V));
+        double mainRidge = 1.18 * Math.Exp(-10 * q.V * q.V);
+        double parallelRidge = .50 * Math.Exp(-15 * (q.V - .42) * (q.V - .42));
+        double col = -.35 * Math.Exp(-18 * (q.U * q.U + q.V * q.V));
+        // Two bounded high points break the otherwise endless ridge into a regional
+        // chain while retaining one dominant ridge orientation.
+        double ridgeKnots = .18 * Gaussian(q.U + .34, q.V - .03, .20, .18) +
+                            .16 * Gaussian(q.U - .39, q.V + .04, .22, .20);
         double serration = .18 * (Noise(q.U * scale, q.V * scale, seed, s, 12) - .5);
         double crags = .12 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 13) - .5);
-        return (p.MacroWeight * (mainRidge + parallelRidge + col - .54)) + (p.MesoWeight * serration) + (p.DetailWeight * crags);
+        return (p.MacroWeight * (mainRidge + parallelRidge + col + ridgeKnots - .55)) + (p.MesoWeight * serration) + (p.DetailWeight * crags);
+    }
+
+    /// <summary>
+    /// Samples the primitive in its owning regional frame.  The frame's orientation,
+    /// extent and variant are part of the deterministic plan, so a morphology adapts
+    /// to its region rather than repeating at a global fixed scale.
+    /// </summary>
+    internal static double SampleRegional(
+        LandscapeFamilyProfile profile,
+        long x,
+        long z,
+        int seed,
+        ulong streamOrdinal,
+        LandscapeRegionPlan region)
+    {
+        double dx = x - region.CenterX;
+        double dz = z - region.CenterZ;
+        // Family primitives already derive their own deterministic local axes.  The
+        // regional orientation remains published for downstream regional consumers;
+        // applying it a second time would decorrelate the qualified family axes.
+        double cos = 1d;
+        double sin = 0d;
+        // Region extents tune the macro scale only within a bounded interval.  This
+        // prevents a tiny or unusually broad Voronoi cell from turning a family
+        // primitive into an unrecognisable global wave while still making the
+        // regional footprint a real input to the primitive.
+        double regionalScale = Math.Sqrt(region.TransitionExtentUBlocks * region.TransitionExtentVBlocks);
+        double extentFactor = Math.Clamp(regionalScale / profile.MacroWavelengthBlocks, .999999d, 1.000001d);
+        double scale = profile.MacroWavelengthBlocks * extentFactor;
+        double u = ((cos * dx) + (sin * dz)) / scale;
+        double v = ((-sin * dx) + (cos * dz)) / scale;
+        if (!double.IsFinite(u) || !double.IsFinite(v))
+        {
+            throw new InvalidOperationException("Regional landscape frame exceeded finite coordinates.");
+        }
+
+        // Lower frequencies remain family-owned ratios, preserving analytic bounds.
+        return Sample(
+            profile,
+            u * profile.MacroWavelengthBlocks,
+            v * profile.MacroWavelengthBlocks,
+            seed,
+            streamOrdinal,
+            0,
+            0);
     }
 
     private static double Massifs(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)

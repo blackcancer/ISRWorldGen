@@ -311,7 +311,7 @@ public sealed class LandscapeCompositionTests
     }
 
     [TestMethod]
-    public void CompactSupportRemovesMembershipJumpsAtFormerRankExchangeCoordinates()
+    public void RegionalCoreIsPureAndTheOnlyResidualMixIsTheExplicitC1Band()
     {
         FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("laboratory");
         GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
@@ -323,23 +323,28 @@ public sealed class LandscapeCompositionTests
             profile,
             new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), profile.SiteQuota, 1.25)));
 
-        // These are local regressions for the two prior rank-exchange reports, not a campaign acceptance threshold.
-        // The independently measured compact-support maxima were about 8.1e-4; 1.1e-3 leaves only run-to-run margin.
-        Assert.IsLessThan(.0011, AdjacentDelta(model, 896, 1020, 896, 1021));
-        Assert.IsLessThan(.0011, AdjacentDelta(model, 2104, 1024, 2105, 1024));
-
-        foreach (IEnumerable<(long X, long Z)> line in new[]
+        // Worst-case fixture: every published owner centre, not a median summary.
+        foreach (AtlasSite site in atlas.Sites)
         {
-            Enumerable.Range(768, 257).Select(x => ((long)x, 1024L)),
-            Enumerable.Range(768, 257).Select(z => (896L, (long)z)),
-            Enumerable.Range(768, 257).Select(offset => ((long)offset, (long)offset)),
-        })
-        {
-            double[] samples = line.Select(point => model.Sample(point.X, point.Z).ModelAltitudeNormalized).ToArray();
-            Assert.IsTrue(samples.All(value => double.IsFinite(value) && value is >= -1 and <= 1));
-            Assert.IsLessThan(.0011, samples.Zip(samples.Skip(1), (left, right) => Math.Abs(left - right)).Max(),
-                "Compact-support scan margin around the independently measured local maximum; not a T03-06 policy threshold.");
+            LandscapeSample sample = model.Sample(site.X, site.Z);
+            Assert.AreEqual(site.Id, sample.DominantCellId);
+            Assert.AreEqual(1d, sample.PrimaryResidualWeight,
+                "No foreign residual is permitted at an owner centre or elsewhere in its pure core.");
+            Assert.IsFalse(sample.IsTransition);
         }
+
+        MethodInfo transition = typeof(LandscapeModel).GetMethod("TransitionWeight", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        // overlap 1.25 creates a 0.8 nearest/second-nearest core boundary.
+        Assert.AreEqual(0d, (double)transition.Invoke(model, [.64d, 1d])!);
+        double insideBand = (double)transition.Invoke(model, [.81d, 1d])!;
+        double atBoundary = (double)transition.Invoke(model, [1d, 1d])!;
+        Assert.IsGreaterThan(0d, insideBand);
+        Assert.IsLessThan(.5d, insideBand);
+        Assert.AreEqual(.5d, atBoundary);
+        // Smoothstep has zero slope at both explicit band limits: an anti-Voronoi-step probe.
+        double epsilon = 1e-5;
+        Assert.IsLessThan(1e-5d, (double)transition.Invoke(model, [.64d + epsilon, 1d])!);
+        Assert.IsLessThan(1e-4d, .5d - (double)transition.Invoke(model, [1d - epsilon, 1d])!);
     }
 
     [TestMethod]
