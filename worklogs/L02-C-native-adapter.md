@@ -272,3 +272,110 @@ de profil, bootstrap, DLL/PDB, callstack, callback, mutation et tailles bornées
 restent inchangés. Cette correction est statique : T02-05 doit être rejoué sous
 Visual Studio/MCP après intégration ; son statut demeure `NOT_RUN` pour le
 nouveau schéma v3.
+
+## Erratum scellement SQLite v1 — aucune ouverture de la sauvegarde source
+
+Cet erratum conserve tout l’historique ci-dessus, mais rend les extractions
+directes des sauvegardes de campagne insuffisantes pour une nouvelle promotion.
+Les campagnes historiques ne sont ni modifiées ni réinterprétées. Le candidat
+de ce correctif reste `NOT_RUN` jusqu’à une campagne entièrement neuve après
+revue et intégration.
+
+### Extracteur versionné et frontière de sécurité
+
+`Invoke-L02CNativeSqliteExtraction.ps1` reçoit une sauvegarde arrêtée, le log,
+le manifeste pré-lancement et l’identité fermée du cas. Il n’ouvre jamais la
+source avec SQLite. Pour l’ensemble exact observé `main`, `main-wal`,
+`main-shm` :
+
+1. chaque fichier est borné par `Get-Item.Length`, puis scellé par flux brut
+   avec type, nom borné, longueur, mtime UTC, empreinte du chemin et SHA-256 ;
+2. les octets sont copiés avec `FileMode.CreateNew` vers un jeu de sources
+   scellées persistant propre au scénario et vers un clone temporaire ;
+3. les sources sont rescannées et rescéllées après copie, puis après extraction ;
+   ensemble, longueur, mtime et SHA doivent rester identiques aux valeurs
+   pré-copie ;
+4. l’unique site `Microsoft.Data.Sqlite.SqliteConnection` est protégé par
+   `Assert-PathWithinCloneRoot` et reçoit seulement `clone.vcdbs` ou son clone
+   main-only, avec `Mode=ReadOnly;Pooling=False` ;
+5. `length(gamedata.data)` est vérifiée avant lecture du blob. L’intégrité, les
+   compteurs `chunk|mapchunk|mapregion`, la présence de la clé, la longueur et
+   le SHA de l’enveloppe et son état authentifié sont calculés depuis le clone ;
+6. quand un WAL existe, un clone main-only distinct établit si le WAL est
+   `RequiredForObservedState` ou seulement `PresentStateEquivalent`. Les refus
+   dont le schéma et `gamedata` résident dans le WAL doivent prouver le premier
+   état.
+
+Le rapport fermé `isrworldgen.t02-05.sqlite-extraction.v1` est lié à
+`TestedCommit`, `SessionId`, rôle `new|reload|height|rectangle`, PID, SHA du log
+et SHA du manifeste. Il contient les trois scellements source, les copies
+persistantes scellées et les résultats clonés. Aucun champ déclaratif du type
+`probeOpenConnectionUsed` n’existe : l’interdiction est portée par le code,
+l’unique site d’ouverture, son garde de racine et le contrôle statique.
+
+Les jeux scellés doivent être distincts pour `new` et `reload`, même si le
+serveur recharge ensuite la même sauvegarde active : l’oracle final doit encore
+pouvoir recalculer les octets exacts observés après chacun des deux arrêts.
+
+### Oracle runtime v4
+
+`Invoke-L02CNativeRuntimeEvidence.ps1 -Phase Validate` exige désormais quatre
+rapports d’extraction et quatre répertoires de sources scellées. Avant de
+produire `isrworldgen.t02-05.runtime-evidence.v4`, il :
+
+- relie chaque extraction à la session MCP, au PID, au rôle, au log, au commit
+  et au manifeste déjà validés ;
+- recalcule le SHA de chaque rapport et de chaque fichier source scellé, refuse
+  tout fichier remplacé, manquant ou supplémentaire et restitue ces empreintes
+  dans le cas correspondant ;
+- exige une enveloppe `Committed` identique dans `new` et `reload`, égale aux
+  longueur/SHA réellement journalisés ;
+- exige pour `height` et `rectangle` une clé absente, zéro octet d’enveloppe et
+  zéro ligne `chunk`, `mapchunk`, `mapregion` ; lorsqu’un WAL est présent, son
+  rôle dans la reconstruction doit être prouvé ;
+- refuse un rapport extrait avant la fin de la session arrêtée.
+
+Recette reproductible après chaque arrêt doux, sur quatre dossiers de preuve
+distincts :
+
+```powershell
+$extract = '<repo>\testsrc\WorldGen.Tests\L02CNative\Invoke-L02CNativeSqliteExtraction.ps1'
+& $extract -SourceDatabasePath '<data-root>\Saves\case.vcdbs' `
+  -OutputPath '<evidence>\extractions\case.json' `
+  -SealedSourceDirectory '<evidence>\sealed-sources\case' `
+  -TestedCommit '<SHA40>' -SessionId '<session32>' -CaseRole '<role>' `
+  -ServerPid <pid> -LogPath '<evidence>\logs\case-server-main.log' `
+  -LogSha256 '<LOG_SHA256>' `
+  -SnapshotManifestPath '<evidence>\prelaunch-snapshot\prelaunch-snapshot.json' `
+  -SnapshotManifestSha256 '<MANIFEST_SHA256>' `
+  -RepositoryRoot '<repo>' -VintageStoryPath 'D:\Jeux\Vintagestory'
+```
+
+La validation finale ajoute les paramètres
+`New|Reload|Height|RectangleExtractionReport` et
+`New|Reload|Height|RectangleSealedSourceDirectory` aux paramètres v3. Aucun
+rapport ou répertoire ne peut préexister : toutes les sorties passent par
+`CreateNew`.
+
+### Preuves statiques de cet erratum
+
+- témoin rouge obtenu : le contrôle statique refusait l’absence de l’extracteur
+  versionné ;
+- auto-test extracteur : main/WAL/SHM, source inchangée, enveloppe Committed et
+  WAL requis, avec refus de remplacement, WAL manquant et sidecar dépassant la
+  borne avant lecture ;
+- auto-test oracle : rapport croisé entre sessions, hash forgé, WAL scellé
+  manquant, source scellée modifiée et rapport surdimensionné sont refusés ;
+- le contrôle statique exige un unique constructeur `SqliteConnection`, le
+  garde de clone, la connexion `Mode=ReadOnly`, l’absence du symbole
+  `ProbeOpenConnection` et les négatifs précédents.
+
+Validation hors moteur avant commit : extracteur et oracle v4 `PASS` en Debug
+et Release ; contrôle API/IL/package `PASS` dans les deux configurations avec
+`RuntimeEngine=NOT_RUN` ; tests C# L02CNative 38/38 et suite globale 195/195
+dans chaque configuration ; parsing PowerShell, `git diff --check` et
+`dotnet format --verify-no-changes` `PASS`. Ces contrôles doivent être relancés
+après le commit afin de reconstruire les ProductVersion liées au nouveau HEAD.
+
+Le moteur et Visual Studio ne sont pas lancés pour cet erratum. T02-05 reste
+`NOT_RUN`; une re-review est obligatoire avant toute nouvelle campagne.

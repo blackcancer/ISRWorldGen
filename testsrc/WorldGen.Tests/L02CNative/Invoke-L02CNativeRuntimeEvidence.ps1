@@ -14,7 +14,15 @@ param(
     [string]$ReloadLog,
     [string]$HeightRefusalLog,
     [string]$RectangleRefusalLog,
-    [string]$CampaignObservationPath
+    [string]$CampaignObservationPath,
+    [string]$NewExtractionReport,
+    [string]$ReloadExtractionReport,
+    [string]$HeightExtractionReport,
+    [string]$RectangleExtractionReport,
+    [string]$NewSealedSourceDirectory,
+    [string]$ReloadSealedSourceDirectory,
+    [string]$HeightSealedSourceDirectory,
+    [string]$RectangleSealedSourceDirectory
 )
 
 Set-StrictMode -Version Latest
@@ -28,6 +36,8 @@ $maximumEnvelopeBytes = 8192
 $maximumLogBytes = 16 * 1024 * 1024
 $maximumManifestBytes = 64 * 1024
 $maximumCampaignBytes = 64 * 1024
+$maximumExtractionReportBytes = 256 * 1024
+$maximumSourceBytes = [ordered]@{ Main = 256GB; Wal = 64GB; Shm = 1GB }
 $maximumInteractiveInspection = [TimeSpan]::FromMinutes(5)
 $maximumPostContinueMarkerDelay = [TimeSpan]::FromSeconds(5)
 $artifactNames = @('ISRWorldGen.dll', 'ISRWorldGen.Core.dll', 'ISRWorldGen.pdb', 'ISRWorldGen.Core.pdb')
@@ -112,6 +122,257 @@ function Get-NormalizedPathSha256 {
     param([Parameter(Mandatory)][string]$Path)
     $normalized = [IO.Path]::GetFullPath($Path).Replace('/', '\').TrimEnd('\').ToUpperInvariant()
     return Get-TextSha256 $normalized
+}
+
+function Get-SealedEvidenceFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][ValidateSet('Main', 'Wal', 'Shm')][string]$FileType
+    )
+
+    Assert-LeafFile $Path "sealed SQLite $FileType evidence"
+    $item = Get-Item -LiteralPath $Path
+    $maximum = [long]$maximumSourceBytes[$FileType]
+    if ($item.Length -gt $maximum) {
+        throw "Sealed SQLite $FileType evidence exceeds maximum byte length (observed=$($item.Length) maximum=$maximum)."
+    }
+    return [ordered]@{
+        Length = [long]$item.Length
+        Sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    }
+}
+
+function Get-ExtractionSourceSetHash {
+    param([Parameter(Mandatory)][object[]]$SourceFiles)
+
+    $rows = foreach ($file in $SourceFiles) {
+        @(
+            [string]$file.FileType,
+            [string]$file.FileName,
+            [string]$file.PathSha256,
+            [string]$file.PreCopy.Length,
+            [string]$file.PreCopy.LastWriteTimeUtc,
+            [string]$file.PreCopy.Sha256
+        ) -join '|'
+    }
+    return Get-TextSha256 ($rows -join "`n")
+}
+
+function Get-SealedSourceSetHash {
+    param([Parameter(Mandatory)][object[]]$SealedFiles)
+
+    $rows = foreach ($file in $SealedFiles) {
+        @(
+            [string]$file.FileType,
+            [string]$file.FileName,
+            [string]$file.PathSha256,
+            [string]$file.Length,
+            [string]$file.Sha256
+        ) -join '|'
+    }
+    return Get-TextSha256 ($rows -join "`n")
+}
+
+function Get-ExtractionCloneResultHash {
+    param([Parameter(Mandatory)]$Clone)
+
+    return Get-TextSha256 (@(
+        [string]$Clone.Integrity,
+        [string]$Clone.GameDataBytes,
+        [string]$Clone.ModDataCount,
+        [string]$Clone.KeyStatus,
+        [string]$Clone.EnvelopeBytes,
+        [string]$Clone.EnvelopeSha256,
+        [string]$Clone.EnvelopeState,
+        [string]$Clone.ChunkRows,
+        [string]$Clone.MapChunkRows,
+        [string]$Clone.MapRegionRows
+    ) -join '|')
+}
+
+function Assert-ExtractionSeal {
+    param([Parameter(Mandatory)]$Seal, [Parameter(Mandatory)][string]$Label)
+
+    Assert-ClosedSchema $Seal @('Length', 'LastWriteTimeUtc', 'Sha256') $Label
+    if ([long]$Seal.Length -lt 0 -or [string]$Seal.Sha256 -cnotmatch '^[0-9A-F]{64}$') {
+        throw "$Label contains an invalid length or SHA-256."
+    }
+    $null = Convert-StrictUtcTimestamp ([string]$Seal.LastWriteTimeUtc) "$Label LastWriteTimeUtc"
+}
+
+function Read-ExtractionReport {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$SealedSourceDirectory,
+        [Parameter(Mandatory)][string]$CaseName,
+        [Parameter(Mandatory)]$Observation,
+        [Parameter(Mandatory)][string]$CurrentCommit,
+        [Parameter(Mandatory)][string]$ManifestSha256
+    )
+
+    $content = Read-BoundedTextFile $Path $maximumExtractionReportBytes "$CaseName SQLite extraction report"
+    $reportSha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    $report = $content | ConvertFrom-Json -DateKind String
+    Assert-ClosedSchema $report @(
+        'Schema', 'TestedCommit', 'SessionId', 'CaseRole', 'ServerPid', 'LogSha256',
+        'SnapshotManifestSha256', 'ExtractedUtc', 'SourceMainPathSha256', 'SourceSetSha256',
+        'SourceFiles', 'SealedSourceSetSha256', 'SealedFiles', 'Clone'
+    ) "$CaseName SQLite extraction report"
+    if ($report.Schema -cne 'isrworldgen.t02-05.sqlite-extraction.v1' -or
+        $report.TestedCommit -cne $CurrentCommit -or $report.CaseRole -cne $CaseName -or
+        $report.SessionId -cne $Observation.SessionId -or [int]$report.ServerPid -ne $Observation.ServerPid -or
+        $report.LogSha256 -cne $Observation.LogSha256 -or
+        $report.SnapshotManifestSha256 -cne $ManifestSha256 -or
+        [string]$report.SourceMainPathSha256 -cnotmatch '^[0-9A-F]{64}$') {
+        throw "$CaseName SQLite extraction is not bound to the campaign session, log, commit, role, PID, and snapshot."
+    }
+    $extractedUtc = Convert-StrictUtcTimestamp ([string]$report.ExtractedUtc) "$CaseName extraction ExtractedUtc"
+    $completedUtc = Convert-StrictUtcTimestamp ([string]$Observation.CompletedUtc) "$CaseName extraction campaign CompletedUtc"
+    if ($extractedUtc -lt $completedUtc -or $extractedUtc -gt [DateTimeOffset]::UtcNow.AddMinutes(1)) {
+        throw "$CaseName SQLite extraction was not performed after the stopped debugger session."
+    }
+
+    $sourceFiles = @($report.SourceFiles)
+    $sealedFiles = @($report.SealedFiles)
+    if ($sourceFiles.Count -lt 1 -or $sourceFiles.Count -gt 3 -or $sealedFiles.Count -ne $sourceFiles.Count) {
+        throw "$CaseName SQLite extraction does not contain an exact bounded source set."
+    }
+    $expectedTypes = @('Main', 'Wal', 'Shm')
+    $observedTypes = @($sourceFiles | ForEach-Object { [string]$_.FileType })
+    if ($observedTypes[0] -cne 'Main' -or
+        ($observedTypes -join '|') -cne (($expectedTypes | Select-Object -First $observedTypes.Count) -join '|') -or
+        ($observedTypes -ccontains 'Shm' -and $observedTypes -cnotcontains 'Wal')) {
+        throw "$CaseName SQLite extraction source type set is invalid."
+    }
+    $mainFileName = [string]$sourceFiles[0].FileName
+    if ($mainFileName.Length -lt 1 -or $mainFileName.Length -gt 128 -or $mainFileName -match '[\\/\x00-\x1f\x7f]') {
+        throw "$CaseName SQLite extraction source filename is invalid."
+    }
+
+    for ($index = 0; $index -lt $sourceFiles.Count; $index++) {
+        $source = $sourceFiles[$index]
+        Assert-ClosedSchema $source @('FileName', 'FileType', 'PathSha256', 'PreCopy', 'AfterCopy', 'PostExtraction') `
+            "$CaseName SQLite source file"
+        $expectedName = if ($index -eq 0) { $mainFileName } elseif ($index -eq 1) { "$mainFileName-wal" } else { "$mainFileName-shm" }
+        if ($source.FileType -cne $observedTypes[$index] -or $source.FileName -cne $expectedName -or
+            [string]$source.PathSha256 -cnotmatch '^[0-9A-F]{64}$') {
+            throw "$CaseName SQLite source file identity is invalid."
+        }
+        Assert-ExtractionSeal $source.PreCopy "$CaseName $($source.FileType) pre-copy seal"
+        Assert-ExtractionSeal $source.AfterCopy "$CaseName $($source.FileType) after-copy seal"
+        Assert-ExtractionSeal $source.PostExtraction "$CaseName $($source.FileType) post-extraction seal"
+        foreach ($name in @('Length', 'LastWriteTimeUtc', 'Sha256')) {
+            if ([string]$source.PreCopy.$name -cne [string]$source.AfterCopy.$name -or
+                [string]$source.PreCopy.$name -cne [string]$source.PostExtraction.$name) {
+                throw "$CaseName SQLite source changed between pre-copy and post-extraction seals."
+            }
+        }
+    }
+    if ($report.SourceSetSha256 -cne (Get-ExtractionSourceSetHash $sourceFiles)) {
+        throw "$CaseName SQLite extraction source-set hash is invalid."
+    }
+
+    $resolvedSealedDirectory = [IO.Path]::GetFullPath($SealedSourceDirectory)
+    if (-not (Test-Path -LiteralPath $resolvedSealedDirectory -PathType Container)) {
+        throw "$CaseName sealed SQLite source directory is missing."
+    }
+    $expectedSealedNames = @($observedTypes | ForEach-Object {
+        if ($_ -ceq 'Main') { 'source.vcdbs' } elseif ($_ -ceq 'Wal') { 'source.vcdbs-wal' } else { 'source.vcdbs-shm' }
+    })
+    $sealedChildren = @(Get-ChildItem -LiteralPath $resolvedSealedDirectory -Force)
+    $actualSealedNames = @($sealedChildren | Select-Object -ExpandProperty Name | Sort-Object)
+    if (@($sealedChildren | Where-Object { -not $_.PSIsContainer }).Count -ne $sealedChildren.Count -or
+        ($actualSealedNames -join '|') -cne (($expectedSealedNames | Sort-Object) -join '|')) {
+        throw "$CaseName sealed SQLite source directory has a replaced, missing, or extra file."
+    }
+    for ($index = 0; $index -lt $sealedFiles.Count; $index++) {
+        $sealed = $sealedFiles[$index]
+        Assert-ClosedSchema $sealed @('FileName', 'FileType', 'PathSha256', 'Length', 'Sha256') `
+            "$CaseName sealed SQLite source file"
+        $sealedPath = Join-Path $resolvedSealedDirectory $expectedSealedNames[$index]
+        $actual = Get-SealedEvidenceFile $sealedPath $observedTypes[$index]
+        if ($sealed.FileName -cne $expectedSealedNames[$index] -or $sealed.FileType -cne $observedTypes[$index] -or
+            $sealed.PathSha256 -cne (Get-NormalizedPathSha256 $sealedPath) -or
+            [long]$sealed.Length -ne $actual.Length -or $sealed.Sha256 -cne $actual.Sha256 -or
+            [long]$sealed.Length -ne [long]$sourceFiles[$index].PreCopy.Length -or
+            $sealed.Sha256 -cne $sourceFiles[$index].PreCopy.Sha256) {
+            throw "$CaseName sealed SQLite source file hash or identity mismatch."
+        }
+    }
+    if ($report.SealedSourceSetSha256 -cne (Get-SealedSourceSetHash $sealedFiles)) {
+        throw "$CaseName sealed SQLite source-set hash is invalid."
+    }
+
+    $clone = $report.Clone
+    Assert-ClosedSchema $clone @(
+        'Files', 'Integrity', 'GameDataBytes', 'ModDataCount', 'StorageKey', 'KeyStatus',
+        'EnvelopeBytes', 'EnvelopeSha256', 'EnvelopeState', 'ChunkRows', 'MapChunkRows',
+        'MapRegionRows', 'ResultSha256', 'WalEvidence'
+    ) "$CaseName SQLite clone result"
+    if ($clone.Integrity -cne 'ok' -or $clone.StorageKey -cne 'isrworldgen:l02c:frozen-profile:v1' -or
+        $clone.KeyStatus -cnotin @('Present', 'Absent') -or
+        $clone.EnvelopeState -cnotin @('Absent', 'Pending', 'Committed', 'Rejected') -or
+        [long]$clone.GameDataBytes -lt 0 -or [long]$clone.GameDataBytes -gt 16MB -or
+        [long]$clone.ModDataCount -lt 0 -or [long]$clone.EnvelopeBytes -lt 0 -or [long]$clone.EnvelopeBytes -gt $maximumEnvelopeBytes -or
+        [long]$clone.ChunkRows -lt 0 -or [long]$clone.MapChunkRows -lt 0 -or [long]$clone.MapRegionRows -lt 0) {
+        throw "$CaseName SQLite clone result contains an invalid bounded value."
+    }
+    if ($clone.ResultSha256 -cne (Get-ExtractionCloneResultHash $clone)) {
+        throw "$CaseName SQLite clone result hash is invalid."
+    }
+    if ($clone.KeyStatus -ceq 'Absent') {
+        if ([long]$clone.EnvelopeBytes -ne 0 -or $null -ne $clone.EnvelopeSha256 -or $clone.EnvelopeState -cne 'Absent') {
+            throw "$CaseName absent SQLite key carries forged envelope evidence."
+        }
+    }
+    elseif ([long]$clone.EnvelopeBytes -lt 1 -or [string]$clone.EnvelopeSha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        $clone.EnvelopeState -ceq 'Absent') {
+        throw "$CaseName present SQLite key lacks canonical envelope evidence."
+    }
+
+    $cloneFiles = @($clone.Files)
+    if ($cloneFiles.Count -ne $sourceFiles.Count) { throw "$CaseName SQLite clone file set is incomplete." }
+    for ($index = 0; $index -lt $cloneFiles.Count; $index++) {
+        $cloneFile = $cloneFiles[$index]
+        Assert-ClosedSchema $cloneFile @('FileName', 'FileType', 'Length', 'Sha256') "$CaseName SQLite clone file"
+        $expectedCloneName = if ($index -eq 0) { 'clone.vcdbs' } elseif ($index -eq 1) { 'clone.vcdbs-wal' } else { 'clone.vcdbs-shm' }
+        if ($cloneFile.FileName -cne $expectedCloneName -or $cloneFile.FileType -cne $observedTypes[$index] -or
+            [long]$cloneFile.Length -ne [long]$sourceFiles[$index].PreCopy.Length -or
+            $cloneFile.Sha256 -cne $sourceFiles[$index].PreCopy.Sha256) {
+            throw "$CaseName SQLite clone file does not match the sealed source bytes."
+        }
+    }
+
+    $wal = $clone.WalEvidence
+    Assert-ClosedSchema $wal @('Composition', 'WalContribution', 'FullResultSha256', 'MainOnlyStatus', 'MainOnlyResultSha256') `
+        "$CaseName SQLite WAL evidence"
+    if ((@($wal.Composition) -join '|') -cne ($observedTypes -join '|') -or
+        $wal.FullResultSha256 -cne $clone.ResultSha256) {
+        throw "$CaseName SQLite WAL composition is not bound to the full clone result."
+    }
+    if ($observedTypes -ccontains 'Wal') {
+        if ($wal.WalContribution -cnotin @('RequiredForObservedState', 'PresentStateEquivalent') -or
+            $wal.MainOnlyStatus -cnotin @('Readable', 'Unreadable') -or
+            ($wal.MainOnlyStatus -ceq 'Readable' -and [string]$wal.MainOnlyResultSha256 -cnotmatch '^[0-9A-F]{64}$') -or
+            ($wal.MainOnlyStatus -ceq 'Unreadable' -and $null -ne $wal.MainOnlyResultSha256)) {
+            throw "$CaseName SQLite WAL contribution evidence is invalid."
+        }
+    }
+    elseif ($wal.WalContribution -cne 'Absent' -or $wal.MainOnlyStatus -cne 'NotRun' -or
+        $null -ne $wal.MainOnlyResultSha256) {
+        throw "$CaseName SQLite no-WAL evidence is invalid."
+    }
+
+    return [ordered]@{
+        ReportSha256 = $reportSha256
+        SourceSetSha256 = [string]$report.SourceSetSha256
+        SealedSourceSetSha256 = [string]$report.SealedSourceSetSha256
+        SourceFiles = @($sealedFiles | ForEach-Object {
+            [ordered]@{ FileType = $_.FileType; Length = [long]$_.Length; Sha256 = $_.Sha256 }
+        })
+        ExtractedUtc = $extractedUtc.ToString('o')
+        Clone = $clone
+    }
 }
 
 function Get-AssemblyInformationalVersion {
@@ -443,7 +704,12 @@ if ($Phase -eq 'Snapshot') {
     return
 }
 
-foreach ($required in @($NewLog, $ReloadLog, $HeightRefusalLog, $RectangleRefusalLog, $CampaignObservationPath)) {
+foreach ($required in @(
+    $NewLog, $ReloadLog, $HeightRefusalLog, $RectangleRefusalLog, $CampaignObservationPath,
+    $NewExtractionReport, $ReloadExtractionReport, $HeightExtractionReport, $RectangleExtractionReport,
+    $NewSealedSourceDirectory, $ReloadSealedSourceDirectory, $HeightSealedSourceDirectory,
+    $RectangleSealedSourceDirectory
+)) {
     if ([string]::IsNullOrWhiteSpace($required)) { throw 'Validate requires all four case logs and CampaignObservationPath.' }
 }
 $snapshotManifestContent = Read-BoundedTextFile $snapshotManifestPath $maximumManifestBytes 'prelaunch snapshot manifest'
@@ -583,6 +849,51 @@ foreach ($caseName in @('height', 'rectangle')) {
     }
 }
 
+$snapshotManifestSha256 = (Get-FileHash -LiteralPath $snapshotManifestPath -Algorithm SHA256).Hash
+$extractionReportPaths = [ordered]@{
+    new = $NewExtractionReport
+    reload = $ReloadExtractionReport
+    height = $HeightExtractionReport
+    rectangle = $RectangleExtractionReport
+}
+$sealedSourceDirectories = [ordered]@{
+    new = $NewSealedSourceDirectory
+    reload = $ReloadSealedSourceDirectory
+    height = $HeightSealedSourceDirectory
+    rectangle = $RectangleSealedSourceDirectory
+}
+$extractions = [ordered]@{}
+foreach ($caseName in $caseNames) {
+    $extractions[$caseName] = Read-ExtractionReport $extractionReportPaths[$caseName] `
+        $sealedSourceDirectories[$caseName] $caseName $observations[$caseName] $currentCommit $snapshotManifestSha256
+}
+
+foreach ($caseName in @('new', 'reload')) {
+    $tokens = if ($caseName -ceq 'new') { $newTokens } else { $reloadTokens }
+    $clone = $extractions[$caseName].Clone
+    if ($clone.KeyStatus -cne 'Present' -or $clone.EnvelopeState -cne 'Committed' -or
+        [int]$clone.EnvelopeBytes -ne [int]$tokens.envelopebytes -or
+        ([string]$clone.EnvelopeSha256).ToLowerInvariant() -cne $tokens.envelopesha256) {
+        throw "$caseName SQLite extraction does not prove the committed envelope logged by the runtime."
+    }
+}
+if ($extractions.new.Clone.EnvelopeBytes -ne $extractions.reload.Clone.EnvelopeBytes -or
+    $extractions.new.Clone.EnvelopeSha256 -cne $extractions.reload.Clone.EnvelopeSha256) {
+    throw 'new and reload SQLite extractions do not contain the identical committed envelope.'
+}
+foreach ($caseName in @('height', 'rectangle')) {
+    $clone = $extractions[$caseName].Clone
+    if ($clone.KeyStatus -cne 'Absent' -or $clone.EnvelopeState -cne 'Absent' -or
+        [long]$clone.EnvelopeBytes -ne 0 -or $null -ne $clone.EnvelopeSha256 -or
+        [long]$clone.ChunkRows -ne 0 -or [long]$clone.MapChunkRows -ne 0 -or [long]$clone.MapRegionRows -ne 0) {
+        throw "$caseName SQLite extraction does not prove fail-closed absence and zero geographic rows."
+    }
+    if ((@($clone.WalEvidence.Composition) -ccontains 'Wal') -and
+        $clone.WalEvidence.WalContribution -cne 'RequiredForObservedState') {
+        throw "$caseName SQLite extraction does not prove WAL reconstruction of the refusal state."
+    }
+}
+
 $caseReports = @()
 foreach ($caseName in $caseNames) {
     $caseReports += [ordered]@{
@@ -594,12 +905,29 @@ foreach ($caseName in $caseNames) {
         CompletedUtc = $observations[$caseName].CompletedUtc; LogSha256 = $observations[$caseName].LogSha256
         BreakpointId = $observations[$caseName].BreakpointId; CallstackSha256 = $observations[$caseName].CallstackSha256
         BootstrapModuleBinding = $true; PdbPairingVerified = $true
+        SQLiteExtraction = [ordered]@{
+            Schema = 'isrworldgen.t02-05.sqlite-extraction.v1'
+            ReportSha256 = $extractions[$caseName].ReportSha256
+            SourceSetSha256 = $extractions[$caseName].SourceSetSha256
+            SealedSourceSetSha256 = $extractions[$caseName].SealedSourceSetSha256
+            ExtractedUtc = $extractions[$caseName].ExtractedUtc
+            SourceFiles = $extractions[$caseName].SourceFiles
+            CloneResultSha256 = $extractions[$caseName].Clone.ResultSha256
+            KeyStatus = $extractions[$caseName].Clone.KeyStatus
+            EnvelopeBytes = [long]$extractions[$caseName].Clone.EnvelopeBytes
+            EnvelopeSha256 = $extractions[$caseName].Clone.EnvelopeSha256
+            EnvelopeState = $extractions[$caseName].Clone.EnvelopeState
+            ChunkRows = [long]$extractions[$caseName].Clone.ChunkRows
+            MapChunkRows = [long]$extractions[$caseName].Clone.MapChunkRows
+            MapRegionRows = [long]$extractions[$caseName].Clone.MapRegionRows
+            WalContribution = $extractions[$caseName].Clone.WalEvidence.WalContribution
+        }
     }
 }
 $report = [ordered]@{
-    Schema = 'isrworldgen.t02-05.runtime-evidence.v3'; Status = 'PASS'; Commit = $currentCommit
+    Schema = 'isrworldgen.t02-05.runtime-evidence.v4'; Status = 'PASS'; Commit = $currentCommit
     ExpectedAssemblyInformationalVersion = $expectedInformationalVersion; Server = $serverIdentity
-    SnapshotManifestSha256 = (Get-FileHash -LiteralPath $snapshotManifestPath -Algorithm SHA256).Hash
+    SnapshotManifestSha256 = $snapshotManifestSha256
     CampaignObservationSha256 = (Get-FileHash -LiteralPath $CampaignObservationPath -Algorithm SHA256).Hash
     EnvelopeBytes = [int]$newTokens.envelopebytes; EnvelopeSha256 = $newTokens.envelopesha256
     ReloadOracle = 'frozen-published-gate-before-worldready-zero-writes-no-reload-initworldgenerator-callback'

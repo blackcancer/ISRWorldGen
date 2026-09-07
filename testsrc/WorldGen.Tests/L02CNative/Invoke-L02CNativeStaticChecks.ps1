@@ -242,9 +242,66 @@ foreach ($fragment in $requiredSourceFragments) {
 
 $runtimeOraclePath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L02CNative\Invoke-L02CNativeRuntimeEvidence.ps1'
 $runtimeOracleTestPath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L02CNative\Test-L02CNativeRuntimeEvidence.ps1'
-foreach ($scriptPath in @($runtimeOraclePath, $runtimeOracleTestPath)) {
+$sqliteExtractorPath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L02CNative\Invoke-L02CNativeSqliteExtraction.ps1'
+$sqliteExtractorTestPath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L02CNative\Test-L02CNativeSqliteExtraction.ps1'
+$sqliteFixtureSupportPath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L02CNative\L02CNativeSqliteFixtureSupport.ps1'
+foreach ($scriptPath in @(
+    $runtimeOraclePath,
+    $runtimeOracleTestPath,
+    $sqliteExtractorPath,
+    $sqliteExtractorTestPath,
+    $sqliteFixtureSupportPath
+)) {
     if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
         throw "T02-05 runtime evidence script is missing: $scriptPath"
+    }
+}
+
+$sqliteExtractorSource = Get-Content -LiteralPath $sqliteExtractorPath -Raw
+foreach ($fragment in @(
+    "'isrworldgen.t02-05.sqlite-extraction.v1'",
+    '[IO.FileMode]::CreateNew',
+    'function Get-SourceFileSeal',
+    'function Copy-SealedSourceFile',
+    'function Read-CloneDatabaseSnapshot',
+    'Assert-PathWithinCloneRoot',
+    'Mode=ReadOnly;Pooling=False',
+    'PreCopy',
+    'AfterCopy',
+    'PostExtraction',
+    'WalContribution',
+    'RequiredForObservedState'
+)) {
+    if (-not $sqliteExtractorSource.Contains($fragment)) {
+        throw "Required T02-05 SQLite extractor fragment is missing: $fragment"
+    }
+}
+if ($sqliteExtractorSource.Contains('ProbeOpenConnection', [StringComparison]::Ordinal)) {
+    throw 'T02-05 SQLite extractor must not contain or call ProbeOpenConnection.'
+}
+$sqliteOpenSites = @([regex]::Matches(
+    $sqliteExtractorSource,
+    '\[Microsoft\.Data\.Sqlite\.SqliteConnection\]::new\(\$connectionString\)'))
+if ($sqliteOpenSites.Count -ne 1) {
+    throw 'T02-05 SQLite extractor must centralize its only SQLite open behind the clone-root guard.'
+}
+if ($sqliteExtractorSource -match 'Data Source=\$(resolved)?Source') {
+    throw 'T02-05 SQLite extractor must never construct a source-path SQLite connection string.'
+}
+
+$sqliteExtractorTestSource = Get-Content -LiteralPath $sqliteExtractorTestPath -Raw
+$sqliteNegativeTestSources = $sqliteExtractorTestSource + (Get-Content -LiteralPath $runtimeOracleTestPath -Raw)
+foreach ($fragment in @(
+    "'Output replacement'",
+    "'Cross-session extraction'",
+    "'Extraction hash mismatch'",
+    "'Missing WAL'",
+    "'Source changed after extraction'",
+    "'Oversized source sidecar'",
+    "'Oversized extraction report'"
+)) {
+    if (-not $sqliteNegativeTestSources.Contains($fragment)) {
+        throw "Required T02-05 SQLite extraction negative test is missing: $fragment"
     }
 }
 
@@ -259,7 +316,8 @@ $requiredRuntimeOracleFragments = @(
     "'L00A_BOOTSTRAP'",
     "'visual-studio-debugger-session-verified-v3'",
     "'isrworldgen.t02-05.visual-studio-campaign.v3'",
-    "'isrworldgen.t02-05.runtime-evidence.v3'",
+    "'isrworldgen.t02-05.runtime-evidence.v4'",
+    "'isrworldgen.t02-05.sqlite-extraction.v1'",
     "'ISRWorldGen Server (isolated data)'",
     'ExpectedAssemblyInformationalVersion',
     'AssemblyInformationalVersionAttribute',
@@ -277,6 +335,7 @@ $requiredRuntimeOracleFragments = @(
     '$maximumLogBytes = 16 * 1024 * 1024',
     '$maximumManifestBytes = 64 * 1024',
     '$maximumCampaignBytes = 64 * 1024',
+    '$maximumExtractionReportBytes = 256 * 1024',
     'function Read-BoundedTextFile',
     '$item = Get-Item -LiteralPath $Path',
     '$item.Length -gt $MaximumBytes',
@@ -287,7 +346,13 @@ $requiredRuntimeOracleFragments = @(
     "Assert-ExactToken `$reloadTokens 'gatecallbackregistered' 'false' 'reload'",
     "Assert-ExactToken `$reloadTokens 'envelopesha256' `$newTokens.envelopesha256 'reload'",
     "Assert-Omits `$logs.reload.Content 'L02C_NATIVE_GATE_FROZEN' 'reload'",
-    "Assert-ContainsAtLeastOnce `$logs.new.Content 'L00B_COLUMN_CALLBACK' 'new'"
+    "Assert-ContainsAtLeastOnce `$logs.new.Content 'L00B_COLUMN_CALLBACK' 'new'",
+    'function Read-ExtractionReport',
+    'NewExtractionReport',
+    'NewSealedSourceDirectory',
+    'SealedSourceSetSha256',
+    'SQLiteExtraction',
+    'RequiredForObservedState'
 )
 foreach ($fragment in $requiredRuntimeOracleFragments) {
     if (-not $runtimeOracleSource.Contains($fragment)) {

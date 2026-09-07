@@ -9,6 +9,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'L02CNativeSqliteFixtureSupport.ps1')
+
 function Write-Utf8Fixture {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Content)
 
@@ -152,14 +154,21 @@ function Invoke-Validation {
         [Parameter(Mandatory)][string]$Oracle,
         [Parameter(Mandatory)][string]$Root,
         [Parameter(Mandatory)][string]$ObservationPath,
-        [Parameter(Mandatory)][hashtable]$LogPaths
+        [Parameter(Mandatory)][hashtable]$LogPaths,
+        [hashtable]$ExtractionReports = $script:l02cExtractionReports,
+        [hashtable]$SealedSources = $script:l02cSealedSources
     )
 
     & $Oracle -Phase Validate -EvidenceRoot $Root -RepositoryRoot $RepositoryRoot `
         -VintageStoryPath $VintageStoryPath -Configuration $Configuration `
         -NewLog $LogPaths.new -ReloadLog $LogPaths.reload `
         -HeightRefusalLog $LogPaths.height -RectangleRefusalLog $LogPaths.rectangle `
-        -CampaignObservationPath $ObservationPath | Out-Null
+        -CampaignObservationPath $ObservationPath `
+        -NewExtractionReport $ExtractionReports.new -ReloadExtractionReport $ExtractionReports.reload `
+        -HeightExtractionReport $ExtractionReports.height -RectangleExtractionReport $ExtractionReports.rectangle `
+        -NewSealedSourceDirectory $SealedSources.new -ReloadSealedSourceDirectory $SealedSources.reload `
+        -HeightSealedSourceDirectory $SealedSources.height `
+        -RectangleSealedSourceDirectory $SealedSources.rectangle | Out-Null
 }
 
 function Assert-ValidationFails {
@@ -223,12 +232,15 @@ try {
     $assemblyArtifact = Get-Artifact $manifest 'ISRWorldGen.dll'
     $pdbArtifact = Get-Artifact $manifest 'ISRWorldGen.pdb'
     $symbolPair = Get-SymbolPair $manifest 'ISRWorldGen.dll'
-    $envelopeHash = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-    $envelopeBytes = 406
+    Initialize-L02CSqliteFixtureRuntime $VintageStoryPath
+    $envelope = New-L02CCommittedEnvelope
+    $envelopeHash = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($envelope)).ToLowerInvariant()
+    $envelopeBytes = $envelope.Length
     $nowUtc = [DateTimeOffset]::UtcNow
     $eventUtc = [DateTimeOffset]::new(
         $nowUtc.UtcDateTime.AddTicks(-($nowUtc.UtcDateTime.Ticks % [TimeSpan]::TicksPerSecond)),
-        [TimeSpan]::Zero).AddSeconds(-1)
+        [TimeSpan]::Zero).AddSeconds(-10)
     $logTimestamp = Get-LocalLogTimestamp $eventUtc
     $logs = [ordered]@{
         new = @"
@@ -310,13 +322,43 @@ $logTimestamp [Event] Stopped the server!
     $observationPath = Join-Path $testRoot 'campaign-observation.json'
     Write-JsonFixture $observationPath $observations
 
-    Invoke-Validation $oracle $testRoot $observationPath $logPaths
+    $extractor = Join-Path $PSScriptRoot 'Invoke-L02CNativeSqliteExtraction.ps1'
+    $databasePaths = @{}
+    $extractionReports = @{}
+    $sealedSources = @{}
+    foreach ($caseName in @('new', 'reload', 'height', 'rectangle')) {
+        $databasePaths[$caseName] = Join-Path $testRoot "database-$caseName\source.vcdbs"
+        $hasEnvelope = $caseName -in @('new', 'reload')
+        $geographyRows = if ($hasEnvelope) { 1 } else { 0 }
+        $walDependent = $caseName -in @('height', 'rectangle')
+        New-L02CSqliteSourceFixture $databasePaths[$caseName] `
+            $(if ($hasEnvelope) { $envelope } else { $null }) $geographyRows $walDependent
+        $extractionReports[$caseName] = Join-Path $testRoot "extraction-$caseName.json"
+        $sealedSources[$caseName] = Join-Path $testRoot "sealed-$caseName"
+        $caseObservation = $observations.Cases.$caseName
+        try {
+            & $extractor -SourceDatabasePath $databasePaths[$caseName] `
+                -OutputPath $extractionReports[$caseName] -SealedSourceDirectory $sealedSources[$caseName] `
+                -TestedCommit $commit -SessionId $caseObservation.SessionId -CaseRole $caseName `
+                -ServerPid $caseObservation.ServerPid -LogPath $logPaths[$caseName] `
+                -LogSha256 $caseObservation.LogSha256 -SnapshotManifestPath $manifestPath `
+                -SnapshotManifestSha256 $observations.SnapshotManifestSha256 `
+                -RepositoryRoot $RepositoryRoot -VintageStoryPath $VintageStoryPath | Out-Null
+        }
+        catch {
+            throw "$caseName fixture extraction failed: $($_.Exception.Message)"
+        }
+    }
+    $script:l02cExtractionReports = $extractionReports
+    $script:l02cSealedSources = $sealedSources
+
+    Invoke-Validation $oracle $testRoot $observationPath $logPaths $extractionReports $sealedSources
     $reportPath = Join-Path $testRoot 'runtime-evidence.json'
     $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -DateKind String
     Assert-True ($report.Status -ceq 'PASS') 'Runtime evidence self-test report did not pass.'
     Assert-True ($report.EnvelopeSha256 -ceq $envelopeHash) 'Runtime evidence self-test changed the envelope hash.'
-    Assert-True ($report.Schema -ceq 'isrworldgen.t02-05.runtime-evidence.v3') `
-        'Runtime evidence self-test did not emit the v3 schema.'
+    Assert-True ($report.Schema -ceq 'isrworldgen.t02-05.runtime-evidence.v4') `
+        'Runtime evidence self-test did not emit the v4 schema.'
     Assert-True ($report.VisualStudio.Provenance -ceq 'visual-studio-debugger-session-verified-v3') `
         'Runtime evidence self-test did not retain verified Visual Studio provenance.'
     Assert-True (@($report.Cases).Count -eq 4) 'Runtime evidence self-test did not report all four cases.'
@@ -326,10 +368,20 @@ $logTimestamp [Event] Stopped the server!
     Assert-True ($report.Cases[3].Case -ceq 'rectangle' -and
         $report.Cases[3].BreakpointId -ceq 'native-profile-rejected-before-log') `
         'Runtime evidence self-test did not fully attest the rectangle rejection.'
+    Assert-True ($report.Cases[0].SQLiteExtraction.EnvelopeState -ceq 'Committed' -and
+        $report.Cases[1].SQLiteExtraction.EnvelopeSha256 -ceq $report.Cases[0].SQLiteExtraction.EnvelopeSha256) `
+        'Runtime evidence self-test did not bind identical new/reload SQLite envelopes.'
+    Assert-True ($report.Cases[2].SQLiteExtraction.WalContribution -ceq 'RequiredForObservedState' -and
+        $report.Cases[2].SQLiteExtraction.ChunkRows -eq 0) `
+        'Runtime evidence self-test did not bind fail-closed WAL-backed refusal evidence.'
 
     $originalObservationJson = Get-Content -LiteralPath $observationPath -Raw
     $originalNewLog = $logs.new
     $originalRectangleLog = $logs.rectangle
+    $originalExtractionJson = @{}
+    foreach ($caseName in @('new', 'reload', 'height', 'rectangle')) {
+        $originalExtractionJson[$caseName] = Get-Content -LiteralPath $extractionReports[$caseName] -Raw
+    }
 
     $observations.Schema = 'isrworldgen.t02-05.visual-studio-campaign.v2'
     Write-JsonFixture $observationPath $observations
@@ -490,6 +542,45 @@ $logTimestamp [Event] Stopped the server!
     Write-Utf8Fixture $logPaths.rectangle $originalRectangleLog
     Write-Utf8Fixture $observationPath $originalObservationJson
 
+    $newExtraction = $originalExtractionJson.new | ConvertFrom-Json -DateKind String
+    $newExtraction.SessionId = 'ffffffffffffffffffffffffffffffff'
+    Write-JsonFixture $extractionReports.new $newExtraction
+    Assert-ValidationFails 'Cross-session extraction' 'campaign session' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $extractionReports.new $originalExtractionJson.new
+
+    $newExtraction = $originalExtractionJson.new | ConvertFrom-Json -DateKind String
+    $newExtraction.SourceSetSha256 = 'F' * 64
+    Write-JsonFixture $extractionReports.new $newExtraction
+    Assert-ValidationFails 'Extraction hash mismatch' 'source-set hash' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $extractionReports.new $originalExtractionJson.new
+
+    $heightWal = Join-Path $sealedSources.height 'source.vcdbs-wal'
+    $heightWalBackup = Join-Path $testRoot 'height-wal.backup'
+    [IO.File]::Copy($heightWal, $heightWalBackup, $false)
+    Remove-Item -LiteralPath $heightWal -Force
+    Assert-ValidationFails 'Missing WAL' 'missing' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    [IO.File]::Copy($heightWalBackup, $heightWal, $false)
+
+    $reloadMain = Join-Path $sealedSources.reload 'source.vcdbs'
+    $reloadMainBackup = Join-Path $testRoot 'reload-main.backup'
+    [IO.File]::Copy($reloadMain, $reloadMainBackup, $false)
+    $mutationStream = [IO.File]::Open($reloadMain, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $mutationStream.WriteByte(1) }
+    finally { $mutationStream.Dispose() }
+    Assert-ValidationFails 'Source changed after extraction' 'hash or identity mismatch' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Remove-Item -LiteralPath $reloadMain -Force
+    [IO.File]::Copy($reloadMainBackup, $reloadMain, $false)
+
+    $oversizedExtractionSentinel = 'EXTRACTION_SECRET_SHOULD_NOT_BE_ECHOED'
+    Write-OversizedFixture $extractionReports.new (256KB) $oversizedExtractionSentinel
+    Assert-ValidationFails 'Oversized extraction report' 'SQLite extraction report exceeds maximum' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath $oversizedExtractionSentinel
+    Write-Utf8Fixture $extractionReports.new $originalExtractionJson.new
+
     Add-Content -LiteralPath $logPaths.new -Value 'arbitrary stale content'
     Assert-ValidationFails 'Arbitrary log mutation' 'log SHA-256' `
         { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
@@ -540,10 +631,11 @@ $logTimestamp [Event] Stopped the server!
         Status = 'PASS'
         Configuration = $Configuration
         CreateNewReplacementRejected = $duplicateFailed
-        NegativeCases = 25
+        NegativeCases = 30
         BootstrapModuleBinding = $true
         PortablePdbPairing = $true
         VisualStudioProvenance = 'visual-studio-debugger-session-verified-v3'
+        SQLiteExtraction = 'sealed-source-clone-only-v1'
     } | ConvertTo-Json -Depth 4
 }
 finally {
