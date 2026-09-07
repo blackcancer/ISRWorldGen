@@ -25,12 +25,12 @@ public sealed class EvidenceArtifactTests
 
     private static readonly (string Code, LandscapeFamily Family)[] BlindOrder =
     [
-        ("Q01", LandscapeFamily.VolcanicDomains),
-        ("Q02", LandscapeFamily.Plains),
-        ("Q03", LandscapeFamily.SedimentaryBasins),
-        ("Q04", LandscapeFamily.Plateaus),
-        ("Q05", LandscapeFamily.RuggedRanges),
-        ("Q06", LandscapeFamily.OldMassifs),
+        ("R01", LandscapeFamily.OldMassifs),
+        ("R02", LandscapeFamily.Plateaus),
+        ("R03", LandscapeFamily.VolcanicDomains),
+        ("R04", LandscapeFamily.RuggedRanges),
+        ("R05", LandscapeFamily.SedimentaryBasins),
+        ("R06", LandscapeFamily.Plains),
     ];
 
     [TestMethod]
@@ -44,7 +44,7 @@ public sealed class EvidenceArtifactTests
         }
         string output = Path.Combine(L03BTestSupport.FindRepositoryRoot(), ".local", "L03B", runName);
         Directory.CreateDirectory(output);
-        string reportPath = Path.Combine(output, "T03-05-06-Q.json");
+        string reportPath = Path.Combine(output, "T03-05-06-R.json");
         string commit = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_COMMIT") ?? "WORKING_TREE";
         string configuration = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_CONFIGURATION") ?? "UNKNOWN";
         WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
@@ -148,15 +148,15 @@ public sealed class EvidenceArtifactTests
         }
 
         byte[] profileBytes = Encoding.UTF8.GetBytes(profileRows.ToString());
-        string profilesPath = Path.Combine(output, "T03-06-blind-profiles.csv");
+        string profilesPath = Path.Combine(output, "T03-06-R-blind-profiles.csv");
         WriteAtomic(profilesPath, profileBytes);
         byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
-            instruction = "Inspect Q01..Q06 maps and profiles before opening this separate key.",
+            instruction = "Inspect R01..R06 maps and profiles before opening this separate key.",
             entries = BlindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
         }, JsonOptions);
-        string keyPath = Path.Combine(output, "T03-06-Q-review-key.json");
+        string keyPath = Path.Combine(output, "T03-06-R-review-key.json");
         WriteAtomic(keyPath, keyBytes);
 
         IReadOnlyList<int> calibrationSeeds = L03BTestSupport.SeedCorpus("calibration_seeds");
