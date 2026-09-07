@@ -184,20 +184,14 @@ public sealed class LandscapeModel
     private static double ComposeCellAltitude(LandscapeCellProfile cell, LandscapeFamilyProfile family, double signature)
     {
         double continental = cell.ContinentalHeightPpm / 1_000_000d;
-        if (continental >= 0)
-        {
-            return 0.08 +
-                (0.30 * continental) +
-                (0.25 * cell.UpliftNormalized) -
-                (0.08 * cell.SubsidenceNormalized) +
-                (family.ReliefAmplitudeNormalized * signature);
-        }
-
-        return -0.08 +
-            (0.45 * continental) -
-            (0.12 * cell.SubsidenceNormalized) +
-            (0.06 * cell.UpliftNormalized) +
-            (family.ReliefAmplitudeNormalized * signature);
+        // The geological datum deliberately does not encode a family silhouette.
+        // Keeping it separate from the zero-centred local residual means a basin
+        // remains a basin and a plateau keeps its flat top after composition.
+        double geologicalBase = continental >= 0
+            ? 0.10 + (0.26 * continental) + (0.22 * cell.UpliftNormalized) - (0.10 * cell.SubsidenceNormalized)
+            : -0.18 + (0.35 * continental) + (0.04 * cell.UpliftNormalized) - (0.10 * cell.SubsidenceNormalized);
+        double morphologyResidual = family.ReliefAmplitudeNormalized * signature;
+        return geologicalBase + morphologyResidual;
     }
 
     private static Hash256 ComputeChecksum(LandscapeModel model, GenerationIdentity identity)
@@ -405,6 +399,16 @@ public static class LandscapeModelBuilder
     private static LandscapeFamily Classify(int seed, PlateCellState cell)
     {
         double boundaryIntensity = Math.Max(cell.UpliftNormalized, cell.SubsidenceNormalized);
+
+        // Oceanic interiors are quiet bathymetric domains, not continental plains.
+        // Preserve the volcanic exception before applying the calm-interior rule.
+        if (cell.CrustKind == CrustKind.Oceanic)
+        {
+            return cell.UpliftNormalized > 0.45
+                ? LandscapeFamily.VolcanicDomains
+                : LandscapeFamily.SedimentaryBasins;
+        }
+
         if (boundaryIntensity < 0.03)
         {
             return LandscapeFamily.Plains;
@@ -425,13 +429,6 @@ public static class LandscapeModelBuilder
             RandomDomain.Geology,
             cell.CellId,
             601) % 6;
-        if (cell.CrustKind == CrustKind.Oceanic)
-        {
-            return selector % 3 == 0
-                ? LandscapeFamily.VolcanicDomains
-                : LandscapeFamily.SedimentaryBasins;
-        }
-
         if (cell.RelativeAgePpm >= 700_000)
         {
             return LandscapeFamily.OldMassifs;

@@ -33,7 +33,7 @@ public sealed class LandscapeCompositionTests
         for (int left = 0; left < signatures.Length; left++)
         {
             Assert.IsTrue(signatures[left].All(value => double.IsFinite(value) && value is >= -1 and <= 1));
-            Assert.IsGreaterThan(0.0001, Variance(signatures[left]));
+            Assert.IsGreaterThan(0.0001, Variance(signatures[left]), $"{profiles[left].Family} variance");
             for (int right = left + 1; right < signatures.Length; right++)
             {
                 double meanAbsoluteDifference = signatures[left]

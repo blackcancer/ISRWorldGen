@@ -76,17 +76,77 @@ public static class LandscapeSignatureSampler
         };
     }
     private static double Ranges(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
-    { var q = Local(x, z, seed, s, 0, p.MacroWavelengthBlocks); double backbone = Math.Exp(-5.8 * q.V * q.V) * (.76 + (.24 * Noise(q.U * p.MacroWavelengthBlocks / p.MesoWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.MesoWavelengthBlocks, seed, s, 10))); double spurV = q.V - (.34 * Math.Sin((q.U * p.MacroWavelengthBlocks / p.MesoWavelengthBlocks) + Phase(seed, s, 11))); double spurs = .45 * Math.Exp(-12 * spurV * spurV); double serration = .24 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 12) - .5); return ((p.MacroWeight * backbone) + (p.MesoWeight * spurs) + (p.DetailWeight * serration)) * 1.35 - .72; }
+    {
+        var q = Local(x, z, seed, s, 0, p.MacroWavelengthBlocks);
+        double scale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
+        double mainRidge = Math.Exp(-7 * q.V * q.V);
+        double parallelRidge = .72 * Math.Exp(-12 * (q.V - .42) * (q.V - .42));
+        double col = -.42 * Math.Exp(-18 * (q.U * q.U + q.V * q.V));
+        double serration = .18 * (Noise(q.U * scale, q.V * scale, seed, s, 12) - .5);
+        double crags = .12 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 13) - .5);
+        return (p.MacroWeight * (mainRidge + parallelRidge + col - .54)) + (p.MesoWeight * serration) + (p.DetailWeight * crags);
+    }
+
     private static double Massifs(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
-    { var q = Local(x, z, seed, s, 20, p.MacroWavelengthBlocks); double a = Gaussian(q.U + .18, q.V - .11, 1, .78); double scale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks; double b = .62 * Gaussian((q.U - .36) * scale, (q.V + .27) * scale, .62, .55); double erosion = .16 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 21) - .5); return ((p.MacroWeight * a) + (p.MesoWeight * b) + (p.DetailWeight * erosion)) * 1.45 - .78; }
+    {
+        var q = Local(x, z, seed, s, 20, p.MacroWavelengthBlocks);
+        double scale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
+        double summitA = Gaussian(q.U + .28, q.V - .13, .34, .31);
+        double summitB = .82 * Gaussian(q.U - .32, q.V + .20, .28, .36);
+        double summitC = .56 * Gaussian((q.U + .04) * scale, (q.V + .38) * scale, .64, .58);
+        double valley = -.45 * Gaussian(q.U, q.V, .24, .20);
+        double weathering = .10 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 22) - .5);
+        return (p.MacroWeight * (summitA + summitB + valley - .28)) + (p.MesoWeight * (summitC - .10)) + (p.DetailWeight * weathering);
+    }
+
     private static double Plateau(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
-    { var q = Local(x, z, seed, s, 30, p.MacroWavelengthBlocks); double r = Math.Pow(Math.Abs(q.U), 4) + Math.Pow(Math.Abs(q.V / .73), 4); double top = 1 - Smooth(.62, 1.06, r); double mesoScale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks; double escarpment = Math.Exp(-42 * mesoScale * (r - 1) * (r - 1)); double terraces = .10 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 32) - .5); double interior = .035 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 31) - .5) * Smooth(.25, .85, top); return -.66 + (1.5 * ((p.MacroWeight * top) + (p.MesoWeight * (escarpment + terraces)) + (p.DetailWeight * interior))); }
+    {
+        var q = Local(x, z, seed, s, 30, p.MacroWavelengthBlocks);
+        double r = Math.Pow(Math.Abs(q.U), 4) + Math.Pow(Math.Abs(q.V / .76), 4);
+        double top = 1 - Smooth(.56, .86, r);
+        double escarpment = Math.Exp(-105 * (r - .73) * (r - .73));
+        double mesoScale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
+        double steppedEdge = .08 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 32) - .5) * escarpment;
+        double interior = (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 31) - .5) * top;
+        double foreland = .14 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 33) - .5);
+        double rockTexture = .05 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 34) - .5);
+        return (p.MacroWeight * (top - .36)) + (p.MesoWeight * (.46 * escarpment + steppedEdge + foreland - .11)) + (p.DetailWeight * ((.06 * interior) + rockTexture));
+    }
+
     private static double Basin(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
-    { var q = Local(x, z, seed, s, 40, p.MacroWavelengthBlocks); double r = Math.Sqrt((q.U * q.U) + ((q.V / .62) * (q.V / .62))); double bowl = -Math.Exp(-2.9 * r * r); double rim = .30 * Math.Exp(-35 * (p.MacroWavelengthBlocks / p.MesoWavelengthBlocks) * (r - .92) * (r - .92)); double strata = .07 * Math.Sin(((p.MacroWavelengthBlocks / p.DetailWavelengthBlocks) * r) + Phase(seed, s, 41)) * Math.Exp(-2 * r * r); return ((p.MacroWeight * bowl) + (p.MesoWeight * rim) + (p.DetailWeight * strata)) * .95; }
+    {
+        var q = Local(x, z, seed, s, 40, p.MacroWavelengthBlocks);
+        double r = Math.Sqrt((q.U * q.U) + ((q.V / .67) * (q.V / .67)));
+        double closedBowl = -Math.Exp(-3.7 * r * r);
+        double enclosingRim = .58 * Math.Exp(-80 * (r - .77) * (r - .77));
+        double mesoScale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
+        double rimUndulation = .08 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 42) - .5) * enclosingRim;
+        double floor = .06 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 41) - .5) * Math.Exp(-4 * r * r);
+        return (p.MacroWeight * (closedBowl + .29)) + (p.MesoWeight * (enclosingRim + rimUndulation - .08)) + (p.DetailWeight * floor);
+    }
+
     private static double Plain(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
-    { var q = Local(x, z, seed, s, 50, p.MacroWavelengthBlocks); double broad = Noise(q.U, q.V, seed, s, 51) - .5; double meso = Noise(q.U * p.MacroWavelengthBlocks / p.MesoWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.MesoWavelengthBlocks, seed, s, 52) - .5; double fine = Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 53) - .5; return (p.MacroWeight * broad) + (p.MesoWeight * meso) + (p.DetailWeight * fine); }
+    {
+        var q = Local(x, z, seed, s, 50, p.MacroWavelengthBlocks);
+        double broad = Noise(q.U * 1.3, q.V * 1.3, seed, s, 51) - .5;
+        double mesoScale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
+        double gentleDrainage = Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 52) - .5;
+        double fine = Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 53) - .5;
+        return (p.MacroWeight * .38 * broad) + (p.MesoWeight * .20 * gentleDrainage) + (p.DetailWeight * .10 * fine);
+    }
+
     private static double Volcanoes(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
-    { var q = Local(x, z, seed, s, 60, p.MacroWavelengthBlocks); double cone = Cone(q.U + .23, q.V - .08, .48); double mesoScale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks; double detailScale = p.MacroWavelengthBlocks / p.DetailWavelengthBlocks; double secondary = .55 * Cone((q.U - .39) * mesoScale, (q.V + .29) * mesoScale, .27); double r = Math.Sqrt((q.U - .23) * (q.U - .23) + (q.V + .08) * (q.V + .08)); double caldera = (-.52 * Math.Exp(-90 * r * r)) + (.13 * Math.Exp(-160 * (r - .19) * (r - .19))); double ambientMacro = .18 * (Noise(q.U, q.V, seed, s, 63) - .5); double ambientMeso = .12 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 64) - .5); double ambientDetail = .07 * (Noise(q.U * detailScale, q.V * detailScale, seed, s, 65) - .5); return (p.MacroWeight * (cone + ambientMacro)) + (p.MesoWeight * (secondary + ambientMeso)) + (p.DetailWeight * (caldera + ambientDetail)) - .42; }
+    {
+        var q = Local(x, z, seed, s, 60, p.MacroWavelengthBlocks);
+        double mainCone = Cone(q.U + .20, q.V - .10, .45);
+        double mesoScale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
+        double secondaryCone = .58 * Cone((q.U - .36) * mesoScale, (q.V + .24) * mesoScale, .25);
+        double r = Math.Sqrt((q.U + .20) * (q.U + .20) + (q.V - .10) * (q.V - .10));
+        double caldera = -.48 * Math.Exp(-125 * r * r) + .18 * Math.Exp(-210 * (r - .16) * (r - .16));
+        double rift = .22 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 62) - .5);
+        double lava = .26 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 63) - .5);
+        return (p.MacroWeight * ((1.35 * mainCone) - .32)) + (p.MesoWeight * (secondaryCone + caldera + rift - .08)) + (p.DetailWeight * lava);
+    }
     private static (double U, double V) Local(double x, double z, int seed, StableId s, ulong c, double scale) { double angle = Phase(seed, s, c); double cos = Math.Cos(angle); double sin = Math.Sin(angle); double ox = Signed(seed, s, c + 1) * scale * .45; double oz = Signed(seed, s, c + 2) * scale * .45; double dx = x - ox; double dz = z - oz; return (((cos * dx) + (sin * dz)) / scale, ((-sin * dx) + (cos * dz)) / scale); }
     private static double Cone(double u, double v, double radius) { double t = Math.Max(0, 1 - (Math.Sqrt((u * u) + (v * v)) / radius)); return t * t; }
     private static double Gaussian(double u, double v, double sx, double sy) => Math.Exp(-((u * u / (sx * sx)) + (v * v / (sy * sy))));
