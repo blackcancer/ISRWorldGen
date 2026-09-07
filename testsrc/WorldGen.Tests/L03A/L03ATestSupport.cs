@@ -1,4 +1,5 @@
 using ISRWorldGen.Core.Atlas.Geometry;
+using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Foundation;
 using ISRWorldGen.Core.Geology.Plates;
@@ -35,6 +36,14 @@ internal static class L03ATestSupport
         Hash256.Parse(AssetHash),
         "l03a-plates-continents-v1");
 
+    internal static GenerationIdentity Identity(int seed, FrozenScaleProfile profile) => new(
+        seed,
+        GenerationIdentity.SupportedAlgorithmVersion,
+        GenerationIdentity.SupportedSchemaVersion,
+        profile.GeographyConfigHash,
+        Hash256.Parse(AssetHash),
+        $"l03a-{profile.Id}-v{profile.ProfileVersion}");
+
     internal static StableId PlateId(ulong index) =>
         StableId.Derive(RandomDomain.Geology, StableId.Zero, index);
 
@@ -52,6 +61,38 @@ internal static class L03ATestSupport
         maximumRasterSamples: 1_000_000);
 
     internal static WorldBounds VastBounds() => new(0, 0, 12_288, 8_192);
+
+    internal static FrozenScaleProfile FrozenProfile(string id)
+    {
+        ScaleProfileDefinition definition = ScaleProfileCatalog.Proposals.Single(profile => profile.Id == id);
+        var nativeConstraints = new NativeWorldConstraints(
+            "l03a-qualified-native-v1",
+            ruleSetVersion: 1,
+            supportedHeights: new[] { 256, 384, 512 },
+            minimumHorizontalBlocks: 4_096,
+            maximumHorizontalBlocks: 1_024_000,
+            horizontalStepBlocks: 512);
+        return Success(ScaleProfileValidator.ValidateAndFreeze(definition, nativeConstraints));
+    }
+
+    internal static WorldBounds Bounds(FrozenScaleProfile profile)
+    {
+        WorldDomain domain = profile.AtlasIndexProfile.Domain;
+        return new WorldBounds(
+            domain.X.MinInclusive,
+            domain.Z.MinInclusive,
+            domain.X.MaxExclusive,
+            domain.Z.MaxExclusive);
+    }
+
+    internal static ContinentalSamplingGrid ProfileGrid(FrozenScaleProfile profile, int width, int height)
+    {
+        long stepX = (profile.WidthBlocks / width) & ~1L;
+        long stepZ = (profile.LengthBlocks / height) & ~1L;
+        long originX = PositiveModulo(-(stepX / 2), profile.AtlasTileSizeBlocks);
+        long originZ = PositiveModulo(-(stepZ / 2), profile.AtlasTileSizeBlocks);
+        return new ContinentalSamplingGrid(originX, originZ, stepX, stepZ, width, height);
+    }
 
     internal static IReadOnlyList<int> SeedCorpus(string propertyName)
     {
@@ -194,7 +235,7 @@ internal static class L03ATestSupport
     internal static (int CoastSegments, int AtlasAligned, int TileAligned) CoastlineAlignment(
         AtlasMesh atlas,
         ContinentalRaster raster,
-        int tileSizeSamples)
+        int tileSizeBlocks)
     {
         int[] owners = RasterOwners(atlas, raster.Grid);
         int coast = 0;
@@ -212,7 +253,9 @@ internal static class L03ATestSupport
 
                 coast++;
                 atlasAligned += owners[index] != owners[index + 1] ? 1 : 0;
-                tileAligned += (x + 1) % tileSizeSamples == 0 ? 1 : 0;
+                long firstX = checked(raster.Grid.OriginX + ((long)x * raster.Grid.StepX));
+                long secondX = checked(firstX + raster.Grid.StepX);
+                tileAligned += (firstX + secondX) % (2L * tileSizeBlocks) == 0 ? 1 : 0;
             }
         }
 
@@ -228,11 +271,26 @@ internal static class L03ATestSupport
 
                 coast++;
                 atlasAligned += owners[index] != owners[index + raster.Width] ? 1 : 0;
-                tileAligned += (z + 1) % tileSizeSamples == 0 ? 1 : 0;
+                long firstZ = checked(raster.Grid.OriginZ + ((long)z * raster.Grid.StepZ));
+                long secondZ = checked(firstZ + raster.Grid.StepZ);
+                tileAligned += (firstZ + secondZ) % (2L * tileSizeBlocks) == 0 ? 1 : 0;
             }
         }
 
         return (coast, atlasAligned, tileAligned);
+    }
+
+    internal static ContinentalSamplingGrid CenteredGrid(
+        FrozenScaleProfile profile,
+        long step,
+        int width,
+        int height)
+    {
+        long spanX = checked((long)(width - 1) * step);
+        long spanZ = checked((long)(height - 1) * step);
+        long originX = checked((profile.WidthBlocks - spanX) / 2);
+        long originZ = checked((profile.LengthBlocks - spanZ) / 2);
+        return new ContinentalSamplingGrid(originX, originZ, step, step, width, height);
     }
 
     internal static string Sha256(byte[] content) =>
@@ -309,6 +367,12 @@ internal static class L03ATestSupport
             checked((byte)(55 + (id.Low % 170))),
             checked((byte)(55 + ((id.Low >> 16) % 170))),
             checked((byte)(55 + ((id.High >> 32) % 170))));
+
+    private static long PositiveModulo(long value, long divisor)
+    {
+        long remainder = value % divisor;
+        return remainder < 0 ? remainder + divisor : remainder;
+    }
 
     private static void WriteInt32(byte[] destination, int offset, int value)
     {

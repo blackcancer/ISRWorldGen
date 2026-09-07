@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using ISRWorldGen.Core.Atlas.Geometry;
+using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Foundation;
 
@@ -212,6 +213,34 @@ public sealed class ContinentalFieldModel
 
         return GenerationResult<ContinentalFieldModel>.Success(
             new ContinentalFieldModel(identity, bounds, settings, generated));
+    }
+
+    public static GenerationResult<ContinentalFieldModel> Create(
+        GenerationIdentity identity,
+        FrozenScaleProfile profile,
+        ContinentalFieldSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(settings);
+        if (identity.GeographyConfigHash != profile.GeographyConfigHash)
+        {
+            return ModelFailure(
+                identity,
+                GenerationFailureCode.InvalidInput,
+                "geology.continents.profile-hash",
+                "Generation identity and frozen scale profile have different geography configuration hashes.");
+        }
+
+        WorldDomain domain = profile.AtlasIndexProfile.Domain;
+        return Create(
+            identity,
+            new WorldBounds(
+                domain.X.MinInclusive,
+                domain.Z.MinInclusive,
+                domain.X.MaxExclusive,
+                domain.Z.MaxExclusive),
+            settings);
     }
 
     public int SampleHeightPpm(long x, long z)

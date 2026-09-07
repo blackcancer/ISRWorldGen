@@ -1,4 +1,5 @@
 using ISRWorldGen.Core.Atlas.Geometry;
+using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Geology.Plates;
 
 namespace ISRWorldGen.Tests.L03A;
@@ -9,23 +10,27 @@ public sealed class ContinentalFieldTests
     [TestMethod]
     public void FrozenCorpusProducesDeterministicBoundedMultiscaleTopology()
     {
-        WorldBounds bounds = L03ATestSupport.VastBounds();
+        FrozenScaleProfile balanced = L03ATestSupport.FrozenProfile("balanced");
+        FrozenScaleProfile vast = L03ATestSupport.FrozenProfile("vast-expeditions");
         ContinentalFieldSettings settings = L03ATestSupport.ContinentalSettings();
         var allComponentAreas = new List<int>();
         var scaleClasses = new HashSet<ContinentalFeatureScale>();
+        var exercisedProfiles = new HashSet<string>(StringComparer.Ordinal);
         int mapsWithCurvedCoasts = 0;
 
         IReadOnlyList<int> calibrationSeeds = L03ATestSupport.SeedCorpus("calibration_seeds");
         IReadOnlyList<int> holdoutSeeds = L03ATestSupport.SeedCorpus("holdout_seeds");
         Assert.HasCount(192, calibrationSeeds);
         Assert.HasCount(64, holdoutSeeds);
-        foreach (int seed in calibrationSeeds.Concat(holdoutSeeds))
+        foreach ((int seed, FrozenScaleProfile profile) in calibrationSeeds
+                     .Select(seed => (seed, balanced))
+                     .Concat(holdoutSeeds.Select(seed => (seed, vast))))
         {
             ContinentalFieldModel first = L03ATestSupport.Success(
-                ContinentalFieldModel.Create(L03ATestSupport.Identity(seed), bounds, settings));
+                ContinentalFieldModel.Create(L03ATestSupport.Identity(seed, profile), profile, settings));
             ContinentalFieldModel second = L03ATestSupport.Success(
-                ContinentalFieldModel.Create(L03ATestSupport.Identity(seed), bounds, settings));
-            ContinentalSamplingGrid grid = new(64, 64, 128, 128, 96, 64);
+                ContinentalFieldModel.Create(L03ATestSupport.Identity(seed, profile), profile, settings));
+            ContinentalSamplingGrid grid = L03ATestSupport.ProfileGrid(profile, 96, 96);
             ContinentalRaster raster = L03ATestSupport.Success(first.Rasterize(grid));
             ContinentalRaster repeated = L03ATestSupport.Success(second.Rasterize(grid));
             ContinentalTopologyReport report = ContinentalTopologyAnalyzer.Analyze(raster);
@@ -39,6 +44,9 @@ public sealed class ContinentalFieldTests
                 report.LandSampleCount + report.OpenOceanSampleCount + report.InlandBasinSampleCount,
                 $"surface accounting seed {seed}");
             Assert.IsGreaterThan(0, report.OpenOceanComponentCount, $"edge-connected ocean seed {seed}");
+            int tileAligned = report.CoastlineSegments.Count(segment => IsStorageBoundary(segment, profile.AtlasTileSizeBlocks));
+            Assert.IsLessThanOrEqualTo(report.CoastlineSegmentCount, tileAligned * 5,
+                $"More than 20% of coastline follows {profile.Id} storage boundaries for seed {seed}.");
             Assert.IsGreaterThan(0, report.CoastlineSegmentCount, $"coast seed {seed}");
             Assert.HasCount(report.CoastlineSegmentCount, report.CoastlineSegments);
             Assert.HasCount(raster.HeightPpm.Count, report.SurfaceDomains);
@@ -56,6 +64,7 @@ public sealed class ContinentalFieldTests
             }
 
             allComponentAreas.AddRange(report.LandComponentAreas);
+            exercisedProfiles.Add(profile.Id);
             foreach (ContinentalFeatureDescriptor feature in first.Features)
             {
                 scaleClasses.Add(feature.Scale);
@@ -65,24 +74,13 @@ public sealed class ContinentalFieldTests
         CollectionAssert.AreEquivalent(
             new[] { ContinentalFeatureScale.Macro, ContinentalFeatureScale.Regional },
             scaleClasses.ToArray());
-        Assert.IsGreaterThanOrEqualTo(12, mapsWithCurvedCoasts,
+        Assert.IsGreaterThanOrEqualTo(192, mapsWithCurvedCoasts,
             "At least 75% of the frozen corpus must show frequent coastline direction changes.");
         Assert.IsTrue(allComponentAreas.Any(area => area < 300), "Regional landforms are absent.");
         Assert.IsTrue(allComponentAreas.Any(area => area > 750), "Continental landforms are absent.");
         Assert.IsGreaterThanOrEqualTo(8, allComponentAreas.Select(area => area % 32).Distinct().Count(),
             "Component areas appear locked to a 32-sample storage tile.");
-
-        foreach (int seed in holdoutSeeds.Take(8))
-        {
-            ContinentalFieldModel model = L03ATestSupport.Success(ContinentalFieldModel.Create(
-                L03ATestSupport.Identity(seed), bounds, settings));
-            ContinentalRaster expedition = L03ATestSupport.Success(model.Rasterize(
-                new ContinentalSamplingGrid(32, 32, 64, 64, 192, 128)));
-            ContinentalTopologyReport report = ContinentalTopologyAnalyzer.Analyze(expedition);
-            Assert.AreEqual(expedition.Width * expedition.Height,
-                report.LandSampleCount + report.OpenOceanSampleCount + report.InlandBasinSampleCount);
-            Assert.IsGreaterThan(0, report.CoastlineSegmentCount);
-        }
+        CollectionAssert.AreEquivalent(new[] { "balanced", "vast-expeditions" }, exercisedProfiles.ToArray());
     }
 
     [TestMethod]
@@ -125,5 +123,15 @@ public sealed class ContinentalFieldTests
 
         Assert.IsFalse(tooLarge.IsSuccess);
         Assert.IsFalse(outside.IsSuccess);
+    }
+
+    private static bool IsStorageBoundary(ContinentalContourSegment segment, long tileSizeBlocks)
+    {
+        if (segment.Start.X == segment.End.X)
+        {
+            return segment.Start.X.Numerator % (segment.Start.X.Denominator * tileSizeBlocks) == 0;
+        }
+
+        return segment.Start.Z.Numerator % (segment.Start.Z.Denominator * tileSizeBlocks) == 0;
     }
 }

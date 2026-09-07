@@ -1,4 +1,6 @@
 using ISRWorldGen.Core.Atlas.Geometry;
+using ISRWorldGen.Core.Atlas.Profiles;
+using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Geology.Plates;
 
 namespace ISRWorldGen.Tests.L03A;
@@ -9,13 +11,15 @@ public sealed class PlateAtlasBuilderTests
     [TestMethod]
     public void AtlasCellsProduceCanonicalPlateSnapshotWithBoundaryFields()
     {
-        WorldBounds bounds = new(0, 0, 1_024, 768);
+        FrozenScaleProfile profile = L03ATestSupport.FrozenProfile("balanced");
+        WorldBounds bounds = L03ATestSupport.Bounds(profile);
+        var identity = L03ATestSupport.Identity(20260906, profile);
         GeneratedSiteSet sites = L03ATestSupport.Success(AtlasSiteGenerator.Generate(
-            L03ATestSupport.Identity(20260906),
+            identity,
             bounds,
             new AtlasSiteGenerationSettings(64)));
         AtlasMesh mesh = L03ATestSupport.Success(AtlasGeometryBuilder.Build(
-            L03ATestSupport.Identity(20260906),
+            identity,
             bounds,
             sites.Sites,
             new AtlasGeometryBuildOptions(4, GeometryCacheMode.Precomputed)));
@@ -23,17 +27,20 @@ public sealed class PlateAtlasBuilderTests
             plateCount: 7,
             L03ATestSupport.ContinentalSettings(),
             maximumCells: 1_000,
-            maximumBoundaryEdges: 4_000);
+            maximumBoundaryEdges: 4_000,
+            maximumBoundaryInfluenceEvaluations: 4_000_000);
 
         PlateAtlasSnapshot first = L03ATestSupport.Success(
-            PlateAtlasBuilder.Build(L03ATestSupport.Identity(20260906), mesh, settings));
+            PlateAtlasBuilder.Build(identity, mesh, profile, settings));
         PlateAtlasSnapshot reversed = L03ATestSupport.Success(
-            PlateAtlasBuilder.Build(L03ATestSupport.Identity(20260906), mesh, settings));
+            PlateAtlasBuilder.Build(identity, mesh, profile, settings));
 
         Assert.HasCount(7, first.Plates);
         Assert.HasCount(mesh.Cells.Count, first.Cells);
         Assert.IsGreaterThan(0, first.Boundaries.Count);
         Assert.AreEqual(first.ContentChecksum, reversed.ContentChecksum);
+        Assert.AreEqual(profile.Id, first.ScaleProfileId);
+        Assert.AreEqual(profile.AtlasTileSizeBlocks, first.AtlasTileSizeBlocks);
         CollectionAssert.AreEqual(first.Cells.ToArray(), reversed.Cells.ToArray());
         Assert.IsTrue(first.Cells.All(cell => double.IsFinite(cell.UpliftNormalized)));
         Assert.IsTrue(first.Cells.All(cell => double.IsFinite(cell.SubsidenceNormalized)));
@@ -56,19 +63,40 @@ public sealed class PlateAtlasBuilderTests
     }
 
     [TestMethod]
+    [DoNotParallelize]
     public void PlateBuilderRefusesImpossibleCountsAndBudgets()
     {
-        WorldBounds bounds = new(0, 0, 32, 32);
+        FrozenScaleProfile profile = L03ATestSupport.FrozenProfile("laboratory");
+        WorldBounds bounds = L03ATestSupport.Bounds(profile);
+        GenerationIdentity identity = L03ATestSupport.Identity(73, profile);
         GeneratedSiteSet sites = L03ATestSupport.Success(AtlasSiteGenerator.Generate(
-            L03ATestSupport.Identity(), bounds, new AtlasSiteGenerationSettings(8)));
+            identity, bounds, new AtlasSiteGenerationSettings(16)));
         AtlasMesh mesh = L03ATestSupport.Success(AtlasGeometryBuilder.Build(
-            L03ATestSupport.Identity(), bounds, sites.Sites));
+            identity, bounds, sites.Sites));
 
         Assert.IsFalse(PlateAtlasBuilder.Build(
-            L03ATestSupport.Identity(), mesh,
-            new PlateGenerationSettings(9, L03ATestSupport.ContinentalSettings(), 100, 100)).IsSuccess);
+            identity, mesh, profile,
+            new PlateGenerationSettings(17, L03ATestSupport.ContinentalSettings(), 100, 100, 10_000)).IsSuccess);
         Assert.IsFalse(PlateAtlasBuilder.Build(
-            L03ATestSupport.Identity(), mesh,
-            new PlateGenerationSettings(2, L03ATestSupport.ContinentalSettings(), 7, 100)).IsSuccess);
+            identity, mesh, profile,
+            new PlateGenerationSettings(2, L03ATestSupport.ContinentalSettings(), 15, 100, 10_000)).IsSuccess);
+
+        long allocatedBeforeInfluencePreflight = GC.GetAllocatedBytesForCurrentThread();
+        GenerationResult<PlateAtlasSnapshot> influenceBudget = PlateAtlasBuilder.Build(
+            identity,
+            mesh,
+            profile,
+            new PlateGenerationSettings(2, L03ATestSupport.ContinentalSettings(), 100, 100, 1));
+        long influencePreflightAllocation =
+            GC.GetAllocatedBytesForCurrentThread() - allocatedBeforeInfluencePreflight;
+        Assert.IsInstanceOfType<GenerationFailure<PlateAtlasSnapshot>>(influenceBudget);
+        Assert.AreEqual(
+            GenerationFailureCode.BudgetExceeded,
+            ((GenerationFailure<PlateAtlasSnapshot>)influenceBudget).Error.Code);
+        Assert.AreEqual(
+            "geology.plates.influence-budget",
+            ((GenerationFailure<PlateAtlasSnapshot>)influenceBudget).Error.Stage);
+        Assert.IsLessThan(64 * 1024L, influencePreflightAllocation,
+            "The coupled work-budget refusal must occur before continental construction or spread allocation.");
     }
 }

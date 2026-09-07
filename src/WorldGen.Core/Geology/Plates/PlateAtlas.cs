@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text;
 using ISRWorldGen.Core.Atlas.Geometry;
+using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Foundation;
 
@@ -110,13 +111,15 @@ public sealed record PlateGenerationSettings
         int plateCount,
         ContinentalFieldSettings continentalField,
         int maximumCells,
-        int maximumBoundaryEdges)
+        int maximumBoundaryEdges,
+        long maximumBoundaryInfluenceEvaluations)
     {
         ArgumentNullException.ThrowIfNull(continentalField);
         PlateCount = plateCount;
         ContinentalField = continentalField;
         MaximumCells = maximumCells;
         MaximumBoundaryEdges = maximumBoundaryEdges;
+        MaximumBoundaryInfluenceEvaluations = maximumBoundaryInfluenceEvaluations;
     }
 
     public int PlateCount { get; }
@@ -126,6 +129,8 @@ public sealed record PlateGenerationSettings
     public int MaximumCells { get; }
 
     public int MaximumBoundaryEdges { get; }
+
+    public long MaximumBoundaryInfluenceEvaluations { get; }
 }
 
 public sealed class PlateAtlasSnapshot
@@ -135,7 +140,8 @@ public sealed class PlateAtlasSnapshot
         IEnumerable<PlateCellState> cells,
         IEnumerable<PlateBoundaryRecord> boundaries,
         Hash256 continentalModelChecksum,
-        GenerationIdentity identity)
+        GenerationIdentity identity,
+        FrozenScaleProfile profile)
     {
         Plates = Array.AsReadOnly(plates.OrderBy(plate => plate.PlateId, PlateStableIdComparer.Instance).ToArray());
         Cells = Array.AsReadOnly(cells.OrderBy(cell => cell.CellId, PlateStableIdComparer.Instance).ToArray());
@@ -144,6 +150,10 @@ public sealed class PlateAtlasSnapshot
             .ThenBy(boundary => boundary.CellB, PlateStableIdComparer.Instance)
             .ToArray());
         ContinentalModelChecksum = continentalModelChecksum;
+        ScaleProfileId = profile.Id;
+        ScaleProfileVersion = profile.ProfileVersion;
+        AtlasResolutionBlocks = profile.AtlasResolutionBlocks;
+        AtlasTileSizeBlocks = profile.AtlasTileSizeBlocks;
         ContentChecksum = ComputeChecksum(this, identity);
     }
 
@@ -155,13 +165,23 @@ public sealed class PlateAtlasSnapshot
 
     public Hash256 ContinentalModelChecksum { get; }
 
+    public string ScaleProfileId { get; }
+
+    public uint ScaleProfileVersion { get; }
+
+    public int AtlasResolutionBlocks { get; }
+
+    public int AtlasTileSizeBlocks { get; }
+
     public Hash256 ContentChecksum { get; }
 
     private static Hash256 ComputeChecksum(PlateAtlasSnapshot snapshot, GenerationIdentity identity)
     {
         var builder = new StringBuilder();
         builder.Append("ISRW-PLATE-ATLAS-V1\n").Append(identity.NativeSeed).Append('|')
-            .Append(identity.GeographyConfigHash).Append('|').Append(snapshot.ContinentalModelChecksum).Append('\n');
+            .Append(identity.GeographyConfigHash).Append('|').Append(snapshot.ContinentalModelChecksum).Append('|')
+            .Append(snapshot.ScaleProfileId).Append('|').Append(snapshot.ScaleProfileVersion).Append('|')
+            .Append(snapshot.AtlasResolutionBlocks).Append('|').Append(snapshot.AtlasTileSizeBlocks).Append('\n');
         foreach (PlateDomain plate in snapshot.Plates)
         {
             builder.Append("P|").Append(plate.PlateId).Append('|')
@@ -197,11 +217,32 @@ public static class PlateAtlasBuilder
     public static GenerationResult<PlateAtlasSnapshot> Build(
         GenerationIdentity identity,
         AtlasMesh atlas,
+        FrozenScaleProfile profile,
         PlateGenerationSettings settings)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(atlas);
+        ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(settings);
+        if (identity.GeographyConfigHash != profile.GeographyConfigHash)
+        {
+            return Failure(identity, GenerationFailureCode.InvalidInput, "geology.plates.profile-hash",
+                "Generation identity and frozen scale profile have different geography configuration hashes.");
+        }
+
+        WorldDomain domain = profile.AtlasIndexProfile.Domain;
+        if (atlas.Bounds.MinX != domain.X.MinInclusive || atlas.Bounds.MinZ != domain.Z.MinInclusive ||
+            atlas.Bounds.MaxXExclusive != domain.X.MaxExclusive || atlas.Bounds.MaxZExclusive != domain.Z.MaxExclusive)
+        {
+            return Failure(identity, GenerationFailureCode.InvalidInput, "geology.plates.profile-domain",
+                "Atlas bounds do not match the frozen scale profile domain.");
+        }
+
+        if (atlas.Sites.Count > profile.SiteQuota)
+        {
+            return Failure(identity, GenerationFailureCode.BudgetExceeded, "geology.plates.profile-site-quota",
+                $"Atlas has {atlas.Sites.Count} sites for frozen profile quota {profile.SiteQuota}.");
+        }
         if (settings.PlateCount <= 0 || settings.PlateCount > atlas.Sites.Count)
         {
             return Failure(identity, GenerationFailureCode.InvalidInput, "geology.plates.count",
@@ -220,9 +261,18 @@ public static class PlateAtlasBuilder
                 $"Atlas has {atlas.Edges.Count} edges for budget {settings.MaximumBoundaryEdges}.");
         }
 
+        BigInteger maximumInfluenceEvaluations = (BigInteger)atlas.Edges.Count * atlas.Cells.Count;
+        if (settings.MaximumBoundaryInfluenceEvaluations <= 0 ||
+            maximumInfluenceEvaluations > settings.MaximumBoundaryInfluenceEvaluations)
+        {
+            return Failure(identity, GenerationFailureCode.BudgetExceeded, "geology.plates.influence-budget",
+                $"Worst-case boundary spread requires {maximumInfluenceEvaluations} evaluations for budget " +
+                $"{settings.MaximumBoundaryInfluenceEvaluations}.");
+        }
+
         GenerationResult<ContinentalFieldModel> continentalResult = ContinentalFieldModel.Create(
             identity,
-            atlas.Bounds,
+            profile,
             settings.ContinentalField);
         if (continentalResult is GenerationFailure<ContinentalFieldModel> continentalFailure)
         {
@@ -306,7 +356,7 @@ public static class PlateAtlasBuilder
             cells.Where(cell => cell.PlateId == plate.PlateId)
                 .Select(cell => new PlateCrustPatch(cell.CellId, cell.CrustKind, cell.RelativeAgePpm)))).ToArray();
         return GenerationResult<PlateAtlasSnapshot>.Success(
-            new PlateAtlasSnapshot(plates, cells, boundaries, continental.ContentChecksum, identity));
+            new PlateAtlasSnapshot(plates, cells, boundaries, continental.ContentChecksum, identity, profile));
     }
 
     private static PlateKinematics CreateKinematics(int seed, ulong index)
@@ -361,13 +411,13 @@ public static class PlateAtlasBuilder
             double dx = (site.X - midpointX) / bounds.Width;
             double dz = (site.Z - midpointZ) / bounds.Length;
             double distance = Math.Sqrt((dx * dx) + (dz * dz));
-            if (distance >= 0.22)
+            if (distance >= 0.14)
             {
                 continue;
             }
 
             double local = Math.Max(0, 1 - (distance / 0.045));
-            double regional = Math.Max(0, 1 - (distance / 0.22));
+            double regional = Math.Max(0, 1 - (distance / 0.14));
             double influence = (0.7 * local) + (0.3 * regional);
             uplift[site.Id] = Math.Max(uplift[site.Id], effect.UpliftNormalized * influence);
             subsidence[site.Id] = Math.Max(subsidence[site.Id], effect.SubsidenceNormalized * influence);
