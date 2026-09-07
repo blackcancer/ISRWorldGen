@@ -408,3 +408,29 @@ Les nouveaux témoins forgés couvrent `Required + Readable + même hash`,
 contradiction du hash de chemin main. L’auto-test oracle compte désormais 34
 cas négatifs. Les campagnes runtime historiques restent inchangées et ne sont
 pas promues ; la validation moteur de ce correctif reste `NOT_RUN`.
+
+## Recette finale T02-05 v4 — PASS
+
+La campagne `20260907T034524847` a été exécutée exclusivement sous le
+débogueur Visual Studio sur le commit publié
+`0d7a1cce329c1d68c2ea22fa77169d540d4e9fe4`, Vintage Story `1.22.7`.
+Le verdict indépendant est `ACCEPT`, sans P1/P2. L’oracle v4 a été rejoué sur
+une copie temporaire et a reproduit byte pour byte le rapport SHA-256
+`84C8A5EA5BDC888DB5C6BE94B2A19FE3DFDE7EBE4C1E89D253165F40AA284FDF`.
+Le manifeste global contient 33 chemins uniques, tous revérifiés, SHA-256
+`8185876179B21532849B88B2A3D7C57D860EE4F2C830ED5DB7A411EEF9004683`.
+
+- nouveau monde : `source=new`, deux écritures Pending/Committed et gate
+  Frozen avant le premier callback colonne réel ;
+- réouverture : `source=reload`, zéro écriture et enveloppe identique de 420
+  octets, SHA-256
+  `F9114F6A1E5B6332EA7CC39537736FD82DA2E17EF280A435619BD82B13F84FE2` ;
+- hauteur 320 et monde rectangulaire : refus fail-closed avant `WorldReady`,
+  clé absente et compteurs `chunk/mapchunk/mapregion = 0/0/0` ;
+- les quatre extractions scellent main/WAL/SHM avant et après, interrogent
+  uniquement un clone `CreateNew` et reproduisent leur hash canonique ;
+- les DLL/PDB correspondent au commit et leurs paires CodeView/Portable PDB,
+  PID, profil, sessions et instants breakpoint/continue sont concordants.
+
+T02-05 est `PASS`. Avec T02-06 déjà accepté, L02-C est proposé `DONE` et ne
+porte plus de bloqueur.

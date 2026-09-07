@@ -29,3 +29,24 @@
 3. Exécuter T02-05 sur des sauvegardes uniques sous `.local/T02-05/` avec l’arrêt différé post-RunGame : profil laboratoire valide, reload sans écriture, refus hauteur et refus dimensions rectangulaires.
 4. Exécuter la séquence client T00-06 depuis le profil authentifié Visual Studio.
 5. Mettre à jour registre et checksums, pousser, puis déléguer L03-A et L11-A si leurs dépendances sont réellement closes.
+
+## Reprise au 2026-09-07 — L02-C clôturé, voie Core ouverte
+
+- `main` est publié sur
+  `0d7a1cce329c1d68c2ea22fa77169d540d4e9fe4`; format, builds Debug/Release et
+  195/195 tests sont verts dans les deux configurations.
+- L02-C est `DONE`. T02-05 v4 a reçu un verdict indépendant `ACCEPT` sur la
+  campagne `20260907T034524847`; T02-06 était déjà accepté. L03-A devient la
+  prochaine mission admissible.
+- L00-C reste `IN_PROGRESS` uniquement pour T00-06 client. Sa campagne serveur
+  `55bd4bdeb0d049009610a12aa80fdf66` est `ACCEPT` : T00-04/T00-05 et le
+  sous-scope serveur T00-06 passent. Le profil client F5 est bloqué par une clé
+  de session invalide et attend une réauthentification utilisateur.
+- L11-A n’est pas admissible tant que L00-C n’est pas `DONE`. L10-A reste
+  `IN_PROGRESS` et attend le monde intégré requis par T10-01.
+- Le verrou Visual Studio/MCP/jeu est libre : solution fermée, débogueur
+  `Design`, zéro breakpoint et zéro processus Vintage Story.
+
+Prochaine action : valider et pousser ce registre, puis déléguer L03-A sur ce
+checkpoint. Dès que l’utilisateur confirme la reconnexion Vintage Story,
+reprendre T00-06 client par F5 avant L11-A.

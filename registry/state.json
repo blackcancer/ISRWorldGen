@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-06T23:22:49.5139089Z",
-  "integrated_commit": "44afa0f96df4581a34a5e568014868f8c967335c",
+  "updated_utc": "2026-09-07T04:06:47.0744015Z",
+  "integrated_commit": "0d7a1cce329c1d68c2ea22fa77169d540d4e9fe4",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -37,9 +37,13 @@
       "evidence": [
         "worklogs/L00-C.md",
         "commit:e3e3fc5c81cad11fd0d98c17568e4bd88370aa8c",
-        "commit:44afa0f96df4581a34a5e568014868f8c967335c"
+        "commit:44afa0f96df4581a34a5e568014868f8c967335c",
+        "commit:d0dad19192435816c24afc938ff52503145d8d8b",
+        "local:.local/L00C/55bd4bdeb0d049009610a12aa80fdf66/evidence-final/T00-04-05-06.json",
+        "local:.local/L00C/55bd4bdeb0d049009610a12aa80fdf66/evidence-final/oracle-final.json",
+        "local:.local/L00C/client-529d14bca8b044d08a4ba37b014fe87f/result.json"
       ],
-      "blocker": "T00-04, T00-05 et T00-06 moteur NOT_RUN sur le candidat 44afa0f : la campagne 3e5b0ca a prouvé 9/9 mapchunks et 72/72 chunks puis révélé que BlockingLoadChunkColumn n'attache pas MapChunk. Le snapshot cartographique borné, le fail-closed et l'arrêt différé intégrés doivent être rejoués exclusivement par le débogueur Visual Studio avec la chaîne Initialize/RecordOpen1/AuthorizeOpen2/Finalize."
+      "blocker": "T00-04 et T00-05 sont PASS et le sous-scope serveur T00-06 est PASS après 8 sessions Visual Studio sur d0dad191. Le segment client littéral reste NOT_RUN : le profil F5 authentifié charge le runtime puis s'arrête sur 'Cached session key is invalid, require login'. Une réauthentification utilisateur est nécessaire avant les cinq retours menu et la création du second monde ; aucune saisie de secret ni sauvegarde personnelle n'a été tentée."
     },
     "L01-A": {
       "status": "DONE",
@@ -107,7 +111,7 @@
       "blocker": null
     },
     "L02-C": {
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "owner": "agent:l02_c",
       "branch": "agent/l02-c",
       "base_commit": "88f11ae614407587d65dc285d92fbd629b3a1838",
@@ -118,12 +122,17 @@
         "commit:b5eae16769e44dd7709cc94a4224143abd91466e",
         "commit:e5a61ab42004940c28952a52c64917b29667ebc9",
         "commit:2af16c432f3e16b7ebf97b693a605d199198610f",
+        "commit:bed03d526a9c2a50b33a6cb3ea240b69d8f137fb",
+        "commit:52e4e6fc16decf7decf9591cad6b1a7900b14eae",
+        "commit:0d7a1cce329c1d68c2ea22fa77169d540d4e9fe4",
         "local:.local/L02C-integrated/tests/L02C-integrated-targeted-release.trx",
         "local:.local/L02C-integrated/tests/L02C-integrated-global-release.trx",
         "local:.local/L02C/process/T02-05-analytical-06-process.json",
-        "local:.local/L02C/qualitative-evidence/sensitivity-report.json"
+        "local:.local/L02C/qualitative-evidence/sensitivity-report.json",
+        "local:.local/T02-05/20260907T034524847/evidence/runtime-evidence.json",
+        "local:.local/T02-05/20260907T034524847/evidence/campaign-file-hashes.json"
       ],
-      "blocker": "T02-05 moteur NOT_RUN sur le candidat courant : un essai 3e5b0ca a observé Pending, Committed et le gate Frozen, mais l'arrêt RunGame trop précoce n'a pas persisté l'enveloppe et le reload a échoué. L'arrêt différé post-RunGame est intégré à 44afa0f ; les scénarios valide/reload/refus doivent être rejoués dans Vintage Story 1.22.7 par le débogueur Visual Studio."
+      "blocker": null
     },
     "L03-A": {
       "status": "BACKLOG",

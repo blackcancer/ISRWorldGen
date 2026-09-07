@@ -1,7 +1,7 @@
 {
   "status": "PASS",
   "scope": "DOCUMENTATION_ONLY",
-  "generated_utc": "2026-09-06T23:24:02.120326+00:00",
+  "generated_utc": "2026-09-07T04:09:53.443087+00:00",
   "counts": {
     "tasks": 42,
     "requirements": 84,
@@ -10,7 +10,9 @@
     "seeds": 256,
     "markdown_documents": 131
   },
-  "ready_by_dependencies": [],
+  "ready_by_dependencies": [
+    "L03-A"
+  ],
   "context_bytes": {
     "L00-A": 35139,
     "L00-B": 35079,
