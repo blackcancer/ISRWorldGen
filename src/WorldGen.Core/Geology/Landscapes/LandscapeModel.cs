@@ -54,7 +54,50 @@ public readonly record struct LandscapeCellProfile(
     int ContinentalHeightPpm,
     double UpliftNormalized,
     double SubsidenceNormalized,
-    Hash256 FamilyParameterChecksum);
+    Hash256 FamilyParameterChecksum)
+{
+    /// <summary>
+    /// Absolute sampling radii for reviewing morphology. Every family shares this
+    /// physical frame so the scale choice cannot disclose the blind answer key.
+    /// The distances never shrink to fit a world or image edge.
+    /// </summary>
+    public LandscapePhysicalScaleRadii PhysicalScaleRadii =>
+        LandscapePhysicalScaleRadii.Review;
+}
+
+/// <summary>
+/// Three strictly separated, family-neutral physical review scales. Their diameters
+/// respectively resolve the finest catalog detail, span the broadest detail, and
+/// cover the broadest catalog macro wavelength. A caller must select a fixture that
+/// contains the requested extent; clipping or edge clamping is forbidden.
+/// </summary>
+public readonly record struct LandscapePhysicalScaleRadii
+{
+    public static LandscapePhysicalScaleRadii Review { get; } = new(450, 4_500, 26_000);
+
+    public LandscapePhysicalScaleRadii(
+        long coreRadiusBlocks,
+        long detailRadiusBlocks,
+        long regionRadiusBlocks)
+    {
+        if (coreRadiusBlocks <= 0 || detailRadiusBlocks <= coreRadiusBlocks || regionRadiusBlocks <= detailRadiusBlocks)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(coreRadiusBlocks),
+                "Physical landscape radii must satisfy 0 < core < detail < region.");
+        }
+
+        CoreRadiusBlocks = coreRadiusBlocks;
+        DetailRadiusBlocks = detailRadiusBlocks;
+        RegionRadiusBlocks = regionRadiusBlocks;
+    }
+
+    public long CoreRadiusBlocks { get; }
+
+    public long DetailRadiusBlocks { get; }
+
+    public long RegionRadiusBlocks { get; }
+}
 
 public readonly record struct LandscapeSample(
     StableId DominantCellId,
