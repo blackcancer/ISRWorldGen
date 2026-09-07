@@ -25,6 +25,9 @@ $expectedServerSha256 = '3AD6294240B9B55D3E0DB3CD323D90C31EC8474EAE6E4E16B58FE76
 $snapshotDirectory = Join-Path $EvidenceRoot 'prelaunch-snapshot'
 $snapshotManifestPath = Join-Path $snapshotDirectory 'prelaunch-snapshot.json'
 $maximumEnvelopeBytes = 8192
+$maximumLogBytes = 16 * 1024 * 1024
+$maximumManifestBytes = 64 * 1024
+$maximumCampaignBytes = 64 * 1024
 $artifactNames = @('ISRWorldGen.dll', 'ISRWorldGen.Core.dll', 'ISRWorldGen.pdb', 'ISRWorldGen.Core.pdb')
 $caseNames = @('new', 'reload', 'height', 'rectangle')
 $expectedProfile = 'ISRWorldGen Server (isolated data)'
@@ -36,6 +39,22 @@ function Assert-LeafFile {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Required $Evidence file is missing: $Path"
     }
+}
+
+function Read-BoundedTextFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][long]$MaximumBytes,
+        [Parameter(Mandatory)][string]$Evidence
+    )
+
+    Assert-LeafFile $Path $Evidence
+    $item = Get-Item -LiteralPath $Path
+    if ($item.Length -gt $MaximumBytes) {
+        throw "$Evidence exceeds maximum byte length (observed=$($item.Length) maximum=$MaximumBytes)."
+    }
+
+    return Get-Content -LiteralPath $Path -Raw
 }
 
 function Write-NewUtf8File {
@@ -240,8 +259,8 @@ function Assert-Omits {
 
 function Read-CaseLog {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$CaseName)
-    Assert-LeafFile $Path "$CaseName log"
-    return [ordered]@{ Content = Get-Content -LiteralPath $Path -Raw; Sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
+    $content = Read-BoundedTextFile $Path $maximumLogBytes "$CaseName log"
+    return [ordered]@{ Content = $content; Sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
 }
 
 function Convert-StrictUtcTimestamp {
@@ -405,9 +424,8 @@ if ($Phase -eq 'Snapshot') {
 foreach ($required in @($NewLog, $ReloadLog, $HeightRefusalLog, $RectangleRefusalLog, $CampaignObservationPath)) {
     if ([string]::IsNullOrWhiteSpace($required)) { throw 'Validate requires all four case logs and CampaignObservationPath.' }
 }
-Assert-LeafFile $snapshotManifestPath 'prelaunch snapshot manifest'
-Assert-LeafFile $CampaignObservationPath 'campaign observation'
-$snapshotManifest = Get-Content -LiteralPath $snapshotManifestPath -Raw | ConvertFrom-Json -DateKind String
+$snapshotManifestContent = Read-BoundedTextFile $snapshotManifestPath $maximumManifestBytes 'prelaunch snapshot manifest'
+$snapshotManifest = $snapshotManifestContent | ConvertFrom-Json -DateKind String
 if ($snapshotManifest.Schema -cne 'isrworldgen.t02-05.prelaunch-snapshot.v2' -or -not $snapshotManifest.CreateNew) {
     throw 'Prelaunch snapshot manifest has an unsupported schema or was not CreateNew-sealed.'
 }
@@ -457,7 +475,8 @@ $logs = [ordered]@{
     new = Read-CaseLog $NewLog 'new'; reload = Read-CaseLog $ReloadLog 'reload'
     height = Read-CaseLog $HeightRefusalLog 'height'; rectangle = Read-CaseLog $RectangleRefusalLog 'rectangle'
 }
-$campaign = Get-Content -LiteralPath $CampaignObservationPath -Raw | ConvertFrom-Json -DateKind String
+$campaignContent = Read-BoundedTextFile $CampaignObservationPath $maximumCampaignBytes 'campaign observation'
+$campaign = $campaignContent | ConvertFrom-Json -DateKind String
 Assert-ClosedSchema $campaign @('Schema', 'TestedCommit', 'SnapshotManifestSha256', 'VisualStudioProfile', 'DebuggerTransport', 'Provenance', 'Cases') 'campaign observation'
 if ($campaign.Schema -cne 'isrworldgen.t02-05.visual-studio-campaign.v2' -or $campaign.TestedCommit -cne $currentCommit -or
     $campaign.SnapshotManifestSha256 -cne (Get-FileHash -LiteralPath $snapshotManifestPath -Algorithm SHA256).Hash -or

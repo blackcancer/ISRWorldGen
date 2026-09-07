@@ -204,3 +204,13 @@ Provenance absente/non vérifiée, champ supplémentaire, frame arbitraire, log 
 Ces contrôles qualifient le harnais statique. Ils ne remplacent pas la campagne Visual Studio : le candidat corrigé demeure `NOT_RUN` tant que les quatre sessions réelles n'ont pas fourni ce dossier v2.
 
 Validation hors moteur de cet erratum : oracle et ses 13 négatifs `PASS` en Debug/Release ; contrôle API/IL/package `PASS` en Debug/Release ; 38/38 tests L02CNative et 195/195 tests globaux `PASS` dans les deux configurations ; build 0 avertissement/0 erreur et format solution `PASS`. La ProductVersion doit être reconstruite et ces contrôles répétés après le commit final, puisque le SHA informatif change avec HEAD.
+
+### Erratum final — lectures brutes bornées
+
+Toutes les entrées textuelles brutes de l'oracle v2 passent désormais par l'unique fonction `Read-BoundedTextFile`. Celle-ci vérifie d'abord l'existence du fichier, obtient sa longueur par `Get-Item.Length`, rejette le dépassement, puis seulement exécute `Get-Content -Raw`. Aucun contenu du fichier surdimensionné n'est lu, alloué ou inclus dans le message de rejet avant ce contrôle.
+
+- chaque log de cas : maximum 16 MiB ;
+- `prelaunch-snapshot.json` : maximum 64 KiB ;
+- JSON de campagne : maximum 64 KiB.
+
+Trois négatifs distincts créent réellement, par `FileStream.SetLength`, un log, un manifeste et une campagne d'un octet au-delà de leur plafond. Ils exigent le rejet déterministe attendu et vérifient qu'une sentinelle placée dans chaque fichier n'apparaît jamais dans l'exception. Le contrôle statique exige aussi qu'il n'existe qu'un seul appel `Get-Content -Raw` dans l'oracle et qu'il soit situé dans ce lecteur borné. La preuve moteur demeure `NOT_RUN`.

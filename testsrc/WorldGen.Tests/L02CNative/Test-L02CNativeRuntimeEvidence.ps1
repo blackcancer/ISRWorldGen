@@ -21,6 +21,28 @@ function Write-JsonFixture {
     Write-Utf8Fixture $Path ($Value | ConvertTo-Json -Depth 12)
 }
 
+function Write-OversizedFixture {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][long]$MaximumBytes,
+        [Parameter(Mandatory)][string]$Sentinel
+    )
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Sentinel)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.SetLength($MaximumBytes + 1)
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    if ((Get-Item -LiteralPath $Path).Length -le $MaximumBytes) {
+        throw "Oversized self-test fixture was not larger than $MaximumBytes bytes."
+    }
+}
+
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
 
@@ -143,7 +165,8 @@ function Assert-ValidationFails {
         [Parameter(Mandatory)][string]$Label,
         [Parameter(Mandatory)][string]$ExpectedMessage,
         [Parameter(Mandatory)][scriptblock]$Action,
-        [Parameter(Mandatory)][string]$ReportPath
+        [Parameter(Mandatory)][string]$ReportPath,
+        [string]$ForbiddenMessage
     )
 
     if (Test-Path -LiteralPath $ReportPath) {
@@ -158,6 +181,10 @@ function Assert-ValidationFails {
         $failed = $true
         if (-not $_.Exception.Message.Contains($ExpectedMessage, [StringComparison]::OrdinalIgnoreCase)) {
             throw "$Label failed for the wrong reason: $($_.Exception.Message)"
+        }
+        if (-not [string]::IsNullOrEmpty($ForbiddenMessage) -and
+            $_.Exception.Message.Contains($ForbiddenMessage, [StringComparison]::Ordinal)) {
+            throw "$Label leaked oversized input content in its rejection."
         }
     }
 
@@ -186,6 +213,7 @@ try {
         -VintageStoryPath $VintageStoryPath -Configuration $Configuration -ExpectedCommit $commit | Out-Null
     $manifestPath = Join-Path $testRoot 'prelaunch-snapshot\prelaunch-snapshot.json'
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -DateKind String
+    $originalManifestJson = Get-Content -LiteralPath $manifestPath -Raw
     Assert-True ($manifest.ExpectedAssemblyInformationalVersion -ceq "1.0.0+$commit") `
         'Snapshot did not bind ProductVersion to HEAD/AssemblyInformationalVersion.'
     Assert-True (@($manifest.SymbolPairs).Count -eq 2) 'Snapshot did not attest both DLL/PDB symbol pairs.'
@@ -377,6 +405,24 @@ $logTimestamp [Event] Stopped the server!
         { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
     Write-Utf8Fixture $logPaths.new $originalNewLog
 
+    $oversizedLogSentinel = 'LOG_SECRET_SHOULD_NOT_BE_ECHOED'
+    Write-OversizedFixture $logPaths.new (16MB) $oversizedLogSentinel
+    Assert-ValidationFails 'Oversized log' 'new log exceeds maximum' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath $oversizedLogSentinel
+    Write-Utf8Fixture $logPaths.new $originalNewLog
+
+    $oversizedManifestSentinel = 'MANIFEST_SECRET_SHOULD_NOT_BE_ECHOED'
+    Write-OversizedFixture $manifestPath (64KB) $oversizedManifestSentinel
+    Assert-ValidationFails 'Oversized manifest' 'prelaunch snapshot manifest exceeds maximum' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath $oversizedManifestSentinel
+    Write-Utf8Fixture $manifestPath $originalManifestJson
+
+    $oversizedCampaignSentinel = 'CAMPAIGN_SECRET_SHOULD_NOT_BE_ECHOED'
+    Write-OversizedFixture $observationPath (64KB) $oversizedCampaignSentinel
+    Assert-ValidationFails 'Oversized campaign' 'campaign observation exceeds maximum' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath $oversizedCampaignSentinel
+    Write-Utf8Fixture $observationPath $originalObservationJson
+
     $duplicateFailed = $false
     try {
         & $oracle -Phase Snapshot -EvidenceRoot $testRoot -RepositoryRoot $RepositoryRoot `
@@ -404,7 +450,7 @@ $logTimestamp [Event] Stopped the server!
         Status = 'PASS'
         Configuration = $Configuration
         CreateNewReplacementRejected = $duplicateFailed
-        NegativeCases = 13
+        NegativeCases = 16
         BootstrapModuleBinding = $true
         PortablePdbPairing = $true
         VisualStudioProvenance = 'visual-studio-debugger-session-verified'

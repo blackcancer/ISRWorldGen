@@ -268,6 +268,15 @@ $requiredRuntimeOracleFragments = @(
     'CallstackSha256',
     'BootstrapModuleBinding',
     'PdbPairingVerified',
+    '$maximumLogBytes = 16 * 1024 * 1024',
+    '$maximumManifestBytes = 64 * 1024',
+    '$maximumCampaignBytes = 64 * 1024',
+    'function Read-BoundedTextFile',
+    '$item = Get-Item -LiteralPath $Path',
+    '$item.Length -gt $MaximumBytes',
+    'Read-BoundedTextFile $Path $maximumLogBytes',
+    'Read-BoundedTextFile $snapshotManifestPath $maximumManifestBytes',
+    'Read-BoundedTextFile $CampaignObservationPath $maximumCampaignBytes',
     "Assert-ExactToken `$reloadTokens 'persistencewrites' '0' 'reload'",
     "Assert-ExactToken `$reloadTokens 'gatecallbackregistered' 'false' 'reload'",
     "Assert-ExactToken `$reloadTokens 'envelopesha256' `$newTokens.envelopesha256 'reload'",
@@ -278,6 +287,11 @@ foreach ($fragment in $requiredRuntimeOracleFragments) {
     if (-not $runtimeOracleSource.Contains($fragment)) {
         throw "Required T02-05 runtime evidence oracle fragment is missing: $fragment"
     }
+}
+
+$runtimeRawReads = @([regex]::Matches($runtimeOracleSource, 'Get-Content\s+-LiteralPath\s+\$[A-Za-z]+\s+-Raw'))
+if ($runtimeRawReads.Count -ne 1 -or $runtimeRawReads[0].Value -cne 'Get-Content -LiteralPath $Path -Raw') {
+    throw 'T02-05 runtime evidence oracle must centralize every raw input read behind one bounded reader.'
 }
 
 $runtimeOracleTestSource = Get-Content -LiteralPath $runtimeOracleTestPath -Raw
@@ -294,7 +308,10 @@ foreach ($fragment in @(
     "'New callback absence'",
     "'Stale log'",
     "'Arbitrary log mutation'",
-    "'PDB mismatch'"
+    "'PDB mismatch'",
+    "'Oversized log'",
+    "'Oversized manifest'",
+    "'Oversized campaign'"
 )) {
     if (-not $runtimeOracleTestSource.Contains($fragment)) {
         throw "Required T02-05 runtime evidence negative test is missing: $fragment"
