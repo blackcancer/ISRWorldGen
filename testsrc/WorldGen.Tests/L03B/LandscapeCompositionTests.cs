@@ -191,15 +191,20 @@ public sealed class LandscapeCompositionTests
     [TestMethod]
     public void PublishedMorphologyParametersEachChangeTheSampleAndSiteLimitIsContinuous()
     {
-        LandscapeFamilyProfile source = LandscapeFamilyCatalog.Get(LandscapeFamily.RuggedRanges);
-        double baseline = LandscapeSignatureSampler.Sample(source, 12_345, -6_789, 73, 11);
-        foreach (LandscapeFamilyProfile changed in new[]
+        foreach (LandscapeFamilyProfile source in LandscapeFamilyCatalog.Profiles)
         {
-            new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks * 1.7, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, source.MacroWeight, source.MesoWeight, source.DetailWeight),
-            new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks * 1.7, source.ReliefAmplitudeNormalized, source.MacroWeight, source.MesoWeight, source.DetailWeight),
-            new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, .35, .50, .15),
-            new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, .55, .15, .30),
-        }) Assert.AreNotEqual(baseline, LandscapeSignatureSampler.Sample(changed, 12_345, -6_789, 73, 11));
+            double baseline = LandscapeSignatureSampler.Sample(source, 12_345, -6_789, 73, 11);
+            foreach (LandscapeFamilyProfile changed in new[]
+            {
+                new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks * 1.11, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, source.MacroWeight, source.MesoWeight, source.DetailWeight),
+                new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks * 1.11, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, source.MacroWeight, source.MesoWeight, source.DetailWeight),
+                new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks * 1.11, source.ReliefAmplitudeNormalized, source.MacroWeight, source.MesoWeight, source.DetailWeight),
+                new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, source.MacroWeight + .01, source.MesoWeight - .01, source.DetailWeight),
+                new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, source.MacroWeight, source.MesoWeight + .01, source.DetailWeight - .01),
+                new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, source.MacroWeight - .01, source.MesoWeight, source.DetailWeight + .01),
+            }) Assert.IsTrue(new[] { (.1 * source.MacroWavelengthBlocks, -.1 * source.MacroWavelengthBlocks), (.7 * source.MacroWavelengthBlocks, .2 * source.MacroWavelengthBlocks), (-.4 * source.MacroWavelengthBlocks, .5 * source.MacroWavelengthBlocks) }
+                .Any(point => LandscapeSignatureSampler.Sample(source, point.Item1, point.Item2, 73, 11) != LandscapeSignatureSampler.Sample(changed, point.Item1, point.Item2, 73, 11)), source.Family.ToString());
+        }
 
         FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
         GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
@@ -207,6 +212,15 @@ public sealed class LandscapeCompositionTests
         LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile, new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4)));
         AtlasSite site = atlas.Sites[0];
         Assert.IsLessThan(.01, Math.Abs(model.Sample(site.X, site.Z).ModelAltitudeNormalized - model.Sample(Math.Min(site.X + 1, atlas.Bounds.MaxXExclusive - 1), site.Z).ModelAltitudeNormalized));
+    }
+
+    [TestMethod]
+    public void LandscapeProfileRejectsHostilePublishedParameters()
+    {
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, double.NaN, 2, 1, .1, .6, .3, .1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 20, 1, .1, .6, .3, .1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 2, 1, 1.1, .6, .3, .1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 2, 1, .1, .6, .3, .2));
     }
 
     private static IEnumerable<(long X, long Z)> SampleCoordinates(FrozenScaleProfile profile)
