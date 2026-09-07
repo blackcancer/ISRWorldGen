@@ -511,7 +511,7 @@ public sealed class EvidenceArtifactTests
             return new SeedFamilyMorphology(
                 family.ToString(),
                 cellCount,
-                "NO_DECLARED_PURE_VIEW",
+                "NO_PURE_VIEW",
                 null,
                 null,
                 [new ExpectedTrait("pure-owner-view-available", 0d, ">=", 1d, false)]);

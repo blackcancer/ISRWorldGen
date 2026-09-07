@@ -2,6 +2,7 @@ using System.Text;
 using ISRWorldGen.Core.Atlas.Geometry;
 using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
+using ISRWorldGen.Core.Foundation;
 using ISRWorldGen.Core.Geology.Landscapes;
 using ISRWorldGen.Core.Geology.Plates;
 
@@ -11,6 +12,7 @@ namespace ISRWorldGen.Tests.L03B;
 public sealed class EvidenceViewContractTests
 {
     private const int FixtureSeed = 20260907;
+    private static readonly Lazy<L03BPureLandscapeView> PureRangeView = new(BuildPureRangeView);
 
     [TestMethod]
     public void BlindMapsAndMorphologyMeasurementsAcceptOnlyPureOwnerPixels()
@@ -67,22 +69,35 @@ public sealed class EvidenceViewContractTests
     }
 
     [TestMethod]
-    public void TransitionContaminationIsRejectedBeforeRenderingOrMeasurement()
+    [DataRow("owner")]
+    [DataRow("family")]
+    [DataRow("is-transition")]
+    [DataRow("contributor-count")]
+    [DataRow("primary-weight")]
+    [DataRow("foreign-weight")]
+    [DataRow("foreign-contribution")]
+    public void EachIndependentPurityGuardRejectsRenderingAndMeasurement(string guard)
     {
-        (LandscapeModel model, AtlasMesh atlas) = Build(FixtureSeed);
-        L03BPureLandscapeView pure = L03BEvidenceViews.SelectPureView(
-            model, atlas, LandscapeFamily.RuggedRanges, FixtureSeed, L03BEvidenceViews.CorpusMapSide);
+        L03BPureLandscapeView pure = PureRangeView.Value;
         L03BEvidencePixel[] pixels = pure.Pixels.ToArray();
         LandscapeSample original = pixels[0].Sample;
         pixels[0] = pixels[0] with
         {
-            Sample = original with
+            Sample = guard switch
             {
-                IsTransition = true,
-                ActiveResidualContributorCount = 2,
-                PrimaryResidualWeight = .75d,
-                ForeignResidualWeight = .25d,
-                ForeignResidualContributionNormalized = .01d,
+                "owner" => original with { DominantCellId = StableId.Zero },
+                "family" => original with
+                {
+                    DominantFamily = original.DominantFamily == LandscapeFamily.RuggedRanges
+                        ? LandscapeFamily.OldMassifs
+                        : LandscapeFamily.RuggedRanges,
+                },
+                "is-transition" => original with { IsTransition = true },
+                "contributor-count" => original with { ActiveResidualContributorCount = original.ActiveResidualContributorCount + 1 },
+                "primary-weight" => original with { PrimaryResidualWeight = .75d },
+                "foreign-weight" => original with { ForeignResidualWeight = .25d },
+                "foreign-contribution" => original with { ForeignResidualContributionNormalized = .01d },
+                _ => throw new AssertFailedException($"Unknown independent guard mutation {guard}."),
             },
         };
         L03BPureLandscapeView contaminated = pure with { Pixels = Array.AsReadOnly(pixels) };
@@ -91,6 +106,15 @@ public sealed class EvidenceViewContractTests
         Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceViews.Altitudes(contaminated));
         Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceViews.RenderTransitionMask(contaminated));
         Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceViews.MeasureMorphology(contaminated));
+    }
+
+    private static L03BPureLandscapeView BuildPureRangeView()
+    {
+        (LandscapeModel model, AtlasMesh atlas) = Build(FixtureSeed);
+        L03BPureLandscapeView view = L03BEvidenceViews.SelectPureView(
+            model, atlas, LandscapeFamily.RuggedRanges, FixtureSeed, L03BEvidenceViews.CorpusMapSide);
+        Assert.AreNotEqual(StableId.Zero, view.OwnerCellId);
+        return view;
     }
 
     private static (LandscapeModel Model, AtlasMesh Atlas) Build(int seed)
