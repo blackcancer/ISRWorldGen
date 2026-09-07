@@ -91,24 +91,90 @@ public sealed class MorphologyRecognitionTests
     }
 
     [TestMethod]
-    public void LocalMorphologyIsContinuousAndNotAVisibleVoronoiStep()
+    public void AnalyticDatumResidualAndCompositionBoundsAreConstructionInvariants()
     {
-        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("laboratory");
-        var identity = L03BTestSupport.Identity(73, profile);
-        var (atlas, plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
-        LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(
-            identity,
-            atlas,
-            plates,
-            profile,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), profile.SiteQuota, 1.25)));
-
-        foreach ((long x, long z) in new[] { (768L, 1024L), (896L, 896L), (1536L, 1664L) })
+        Type bounds = typeof(LandscapeModel).Assembly.GetType("ISRWorldGen.Core.Geology.Landscapes.LandscapeAltitudeBounds")!;
+        MethodInfo datum = bounds.GetMethod("GeologicalDatum", BindingFlags.NonPublic | BindingFlags.Static)!;
+        MethodInfo composed = bounds.GetMethod("Composed", BindingFlags.NonPublic | BindingFlags.Static)!;
+        MethodInfo compose = typeof(LandscapeModel).GetMethod("ComposeCellAltitude", BindingFlags.NonPublic | BindingFlags.Static)!;
+        foreach (LandscapeFamilyProfile family in LandscapeFamilyCatalog.Profiles)
         {
-            double left = model.Sample(x, z).ModelAltitudeNormalized;
-            double right = model.Sample(x + 1, z).ModelAltitudeNormalized;
-            Assert.IsLessThan(.01d, Math.Abs(right - left), $"one-block transition at ({x},{z})");
+            (double Minimum, double Maximum) interval = ((ValueTuple<double, double>)composed.Invoke(null, [family])!)!;
+            Assert.IsGreaterThanOrEqualTo(-1d, interval.Minimum);
+            Assert.IsLessThanOrEqualTo(1d, interval.Maximum);
+            foreach (LandscapeCellProfile cell in BoundaryCells(family))
+            {
+                double baseAltitude = (double)datum.Invoke(null, [cell])!;
+                Assert.IsGreaterThanOrEqualTo(-.63d, baseAltitude);
+                Assert.IsLessThanOrEqualTo(.58d, baseAltitude);
+                foreach (double signature in new[] { -1d, 1d })
+                {
+                    double altitude = (double)compose.Invoke(null, [cell, family, signature])!;
+                    Assert.IsGreaterThanOrEqualTo(-1d, altitude);
+                    Assert.IsLessThanOrEqualTo(1d, altitude);
+                }
+            }
         }
+    }
+
+    [TestMethod]
+    public void ComposedModelRetainsAllSixFamilySignaturesRatherThanOnlySyntheticCellEnergy()
+    {
+        LandscapeModel model = Model("balanced", -437287116, out FrozenScaleProfile profile, out var atlas);
+        var observed = new Dictionary<LandscapeFamily, double>();
+        foreach (LandscapeFamily family in Enum.GetValues<LandscapeFamily>())
+        {
+            LandscapeCellProfile cell = model.Cells.First(profile => profile.Family == family);
+            var site = atlas.Sites.Single(site => site.Id == cell.CellId);
+            double[] values = Enumerable.Range(-24, 49).SelectMany(dx => Enumerable.Range(-24, 49)
+                .Select(dz => model.Sample(
+                    Math.Clamp(site.X + (dx * 24L), 0, profile.WidthBlocks - 1),
+                    Math.Clamp(site.Z + (dz * 24L), 0, profile.LengthBlocks - 1)))
+                .Where(sample => sample.DominantCellId == cell.CellId)
+                .Select(sample => sample.ModelAltitudeNormalized)).ToArray();
+            Assert.IsGreaterThan(64, values.Length, $"{family} requires a real dominant-cell sample neighbourhood.");
+            observed.Add(family, values.Max() - values.Min());
+            Assert.IsGreaterThan(.001d, observed[family], $"{family} must alter actual blended samples.");
+            Assert.AreNotEqual(default, cell.FamilyParameterChecksum);
+        }
+
+        Assert.HasCount(6, observed, "Every family must be observed through the real compact blend.");
+    }
+
+    [TestMethod]
+    public void TransectsCrossActualOwnershipOrContributorChangesWithoutVoronoiSteps()
+    {
+        LandscapeModel model = Model("laboratory", 73, out _, out _);
+        MethodInfo contributors = typeof(LandscapeModel).GetMethod("ContributorIds", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        int crossings = 0;
+        foreach (long z in new[] { 512L, 1024L, 1536L, 2048L, 3072L })
+        {
+            for (long x = 1; x < 4095; x++)
+            {
+                LandscapeSample left = model.Sample(x, z);
+                LandscapeSample right = model.Sample(x + 1, z);
+                StableId[] leftContributors = (StableId[])contributors.Invoke(model, [x, z])!;
+                StableId[] rightContributors = (StableId[])contributors.Invoke(model, [x + 1, z])!;
+                if (left.DominantCellId == right.DominantCellId && leftContributors.SequenceEqual(rightContributors)) continue;
+                crossings++;
+                Assert.IsLessThan(.01d, Math.Abs(right.ModelAltitudeNormalized - left.ModelAltitudeNormalized), $"crossing ({x},{z})");
+            }
+        }
+
+        Assert.IsGreaterThan(4, crossings, "Transects must exercise actual ownership or support-membership changes.");
+    }
+
+    private static IEnumerable<LandscapeCellProfile> BoundaryCells(LandscapeFamilyProfile family) =>
+    [new(StableId.Zero, StableId.Zero, family.Family, CrustKind.Oceanic, 0, -1_000_000, 0, 1, family.ParameterChecksum),
+     new(StableId.Zero, StableId.Zero, family.Family, CrustKind.Continental, 0, 1_000_000, 1, 0, family.ParameterChecksum)];
+
+    private static LandscapeModel Model(string profileId, int seed, out FrozenScaleProfile profile, out ISRWorldGen.Core.Atlas.Geometry.AtlasMesh atlas)
+    {
+        profile = L03BTestSupport.FrozenProfile(profileId);
+        var identity = L03BTestSupport.Identity(seed, profile);
+        (atlas, var plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
+        return L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+            new LandscapeGenerationSettings(profileId == "laboratory" ? new ReliefBudgetRequest(28, 40, 96) : new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.25)));
     }
 
     private static IEnumerable<(double X, double Z)> Grid(int side)

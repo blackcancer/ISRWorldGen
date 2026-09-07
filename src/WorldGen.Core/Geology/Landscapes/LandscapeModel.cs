@@ -151,7 +151,7 @@ public sealed class LandscapeModel
 
         if (!double.IsFinite(modelAltitude) || modelAltitude is < -1 or > 1)
         {
-            throw new InvalidOperationException("Landscape composition exceeded its proven normalized envelope.");
+            throw new InvalidOperationException("Landscape composition violated its construction-time analytic envelope.");
         }
 
         double altitudeBlocks = VerticalPlan.Transform.MapModelAltitudeToBlocks(modelAltitude);
@@ -183,16 +183,20 @@ public sealed class LandscapeModel
 
     private static double ComposeCellAltitude(LandscapeCellProfile cell, LandscapeFamilyProfile family, double signature)
     {
-        double continental = cell.ContinentalHeightPpm / 1_000_000d;
+        double geologicalBase = LandscapeAltitudeBounds.GeologicalDatum(cell);
         // The geological datum deliberately does not encode a family silhouette.
         // Keeping it separate from the zero-centred local residual means a basin
         // remains a basin and a plateau keeps its flat top after composition.
-        double geologicalBase = continental >= 0
-            ? 0.10 + (0.26 * continental) + (0.22 * cell.UpliftNormalized) - (0.10 * cell.SubsidenceNormalized)
-            : -0.18 + (0.35 * continental) + (0.04 * cell.UpliftNormalized) - (0.10 * cell.SubsidenceNormalized);
         double morphologyResidual = family.ReliefAmplitudeNormalized * signature;
         return geologicalBase + morphologyResidual;
     }
+
+    private StableId[] ContributorIds(long x, long z) => sites.Where(site =>
+    {
+        double dx = (double)x - site.X;
+        double dz = (double)z - site.Z;
+        return CompactSupportWeight(Math.Sqrt((dx * dx) + (dz * dz)) / site.SupportRadiusBlocks) > 0;
+    }).Select(site => site.Cell.CellId).ToArray();
 
     private static Hash256 ComputeChecksum(LandscapeModel model, GenerationIdentity identity)
     {
@@ -266,6 +270,49 @@ public sealed class LandscapeModel
 }
 
 internal static class LandscapeChecksumEncoding { internal const int MaximumStringUtf8Bytes = 128; }
+
+/// <summary>
+/// Conservative proof bounds for every term of the composed normalized altitude.
+/// Source-cell validation makes these bounds a construction invariant; compact weighted
+/// composition then remains within the same interval without a final clamp.
+/// </summary>
+internal static class LandscapeAltitudeBounds
+{
+    internal const int MinimumContinentalHeightPpm = -1_000_000;
+    internal const int MaximumContinentalHeightPpm = 1_000_000;
+    internal const double MinimumBoundaryNormalized = 0;
+    internal const double MaximumBoundaryNormalized = 1;
+    internal const double MinimumSignatureNormalized = -1;
+    internal const double MaximumSignatureNormalized = 1;
+    internal const double MinimumGeologicalDatum = -.63;
+    internal const double MaximumGeologicalDatum = .58;
+    internal const double MinimumComposedAltitude = -.91;
+    internal const double MaximumComposedAltitude = .86;
+
+    internal static bool IsValidSourceCell(PlateCellState cell) =>
+        cell.ContinentalHeightPpm is >= MinimumContinentalHeightPpm and <= MaximumContinentalHeightPpm &&
+        double.IsFinite(cell.UpliftNormalized) && cell.UpliftNormalized is >= MinimumBoundaryNormalized and <= MaximumBoundaryNormalized &&
+        double.IsFinite(cell.SubsidenceNormalized) && cell.SubsidenceNormalized is >= MinimumBoundaryNormalized and <= MaximumBoundaryNormalized;
+
+    internal static double GeologicalDatum(LandscapeCellProfile cell)
+    {
+        if (cell.ContinentalHeightPpm is < MinimumContinentalHeightPpm or > MaximumContinentalHeightPpm ||
+            !double.IsFinite(cell.UpliftNormalized) || cell.UpliftNormalized is < MinimumBoundaryNormalized or > MaximumBoundaryNormalized ||
+            !double.IsFinite(cell.SubsidenceNormalized) || cell.SubsidenceNormalized is < MinimumBoundaryNormalized or > MaximumBoundaryNormalized)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cell), "Landscape cell lies outside the analytic altitude inputs.");
+        }
+
+        double continental = cell.ContinentalHeightPpm / 1_000_000d;
+        return continental >= 0
+            ? .10 + (.26 * continental) + (.22 * cell.UpliftNormalized) - (.10 * cell.SubsidenceNormalized)
+            : -.18 + (.35 * continental) + (.04 * cell.UpliftNormalized) - (.10 * cell.SubsidenceNormalized);
+    }
+
+    internal static (double Minimum, double Maximum) Composed(LandscapeFamilyProfile family) =>
+        (MinimumGeologicalDatum + (family.ReliefAmplitudeNormalized * MinimumSignatureNormalized),
+         MaximumGeologicalDatum + (family.ReliefAmplitudeNormalized * MaximumSignatureNormalized));
+}
 
 public static class LandscapeModelBuilder
 {
@@ -356,6 +403,12 @@ public static class LandscapeModelBuilder
             {
                 return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.cell-identity",
                     "Atlas and plate snapshot cell identifiers differ.");
+            }
+
+            if (!LandscapeAltitudeBounds.IsValidSourceCell(sourceCells[index]))
+            {
+                return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.altitude-input",
+                    "Plate-cell altitude inputs fall outside the analytic landscape envelope.");
             }
         }
 
