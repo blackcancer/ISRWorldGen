@@ -20,6 +20,8 @@ function Get-L00CAttestationId {
         [string]$Report.MarkerId,
         [string]$Report.InstanceId,
         [string]$Report.WorldRunId,
+        [string]$Report.ExpectedOpenCount,
+        [string]$Report.ExpectedIsNew,
         [string]$Report.Open1EvidenceSequence,
         [string]$Report.ExpectedOpen2EvidenceSequence,
         $open1Completed.ToString('o'),
@@ -27,6 +29,15 @@ function Get-L00CAttestationId {
         [string]$Report.DatabaseLength,
         [string]$Report.Open1LogSha256,
         [string]$Report.Open1LogLength,
+        [string]$Report.Autonomous,
+        [string]$Report.IntegrityCheck,
+        [string]$Report.ActualMapChunks,
+        [string]$Report.ActualChunks,
+        [string]$Report.MarkerEnvelope.Version,
+        [string]$Report.MarkerEnvelope.OpenCount,
+        [string]$Report.MarkerEnvelope.PayloadSha256,
+        [string]$Report.MarkerEnvelope.MapFootprintVersion,
+        [string]$Report.MarkerEnvelope.MapFootprintSha256,
         $attested.ToString('o')
     ) -join '|'
     $bytes = [Text.Encoding]::UTF8.GetBytes($canonical)
@@ -72,7 +83,7 @@ function Assert-L00CPreOpen2Attestation {
             throw "Persistence attestation input is missing: $path"
         }
     }
-    if ([int]$Report.SchemaVersion -ne 1 -or [string]$Report.ControllerPhase -ne 'RecordOpen1' -or
+    if ([int]$Report.SchemaVersion -ne 2 -or [string]$Report.ControllerPhase -ne 'RecordOpen1' -or
         [string]$Report.EvidenceOrder -ne 'open1-complete<attestation<open2-start') {
         throw 'Persistence attestation schema/order declaration is invalid.'
     }
@@ -96,7 +107,16 @@ function Assert-L00CPreOpen2Attestation {
         }
     }
     if ([int]$Report.ExpectedOpen2EvidenceSequence -ne [int]$Open1Session.EvidenceSequence + 1 -or
-        [int]$Open1Session.OpenCount -ne 1 -or -not [bool]$Open1Session.IsNew) {
+        [int]$Open1Session.OpenCount -ne 1 -or -not [bool]$Open1Session.IsNew -or
+        [int]$Report.ExpectedOpenCount -ne 1 -or -not [bool]$Report.ExpectedIsNew -or
+        -not [bool]$Report.Autonomous -or [string]$Report.IntegrityCheck -ne 'ok' -or
+        [string]$Report.JournalMode -eq 'wal' -or [int]$Report.ActualMapChunks -ne 9 -or
+        [int]$Report.ActualChunks -ne 72 -or [string]$Report.MarkerEnvelope.MarkerId -ne [string]$Open1Session.MarkerId -or
+        [string]$Report.MarkerEnvelope.SavegameIdentifier -ne [string]$Open1Session.SavegameIdentifier -or
+        [string]$Report.MarkerEnvelope.Version -ne 'l00c-flat-v2-map-snapshot' -or
+        [int]$Report.MarkerEnvelope.OpenCount -ne 1 -or
+        [string]$Report.MarkerEnvelope.MapFootprintVersion -ne 'l00c-map-footprint-v1' -or
+        [int]$Report.MarkerEnvelope.MapFootprintMapChunks -ne 9) {
         throw 'Persistence attestation is not bound to a new primary open1 and its immediate open2 sequence.'
     }
 

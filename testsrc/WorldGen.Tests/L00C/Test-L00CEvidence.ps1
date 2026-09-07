@@ -12,6 +12,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'L00CInitializationRefusalEvidence.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'L00CActiveShutdownEvidence.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'L00CPersistedDatabaseEvidence.psm1') -Force
 
 if (-not (Test-Path -LiteralPath $EvidencePath -PathType Leaf)) {
     throw "L00-C evidence is missing: $EvidencePath"
@@ -103,6 +104,12 @@ $pdb = Assert-Artifact $evidence.Artifacts.Symbols 'Symbols'
 $debuggerInspectionPath = Assert-Artifact $evidence.Artifacts.DebuggerInspection 'Debugger inspection'
 $open1DatabasePath = Assert-Artifact $evidence.Artifacts.Open1Database 'Open1 persisted database'
 $open1DatabaseReportPath = Assert-Artifact $evidence.Artifacts.Open1DatabaseReport 'Open1 persisted database report'
+$open2DatabasePath = Assert-Artifact $evidence.Artifacts.Open2Database 'Open2 persisted database'
+$open2DatabaseReportPath = Assert-Artifact $evidence.Artifacts.Open2DatabaseReport 'Open2 persisted database report'
+[void](Assert-L00CAutonomousDatabaseSnapshot -DatabasePath $open1DatabasePath -GamePath $GamePath `
+    -ExpectedSha256 ([string]$evidence.Artifacts.Open1Database.Sha256) -ExpectedLength ([long]$evidence.Artifacts.Open1Database.Length))
+[void](Assert-L00CAutonomousDatabaseSnapshot -DatabasePath $open2DatabasePath -GamePath $GamePath `
+    -ExpectedSha256 ([string]$evidence.Artifacts.Open2Database.Sha256) -ExpectedLength ([long]$evidence.Artifacts.Open2Database.Length))
 $artifactDirectoryName = Split-Path -Leaf (Split-Path -Parent $dll)
 Assert-Equal $artifactDirectoryName $evidence.TestedCommit 'Assembly artifact directory'
 Assert-Equal (Split-Path -Parent $pdb) (Split-Path -Parent $dll) 'Assembly/symbol directory'
@@ -110,6 +117,12 @@ Assert-Equal (Split-Path -Parent $pdb) (Split-Path -Parent $dll) 'Assembly/symbo
 $recordedDatabaseReport = Get-Content -LiteralPath $open1DatabaseReportPath -Raw | ConvertFrom-Json
 Assert-Equal $recordedDatabaseReport.Status 'PASS' 'Open1 persisted database status'
 Assert-Equal $recordedDatabaseReport.OpenMode 'ReadOnly' 'Open1 persisted database mode'
+Assert-Equal $recordedDatabaseReport.Autonomous $true 'Open1 autonomous database snapshot'
+Assert-Equal $recordedDatabaseReport.IntegrityCheck 'ok' 'Open1 database integrity'
+Assert-Equal ([int]$recordedDatabaseReport.MarkerEnvelope.OpenCount) 1 'Open1 persisted marker OpenCount'
+Assert-Equal $recordedDatabaseReport.MarkerEnvelope.Version 'l00c-flat-v2-map-snapshot' 'Open1 marker version'
+Assert-Equal $recordedDatabaseReport.MarkerEnvelope.MapFootprintVersion 'l00c-map-footprint-v1' 'Open1 map footprint version'
+Assert-Equal ([int]$recordedDatabaseReport.MarkerEnvelope.MapFootprintMapChunks) 9 'Open1 marker map footprint count'
 Assert-Equal $recordedDatabaseReport.Packing '(y<<54)|(z<<27)|(dimension<<22)|x' 'Open1 persisted database packing'
 Assert-Equal ([int]$recordedDatabaseReport.ExpectedMapChunks) 9 'Open1 expected mapchunks'
 Assert-Equal ([int]$recordedDatabaseReport.ActualMapChunks) 9 'Open1 persisted mapchunks'
@@ -119,6 +132,17 @@ Assert-Equal (@($recordedDatabaseReport.MissingMapChunks).Count) 0 'Open1 missin
 Assert-Equal (@($recordedDatabaseReport.MissingChunks).Count) 0 'Open1 missing chunks'
 Assert-Equal ([string]$recordedDatabaseReport.DatabaseSha256) ([string]$evidence.Artifacts.Open1Database.Sha256) 'Open1 database/report hash'
 Assert-Equal ([string]$recordedDatabaseReport.OracleSha256) ((Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Test-L00CPersistedDatabase.ps1') -Algorithm SHA256).Hash) 'Open1 persistence oracle hash'
+
+$open2DatabaseReport = Get-Content -LiteralPath $open2DatabaseReportPath -Raw | ConvertFrom-Json
+Assert-Equal $open2DatabaseReport.Status 'PASS' 'Open2 persisted database status'
+Assert-Equal $open2DatabaseReport.ControllerPhase 'FinalizeOpen2' 'Open2 persistence phase'
+Assert-Equal $open2DatabaseReport.Autonomous $true 'Open2 autonomous database snapshot'
+Assert-Equal $open2DatabaseReport.IntegrityCheck 'ok' 'Open2 database integrity'
+Assert-Equal ([int]$open2DatabaseReport.ActualMapChunks) 9 'Open2 persisted mapchunks'
+Assert-Equal ([int]$open2DatabaseReport.ActualChunks) 72 'Open2 persisted chunks'
+Assert-Equal ([int]$open2DatabaseReport.MarkerEnvelope.OpenCount) 2 'Open2 persisted marker OpenCount'
+Assert-Equal ([string]$open2DatabaseReport.DatabaseSha256) ([string]$evidence.Artifacts.Open2Database.Sha256) 'Open2 database/report hash'
+Assert-Equal ([string]$open2DatabaseReport.OracleSha256) ((Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Test-L00CPersistedDatabase.ps1') -Algorithm SHA256).Hash) 'Open2 persistence oracle hash'
 
 $expectedBeforeInventory = '0=[null];1=[0:Vintagestory.ServerMods.GenTerra::OnChunkColumnGen,1:Vintagestory.ServerMods.GenRockStrataNew::GenChunkColumn,2:ISRWorldGen.L00BDebugProbeModSystem::OnChunkColumnGeneration,3:Vintagestory.ServerMods.GenCaves::GenChunkColumn,4:Vintagestory.ServerMods.GenDevastationLayer::OnChunkColumnGeneration,5:Vintagestory.ServerMods.GenBlockLayers::OnChunkColumnGeneration];2=[0:Vintagestory.ServerMods.GenTerraPostProcess::OnChunkColumnGen,1:Vintagestory.ServerMods.GenHotSprings::GenChunkColumn,2:Vintagestory.ServerMods.GenDungeons::onChunkColumnGen,3:Vintagestory.ServerMods.GenDeposits::GenChunkColumn,4:Vintagestory.ServerMods.GenStructures::OnChunkColumnGen,5:Vintagestory.ServerMods.GenPonds::OnChunkColumnGen,6:Vintagestory.ServerMods.GenStructures::OnChunkColumnGenPostPass];3=[0:Vintagestory.GameContent.GenStoryStructures::OnChunkColumnGen,1:Vintagestory.ServerMods.GenVegetationAndPatches::OnChunkColumnGen,2:Vintagestory.ServerMods.GenRivulets::OnChunkColumnGen,3:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration];4=[0:Vintagestory.ServerMods.GenSnowLayer::OnChunkColumnGen,1:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGenerationFlood];5=[0:Vintagestory.ServerMods.GenCreatures::OnChunkColumnGen]'
 $expectedAfterInventory = '0=[null];1=[0:L00CWrapper(original=Vintagestory.ServerMods.GenTerra::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenRockStrataNew::GenChunkColumn@index=1),2:ISRWorldGen.L00BDebugProbeModSystem::OnChunkColumnGeneration,3:L00CWrapper(original=Vintagestory.ServerMods.GenCaves::GenChunkColumn@index=3),4:L00CWrapper(original=Vintagestory.ServerMods.GenDevastationLayer::OnChunkColumnGeneration@index=4),5:L00CWrapper(original=Vintagestory.ServerMods.GenBlockLayers::OnChunkColumnGeneration@index=5)];2=[0:L00CWrapper(original=Vintagestory.ServerMods.GenTerraPostProcess::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenHotSprings::GenChunkColumn@index=1),2:L00CWrapper(original=Vintagestory.ServerMods.GenDungeons::onChunkColumnGen@index=2),3:L00CWrapper(original=Vintagestory.ServerMods.GenDeposits::GenChunkColumn@index=3),4:L00CWrapper(original=Vintagestory.ServerMods.GenStructures::OnChunkColumnGen@index=4),5:L00CWrapper(original=Vintagestory.ServerMods.GenPonds::OnChunkColumnGen@index=5),6:L00CWrapper(original=Vintagestory.ServerMods.GenStructures::OnChunkColumnGenPostPass@index=6)];3=[0:L00CWrapper(original=Vintagestory.GameContent.GenStoryStructures::OnChunkColumnGen@index=0),1:L00CWrapper(original=Vintagestory.ServerMods.GenVegetationAndPatches::OnChunkColumnGen@index=1),2:L00CWrapper(original=Vintagestory.ServerMods.GenRivulets::OnChunkColumnGen@index=2),3:L00CFinalizer(before=Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration@index=3),4:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGeneration];4=[0:L00CWrapper(original=Vintagestory.ServerMods.GenSnowLayer::OnChunkColumnGen@index=0),1:Vintagestory.ServerMods.GenLightSurvival::OnChunkColumnGenerationFlood];5=[0:Vintagestory.ServerMods.GenCreatures::OnChunkColumnGen]'
@@ -239,10 +263,10 @@ foreach ($session in $orderedEvidenceSessions) {
             "L00C_ACTIVATED instance=$instance marker=$marker run=$worldRun open=$open isnew=$isNew ",
             "L00C_FIXTURE_INSPECTED instance=$instance marker=$marker phase=loaded ",
             "L00C_HALO_VALID instance=$instance marker=$marker phase=loaded radius=1 columns=8 ",
-            "L00C_MARKER_SAVED instance=$instance marker=$marker open=$open",
             "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker ",
             'Forced: Shutdown through Server API',
-            'World saved!'
+            'World saved!',
+            'Stopped the server!'
         )
         if ([bool]$session.IsNew) {
             $requiredPatterns += @(
@@ -308,10 +332,10 @@ foreach ($session in $orderedEvidenceSessions) {
             $snapshotCommitIndex = $log.IndexOf("L00C_MAP_SNAPSHOT_COMMITTED instance=$instance", [StringComparison]::Ordinal)
             $shutdownRequestIndex = $log.IndexOf("L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance", [StringComparison]::Ordinal)
             $shutdownPhaseIndex = $log.IndexOf('Entering runphase Shutdown', [StringComparison]::Ordinal)
-            $markerSavedIndex = $log.IndexOf("L00C_MARKER_SAVED instance=$instance marker=$marker open=$open", [StringComparison]::Ordinal)
             $worldSavedIndex = $log.LastIndexOf('World saved!', [StringComparison]::Ordinal)
+            $stoppedIndex = $log.LastIndexOf('Stopped the server!', [StringComparison]::Ordinal)
             if ($stableIndex -lt 0 -or $snapshotCommitIndex -le $stableIndex -or $shutdownRequestIndex -le $snapshotCommitIndex -or
-                $shutdownPhaseIndex -le $shutdownRequestIndex -or $markerSavedIndex -le $shutdownPhaseIndex -or $worldSavedIndex -le $markerSavedIndex) {
+                $shutdownPhaseIndex -le $shutdownRequestIndex -or $worldSavedIndex -le $shutdownPhaseIndex -or $stoppedIndex -le $worldSavedIndex) {
                 throw "New-world session $($session.Cycle) did not validate, request shutdown, retain native ownership, and save in order."
             }
             $snapshotCommit = [regex]::Match($log, "L00C_MAP_SNAPSHOT_COMMITTED instance=$instance marker=$marker maps=9 checksum=([0-9A-F]{64}) writes=1")
@@ -585,6 +609,23 @@ Assert-Equal ([long]$finalizeReceipt.Open2WorldRunId) ([long]$primaryOpen2.World
 Assert-Equal ([int]$finalizeReceipt.Open2EvidenceSequence) ([int]$primaryOpen2.EvidenceSequence) 'Finalize open2 evidence sequence'
 Assert-Equal ([string]$recordReceipt.SnapshotDatabase.Sha256) ([string]$evidence.Artifacts.Open1Database.Sha256) 'RecordOpen1 database snapshot'
 Assert-Equal ([string]$recordReceipt.PersistenceReport.Sha256) ([string]$evidence.Artifacts.Open1DatabaseReport.Sha256) 'RecordOpen1 database report'
+Assert-Equal ([string]$finalizeReceipt.Open2SnapshotDatabase.Sha256) ([string]$evidence.Artifacts.Open2Database.Sha256) 'Finalize open2 database snapshot'
+Assert-Equal ([string]$finalizeReceipt.Open2PersistenceReport.Sha256) ([string]$evidence.Artifacts.Open2DatabaseReport.Sha256) 'Finalize open2 database report'
+Assert-Equal ([string]$finalizeReceipt.Open2PersistenceAttestationId) ([string]$open2DatabaseReport.AttestationId) 'Finalize open2 persistence attestation'
+Assert-Equal ([string]$open2DatabaseReport.SavegameIdentifier) ([string]$primaryOpen2.SavegameIdentifier) 'Open2 report savegame'
+Assert-Equal ([string]$open2DatabaseReport.MarkerId) ([string]$primaryOpen2.MarkerId) 'Open2 report marker'
+Assert-Equal ([string]$open2DatabaseReport.InstanceId) ([string]$primaryOpen2.InstanceId) 'Open2 report instance'
+Assert-Equal ([long]$open2DatabaseReport.WorldRunId) ([long]$primaryOpen2.WorldRunId) 'Open2 report world run'
+Assert-Equal ([int]$open2DatabaseReport.Open1EvidenceSequence) ([int]$primaryOpen2.EvidenceSequence) 'Open2 report evidence sequence'
+Assert-Equal ([int]$finalizeReceipt.ExpectedNextOpenEvidenceSequence) ([int]$orderedPrimary[2].EvidenceSequence) 'Open3 attests the persisted open2 successor'
+$primaryOpen3Index = [Array]::IndexOf($allSessions, $orderedPrimary[2])
+$primaryOpen3Log = Get-Content -LiteralPath $sessionLogPaths[$primaryOpen3Index] -Raw
+$open3Instance = [regex]::Escape([string]$orderedPrimary[2].InstanceId)
+$open3Marker = [regex]::Escape([string]$primaryOpen2.MarkerId)
+if ($primaryOpen3Log -notmatch "L00C_PERSISTED_PRECHECK instance=$open3Instance marker=$open3Marker maps=9 exact=True" -or
+    $primaryOpen3Log -notmatch "L00C_ACTIVATED instance=$open3Instance marker=$open3Marker .* open=3 isnew=False ") {
+    throw 'Primary open3 does not attest that the incremented open2 database was read again.'
+}
 
 Import-Module (Join-Path $PSScriptRoot 'L00CPersistenceAttestation.psm1') -Force
 $persistenceAttestation = Assert-L00CPersistenceAttestation `

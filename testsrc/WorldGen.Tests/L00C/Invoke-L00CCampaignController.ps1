@@ -12,6 +12,8 @@ param(
     [string]$SaveDatabasePath,
     [string]$SnapshotDatabasePath,
     [string]$PersistenceReportPath,
+    [string]$Open2SnapshotDatabasePath,
+    [string]$Open2PersistenceReportPath,
     [string]$Open1SessionPath,
     [string]$Open1LogPath,
     [string]$Open2SessionPath,
@@ -30,6 +32,7 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'L00CCampaignControl.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'L00CPersistenceAttestation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'L00CPersistedDatabaseEvidence.psm1') -Force
 
 function Require-Value([string]$Value, [string]$Label) {
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -162,11 +165,15 @@ if ($Phase -eq 'Initialize') {
     $saveResolved = Assert-PathWithin (Require-Value $SaveDatabasePath 'SaveDatabasePath') $localRoot 'Save database'
     $snapshotResolved = Assert-PathWithin (Require-Value $SnapshotDatabasePath 'SnapshotDatabasePath') $evidenceResolved 'Snapshot database'
     $reportResolved = Assert-PathWithin (Require-Value $PersistenceReportPath 'PersistenceReportPath') $evidenceResolved 'Persistence report'
+    $open2SnapshotCandidate = if ([string]::IsNullOrWhiteSpace($Open2SnapshotDatabasePath)) { Join-Path $evidenceResolved 'artifacts\open2-persisted.vcdbs' } else { $Open2SnapshotDatabasePath }
+    $open2ReportCandidate = if ([string]::IsNullOrWhiteSpace($Open2PersistenceReportPath)) { Join-Path $evidenceResolved 'artifacts\open2-persisted.json' } else { $Open2PersistenceReportPath }
+    $open2SnapshotResolved = Assert-PathWithin $open2SnapshotCandidate $evidenceResolved 'Open2 snapshot database'
+    $open2ReportResolved = Assert-PathWithin $open2ReportCandidate $evidenceResolved 'Open2 persistence report'
     $open1SessionResolved = Assert-PathWithin (Require-Value $Open1SessionPath 'Open1SessionPath') $evidenceResolved 'Open1 session'
     $open1LogResolved = Assert-PathWithin (Require-Value $Open1LogPath 'Open1LogPath') $evidenceResolved 'Open1 log'
     $open2SessionResolved = Assert-PathWithin (Require-Value $Open2SessionPath 'Open2SessionPath') $evidenceResolved 'Open2 session'
     $open2LogResolved = Assert-PathWithin (Require-Value $Open2LogPath 'Open2LogPath') $evidenceResolved 'Open2 log'
-    foreach ($newPath in @($saveResolved, $snapshotResolved, $reportResolved, $open1SessionResolved, $open1LogResolved, $open2SessionResolved, $open2LogResolved)) {
+    foreach ($newPath in @($saveResolved, $snapshotResolved, $reportResolved, $open2SnapshotResolved, $open2ReportResolved, $open1SessionResolved, $open1LogResolved, $open2SessionResolved, $open2LogResolved)) {
         Assert-NewPath $newPath 'Fresh campaign artifact'
     }
     if ($testedCommitValue -notmatch '^[0-9a-f]{40}$') { throw 'TestedCommit must be a full lowercase commit id.' }
@@ -196,6 +203,8 @@ if ($Phase -eq 'Initialize') {
         SaveDatabasePath = $saveResolved
         SnapshotDatabasePath = $snapshotResolved
         PersistenceReportPath = $reportResolved
+        Open2SnapshotDatabasePath = $open2SnapshotResolved
+        Open2PersistenceReportPath = $open2ReportResolved
         Open1SessionPath = $open1SessionResolved
         Open1LogPath = $open1LogResolved
         Open2SessionPath = $open2SessionResolved
@@ -233,9 +242,8 @@ if ($Phase -eq 'RecordOpen1') {
         $databaseWritten -lt $open1Times.Started -or $databaseWritten -gt $open1Times.Completed) {
         throw 'Open1 database creation/write timestamps are not contained in the real open1 interval.'
     }
-    $snapshotParent = Split-Path -Parent ([string]$initialize.SnapshotDatabasePath)
-    if (-not (Test-Path -LiteralPath $snapshotParent -PathType Container)) { [void](New-Item -ItemType Directory -Path $snapshotParent) }
-    [IO.File]::Copy([string]$initialize.SaveDatabasePath, [string]$initialize.SnapshotDatabasePath, $false)
+    [void](New-L00CAutonomousDatabaseSnapshot -SourcePath ([string]$initialize.SaveDatabasePath) `
+        -DestinationPath ([string]$initialize.SnapshotDatabasePath) -GamePath $GamePath)
     $oraclePath = Join-Path $PSScriptRoot 'Test-L00CPersistedDatabase.ps1'
     $oracleParameters = @{
         DatabasePath = [string]$initialize.SnapshotDatabasePath
@@ -257,6 +265,9 @@ if ($Phase -eq 'RecordOpen1') {
         Dimension = $Dimension
         GamePath = $GamePath
         RepositoryRoot = $repositoryRootResolved
+        ExpectedOpenCount = 1
+        ExpectedIsNew = $true
+        ControllerPhase = 'RecordOpen1'
     }
     [void](& $oraclePath @oracleParameters)
     if ($LASTEXITCODE -ne 0) { throw "Open1 persistence oracle failed with exit code $LASTEXITCODE." }
@@ -286,7 +297,6 @@ if ($Phase -eq 'RecordOpen1') {
         WorldRunId = [long]$open1.WorldRunId
         Open1Session = Get-L00CFileRecord ([string]$initialize.Open1SessionPath)
         Open1Log = Get-L00CFileRecord ([string]$initialize.Open1LogPath)
-        SourceDatabase = Get-L00CFileRecord ([string]$initialize.SaveDatabasePath)
         SnapshotDatabase = Get-L00CFileRecord ([string]$initialize.SnapshotDatabasePath)
         PersistenceReport = Get-L00CFileRecord ([string]$initialize.PersistenceReportPath)
         PersistenceAttestationId = [string]$report.AttestationId
@@ -306,9 +316,11 @@ if ($Phase -eq 'AuthorizeOpen2') {
     }
     [void](Assert-L00CFileRecord $record.Open1Session 'Recorded open1 session')
     [void](Assert-L00CFileRecord $record.Open1Log 'Recorded open1 log')
-    [void](Assert-L00CFileRecord $record.SourceDatabase 'Open1 source database')
     [void](Assert-L00CFileRecord $record.SnapshotDatabase 'Open1 database snapshot')
     [void](Assert-L00CFileRecord $record.PersistenceReport 'Open1 persistence report')
+    [void](Assert-L00CAutonomousDatabaseSnapshot -DatabasePath ([string]$record.SnapshotDatabase.Path) `
+        -GamePath $GamePath -ExpectedSha256 ([string]$record.SnapshotDatabase.Sha256) `
+        -ExpectedLength ([long]$record.SnapshotDatabase.Length))
     $open1 = Get-Content -LiteralPath ([string]$initialize.Open1SessionPath) -Raw | ConvertFrom-Json
     $report = Get-Content -LiteralPath ([string]$initialize.PersistenceReportPath) -Raw | ConvertFrom-Json
     $authorized = [DateTimeOffset]::UtcNow
@@ -338,7 +350,6 @@ if ($Phase -eq 'AuthorizeOpen2') {
         ExpectedOpen2EvidenceSequence = [int]$record.ExpectedOpen2EvidenceSequence
         SavegameIdentifier = [string]$record.SavegameIdentifier
         MarkerId = [string]$record.MarkerId
-        SourceDatabaseSha256 = [string]$record.SourceDatabase.Sha256
         Open1SessionSha256 = [string]$record.Open1Session.Sha256
         Open1LogSha256 = [string]$record.Open1Log.Sha256
         SnapshotDatabaseSha256 = [string]$record.SnapshotDatabase.Sha256
@@ -356,6 +367,8 @@ $authorization = Read-L00CCampaignReceipt $authorizePath 'AuthorizeOpen2'
 
 if ($Phase -eq 'Finalize') {
     Assert-NewPath $finalizePath 'Finalize receipt'
+    Assert-NewPath ([string]$initialize.Open2SnapshotDatabasePath) 'Open2 snapshot database'
+    Assert-NewPath ([string]$initialize.Open2PersistenceReportPath) 'Open2 persistence report'
     foreach ($required in @([string]$initialize.Open2SessionPath, [string]$initialize.Open2LogPath)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Finalize input is missing: $required" }
     }
@@ -363,6 +376,9 @@ if ($Phase -eq 'Finalize') {
     [void](Assert-L00CFileRecord $record.Open1Log 'Recorded open1 log')
     [void](Assert-L00CFileRecord $record.SnapshotDatabase 'Open1 database snapshot')
     [void](Assert-L00CFileRecord $record.PersistenceReport 'Open1 persistence report')
+    [void](Assert-L00CAutonomousDatabaseSnapshot -DatabasePath ([string]$record.SnapshotDatabase.Path) `
+        -GamePath $GamePath -ExpectedSha256 ([string]$record.SnapshotDatabase.Sha256) `
+        -ExpectedLength ([long]$record.SnapshotDatabase.Length))
     $open1 = Get-Content -LiteralPath ([string]$initialize.Open1SessionPath) -Raw | ConvertFrom-Json
     $open2 = Get-Content -LiteralPath ([string]$initialize.Open2SessionPath) -Raw | ConvertFrom-Json
     $open2Times = Assert-Open2Session $open2 $open1 $authorization
@@ -374,6 +390,11 @@ if ($Phase -eq 'Finalize') {
     if ($open2Log -notmatch "L00C_ACTIVATED instance=$open2Instance marker=$open2Marker run=$open2Run open=2 isnew=False save=$open2Save " -or
         $open2Log -notmatch "L00C_PERSISTED_REOPEN_STABLE instance=$open2Instance marker=$open2Marker run=$open2Run loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 mapsnapshotwrites=0 callbacks=0 center=[0-9A-F]{64} halo=[0-9A-F]{64}") {
         throw 'Open2 log does not prove the bound persisted reopen session.'
+    }
+    $database = Get-Item -LiteralPath ([string]$initialize.SaveDatabasePath)
+    $databaseWritten = [DateTimeOffset]$database.LastWriteTimeUtc
+    if ($databaseWritten -lt $open2Times.Started -or $databaseWritten -gt $open2Times.Completed) {
+        throw 'Open2 database write timestamp is not contained in the real open2 interval.'
     }
     $authorizationFile = Get-Item -LiteralPath $authorizePath
     if ([DateTimeOffset]$authorizationFile.CreationTimeUtc -ge $open2Times.Started -or
@@ -391,6 +412,39 @@ if ($Phase -eq 'Finalize') {
         -CampaignId ([string]$initialize.CampaignId) `
         -TestedCommit ([string]$initialize.TestedCommit) `
         -AssemblySha256 ([string]$initialize.AssemblySha256)
+    [void](New-L00CAutonomousDatabaseSnapshot -SourcePath ([string]$initialize.SaveDatabasePath) `
+        -DestinationPath ([string]$initialize.Open2SnapshotDatabasePath) -GamePath $GamePath)
+    $oraclePath = Join-Path $PSScriptRoot 'Test-L00CPersistedDatabase.ps1'
+    $open2OracleParameters = @{
+        DatabasePath = [string]$initialize.Open2SnapshotDatabasePath
+        Open1LogPath = [string]$initialize.Open2LogPath
+        AssemblyPath = [string]$initialize.Assembly.Path
+        TestedCommit = [string]$initialize.TestedCommit
+        CampaignId = [string]$initialize.CampaignId
+        SavegameIdentifier = [string]$open2.SavegameIdentifier
+        MarkerId = [string]$open2.MarkerId
+        InstanceId = [string]$open2.InstanceId
+        WorldRunId = [long]$open2.WorldRunId
+        Open1EvidenceSequence = [int]$open2.EvidenceSequence
+        Open1CompletedUtc = $open2Times.Completed.ToString('o')
+        OutputPath = [string]$initialize.Open2PersistenceReportPath
+        ControllerPhase = 'FinalizeOpen2'
+        ExpectedOpenCount = 2
+        ExpectedIsNew = $false
+        FixtureChunkX = $FixtureChunkX
+        FixtureChunkZ = $FixtureChunkZ
+        WorldHeight = $WorldHeight
+        ChunkSize = $ChunkSize
+        Dimension = $Dimension
+        GamePath = $GamePath
+        RepositoryRoot = $repositoryRootResolved
+    }
+    [void](& $oraclePath @open2OracleParameters)
+    if ($LASTEXITCODE -ne 0) { throw "Open2 persistence oracle failed with exit code $LASTEXITCODE." }
+    $open2Report = Get-Content -LiteralPath ([string]$initialize.Open2PersistenceReportPath) -Raw | ConvertFrom-Json
+    if ([string]$open2Report.Status -ne 'PASS' -or [int]$open2Report.MarkerEnvelope.OpenCount -ne 2) {
+        throw 'Open2 persistence report does not prove the incremented marker envelope.'
+    }
     $finalized = [DateTimeOffset]::UtcNow
     $receipt = [ordered]@{
         SchemaVersion = 1
@@ -414,6 +468,10 @@ if ($Phase -eq 'Finalize') {
         Open2WorldRunId = [long]$open2.WorldRunId
         Open2Session = Get-L00CFileRecord ([string]$initialize.Open2SessionPath)
         Open2Log = Get-L00CFileRecord ([string]$initialize.Open2LogPath)
+        Open2SnapshotDatabase = Get-L00CFileRecord ([string]$initialize.Open2SnapshotDatabasePath)
+        Open2PersistenceReport = Get-L00CFileRecord ([string]$initialize.Open2PersistenceReportPath)
+        Open2PersistenceAttestationId = [string]$open2Report.AttestationId
+        ExpectedNextOpenEvidenceSequence = [int]$open2.EvidenceSequence + 1
         PersistenceAttestationId = [string]$attestation.AttestationId
     }
     [void](Add-ReceiptId $receipt)

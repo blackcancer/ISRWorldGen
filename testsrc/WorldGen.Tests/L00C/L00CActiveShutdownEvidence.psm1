@@ -18,6 +18,9 @@ function Assert-L00CActiveShutdownLog {
     $open = [regex]::Escape([string]$OpenCount)
     $reason = if ($IsNew) { 'fixture-stable' } else { 'persisted-reopen-stable' }
     $reasonPattern = [regex]::Escape($reason)
+    $precheckPattern = if ($IsNew) { $null } else {
+        "L00C_PERSISTED_PRECHECK instance=$instance marker=$marker maps=9 exact=True"
+    }
     $readyPattern = if ($IsNew) {
         "L00C_MAP_SNAPSHOT_COMMITTED instance=$instance marker=$marker maps=9 checksum=[0-9A-F]{64} writes=1"
     }
@@ -28,33 +31,42 @@ function Assert-L00CActiveShutdownLog {
     $firedPattern = "L00C_DELAYED_SHUTDOWN_FIRED instance=$instance run=$run reason=$reasonPattern"
     $shutdownPattern = "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker reason=$reasonPattern"
     $markerSavedPattern = "L00C_MARKER_SAVED instance=$instance marker=$marker open=$open"
+    $anyMarkerSavedPattern = "L00C_MARKER_SAVED instance=$instance marker=$marker open=([^\s]+)"
 
     if ($Log -match 'Server suspend requested, but reached max wait time') {
         throw 'Active shutdown encountered a server-suspension timeout.'
     }
 
-    $ready = [regex]::Match($Log, $readyPattern)
+    $precheck = if ($IsNew) { $null } else { [regex]::Match($Log, $precheckPattern) }
+    $readyRegex = [regex]::new($readyPattern)
+    $ready = if ($IsNew -or $precheck.Success) {
+        $readyRegex.Match($Log, $(if ($IsNew) { 0 } else { $precheck.Index + $precheck.Length }))
+    }
+    else {
+        $readyRegex.Match([string]::Empty)
+    }
     $armedRegex = [regex]::new($armedPattern)
     $firedRegex = [regex]::new($firedPattern)
     $shutdownRegex = [regex]::new($shutdownPattern)
-    $markerSavedRegex = [regex]::new($markerSavedPattern)
     $worldSavedRegex = [regex]::new('World saved!')
     $stoppedRegex = [regex]::new('Stopped the server!')
     $armed = if ($ready.Success) { $armedRegex.Match($Log, $ready.Index + $ready.Length) } else { $armedRegex.Match($Log) }
     $fired = if ($armed.Success) { $firedRegex.Match($Log, $armed.Index + $armed.Length) } else { $firedRegex.Match($Log) }
     $shutdown = if ($fired.Success) { $shutdownRegex.Match($Log, $fired.Index + $fired.Length) } else { $shutdownRegex.Match($Log) }
-    $markerSaved = if ($shutdown.Success) { $markerSavedRegex.Match($Log, $shutdown.Index + $shutdown.Length) } else { $markerSavedRegex.Match($Log) }
-    $worldSaved = if ($markerSaved.Success) { $worldSavedRegex.Match($Log, $markerSaved.Index + $markerSaved.Length) } else { $worldSavedRegex.Match($Log) }
+    $worldSaved = if ($shutdown.Success) { $worldSavedRegex.Match($Log, $shutdown.Index + $shutdown.Length) } else { $worldSavedRegex.Match($Log) }
     $stopped = if ($worldSaved.Success) { $stoppedRegex.Match($Log, $worldSaved.Index + $worldSaved.Length) } else { $stoppedRegex.Match($Log) }
-    foreach ($entry in @(
+    $required = @(
         [pscustomobject]@{ Label = 'ready'; Match = $ready },
         [pscustomobject]@{ Label = 'armed'; Match = $armed },
         [pscustomobject]@{ Label = 'fired'; Match = $fired },
         [pscustomobject]@{ Label = 'graceful shutdown request'; Match = $shutdown },
-        [pscustomobject]@{ Label = 'marker save'; Match = $markerSaved },
         [pscustomobject]@{ Label = 'world save'; Match = $worldSaved },
         [pscustomobject]@{ Label = 'server stop'; Match = $stopped }
-    )) {
+    )
+    if (-not $IsNew) {
+        $required = @([pscustomobject]@{ Label = 'persisted precheck'; Match = $precheck }) + $required
+    }
+    foreach ($entry in $required) {
         if (-not $entry.Match.Success) {
             throw "Active shutdown log is missing $($entry.Label)."
         }
@@ -69,10 +81,17 @@ function Assert-L00CActiveShutdownLog {
         [regex]::Matches($Log, $shutdownPattern).Count -ne 1) {
         throw 'Active shutdown was not armed, fired, and requested exactly once.'
     }
-    if ($ready.Index -ge $armed.Index -or $armed.Index -ge $fired.Index -or
-        $fired.Index -ge $shutdown.Index -or $shutdown.Index -ge $markerSaved.Index -or
-        $markerSaved.Index -ge $worldSaved.Index -or $worldSaved.Index -ge $stopped.Index) {
-        throw 'Active shutdown did not prove READY < ARMED < FIRED < GRACEFUL < MARKER_SAVED < World saved < Stopped.'
+    if ((-not $IsNew -and $precheck.Index -ge $ready.Index) -or
+        $ready.Index -ge $armed.Index -or $armed.Index -ge $fired.Index -or
+        $fired.Index -ge $shutdown.Index -or $shutdown.Index -ge $worldSaved.Index -or
+        $worldSaved.Index -ge $stopped.Index) {
+        throw 'Active shutdown did not prove PRECHECK (reopen) < READY < ARMED < FIRED < GRACEFUL < World saved < Stopped.'
+    }
+
+    $anyMarkerSaves = [regex]::Matches($Log, $anyMarkerSavedPattern)
+    $matchingMarkerSaves = [regex]::Matches($Log, $markerSavedPattern)
+    if ($anyMarkerSaves.Count -ne $matchingMarkerSaves.Count) {
+        throw 'An optional marker autosave has an unexpected OpenCount.'
     }
 
     [pscustomobject]@{
@@ -80,6 +99,8 @@ function Assert-L00CActiveShutdownLog {
         Reason = $reason
         DelayMilliseconds = $delayMilliseconds
         ListenerId = [long]$armed.Groups[2].Value
+        MarkerAutosaveCount = $matchingMarkerSaves.Count
+        DurableStateEvidence = 'database-required'
     }
 }
 

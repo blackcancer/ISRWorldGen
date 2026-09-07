@@ -47,10 +47,10 @@ if (((Get-TemplateTokens $activatedTemplate) -join '|') -ne ($expectedActivatedT
 }
 $controllerSource = Get-Content -LiteralPath $controllerPath -Raw
 $validatorSource = Get-Content -LiteralPath $evidenceValidatorPath -Raw
-foreach ($fragment in @('Initialize', 'RecordOpen1', 'AuthorizeOpen2', 'Finalize', 'Test-L00CPersistedDatabase.ps1', 'CreateNew', 'ControllerPhaseBefore', 'ControllerPhaseAfter')) {
+foreach ($fragment in @('Initialize', 'RecordOpen1', 'AuthorizeOpen2', 'Finalize', 'Test-L00CPersistedDatabase.ps1', 'New-L00CAutonomousDatabaseSnapshot', 'Open2SnapshotDatabase', 'Open2PersistenceReport', 'CreateNew', 'ControllerPhaseBefore', 'ControllerPhaseAfter')) {
     if (-not $controllerSource.Contains($fragment)) { throw "Campaign controller is missing required production wiring: $fragment" }
 }
-foreach ($fragment in @('CampaignControl', 'RecordOpen1', 'AuthorizeOpen2', 'ControllerPhaseBefore', 'ControllerPhaseAfter')) {
+foreach ($fragment in @('CampaignControl', 'RecordOpen1', 'AuthorizeOpen2', 'Open2Database', 'Open2DatabaseReport', 'ControllerPhaseBefore', 'ControllerPhaseAfter')) {
     if (-not $validatorSource.Contains($fragment)) { throw "Final evidence validator is missing campaign phase wiring: $fragment" }
 }
 
@@ -71,6 +71,16 @@ foreach ($assembly in @('SQLitePCLRaw.core.dll', 'SQLitePCLRaw.provider.e_sqlite
     [void][Reflection.Assembly]::LoadFrom((Join-Path $sqliteDirectory $assembly))
 }
 [SQLitePCL.Batteries_V2]::Init()
+foreach ($dependency in @('VintagestoryAPI.dll', 'VintagestoryLib.dll')) {
+    [void][Reflection.Assembly]::LoadFrom((Join-Path 'D:\Jeux\Vintagestory' $dependency))
+}
+$candidateAssembly = [Reflection.Assembly]::LoadFrom($assemblyPath)
+$script:markerType = $candidateAssembly.GetType('ISRWorldGen.WorldgenProbe.ProbeMarker', $false)
+$script:footprintType = $candidateAssembly.GetType('ISRWorldGen.WorldgenProbe.PersistedMapFootprintSnapshot', $false)
+$script:mapSnapshotType = $candidateAssembly.GetType('ISRWorldGen.WorldgenProbe.PersistedMapChunkSnapshot', $false)
+if ($null -eq $script:markerType -or $null -eq $script:footprintType -or $null -eq $script:mapSnapshotType) {
+    throw 'Campaign database fixture cannot load the real Debug marker-envelope types.'
+}
 
 function Write-NewJson([string]$Path, $Value) {
     $parent = Split-Path -Parent $Path
@@ -83,15 +93,73 @@ function Write-NewJson([string]$Path, $Value) {
     finally { $stream.Dispose() }
 }
 
-function New-CompleteDatabase([string]$Path) {
+function Write-Varint([IO.Stream]$Stream, [int]$Value) {
+    [uint32]$remaining = $Value
+    do {
+        [byte]$current = $remaining -band 0x7f
+        $remaining = $remaining -shr 7
+        if ($remaining -ne 0) { $current = $current -bor 0x80 }
+        $Stream.WriteByte($current)
+    } while ($remaining -ne 0)
+}
+
+function New-MarkerPayload([int]$OpenCount) {
+    $mapListType = [Collections.Generic.List``1].MakeGenericType($script:mapSnapshotType)
+    $maps = [Activator]::CreateInstance($mapListType)
+    for ($x = 31989; $x -le 31991; $x++) {
+        for ($z = 31989; $z -le 31991; $z++) {
+            $map = [Activator]::CreateInstance($script:mapSnapshotType)
+            $script:mapSnapshotType.GetProperty('X').SetValue($map, $x)
+            $script:mapSnapshotType.GetProperty('Z').SetValue($map, $z)
+            $script:mapSnapshotType.GetProperty('WorldGenTerrainHeightMap').SetValue($map, [ushort[]](1..1024 | ForEach-Object { 64 }))
+            $script:mapSnapshotType.GetProperty('RainHeightMap').SetValue($map, [ushort[]](1..1024 | ForEach-Object { 67 }))
+            $script:mapSnapshotType.GetProperty('TopRockIdMap').SetValue($map, [int[]](1..1024 | ForEach-Object { 11165 }))
+            $script:mapSnapshotType.GetProperty('YMax').SetValue($map, [ushort]67)
+            [void]$maps.Add($map)
+        }
+    }
+    $footprint = $script:footprintType.GetMethod('Create').Invoke($null, @(
+        '44444444444444444444444444444444',
+        '33333333-3333-3333-3333-333333333333',
+        31990, 31990, 32, 256, $maps))
+    $marker = [Activator]::CreateInstance($script:markerType)
+    $script:markerType.GetProperty('MarkerId').SetValue($marker, '44444444444444444444444444444444')
+    $script:markerType.GetProperty('SavegameIdentifier').SetValue($marker, '33333333-3333-3333-3333-333333333333')
+    $script:markerType.GetProperty('Version').SetValue($marker, 'l00c-flat-v2-map-snapshot')
+    $script:markerType.GetProperty('OpenCount').SetValue($marker, $OpenCount)
+    $script:markerType.GetProperty('MapFootprint').SetValue($marker, $footprint)
+    return ,[Text.Json.JsonSerializer]::SerializeToUtf8Bytes($marker, $script:markerType)
+}
+
+function New-GamedataBlob([int]$OpenCount) {
+    [byte[]]$key = [Text.Encoding]::UTF8.GetBytes('isrworldgen:l00c:marker:v1')
+    [byte[]]$payload = New-MarkerPayload $OpenCount
+    $stream = [IO.MemoryStream]::new()
+    try {
+        $stream.WriteByte(0x0a)
+        Write-Varint $stream $key.Length
+        $stream.Write($key, 0, $key.Length)
+        $stream.WriteByte(0x12)
+        Write-Varint $stream $payload.Length
+        $stream.Write($payload, 0, $payload.Length)
+        return ,$stream.ToArray()
+    }
+    finally { $stream.Dispose() }
+}
+
+function New-CompleteDatabase([string]$Path, [int]$OpenCount = 1) {
     $parent = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) { [void](New-Item -ItemType Directory -Path $parent) }
     $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$Path;Mode=ReadWriteCreate;Pooling=False")
     try {
         $connection.Open()
         $command = $connection.CreateCommand()
-        $command.CommandText = 'CREATE TABLE mapchunk(position INTEGER PRIMARY KEY, data BLOB NOT NULL); CREATE TABLE chunk(position INTEGER PRIMARY KEY, data BLOB NOT NULL);'
+        $command.CommandText = 'CREATE TABLE mapchunk(position INTEGER PRIMARY KEY, data BLOB NOT NULL); CREATE TABLE chunk(position INTEGER PRIMARY KEY, data BLOB NOT NULL); CREATE TABLE gamedata(savegameid INTEGER PRIMARY KEY, data BLOB NOT NULL);'
         [void]$command.ExecuteNonQuery()
+        $command.CommandText = 'INSERT INTO gamedata(savegameid, data) VALUES(1, $data)'
+        [void]$command.Parameters.AddWithValue('$data', (New-GamedataBlob $OpenCount))
+        [void]$command.ExecuteNonQuery()
+        $command.Parameters.Clear()
         $transaction = $connection.BeginTransaction()
         try {
             $command.Transaction = $transaction
@@ -113,6 +181,24 @@ function New-CompleteDatabase([string]$Path) {
             $transaction.Commit()
         }
         finally { $transaction.Dispose() }
+    }
+    finally {
+        $connection.Close()
+        $connection.Dispose()
+    }
+}
+
+function Set-DatabaseMarkerOpenCount([string]$Path, [int]$OpenCount) {
+    $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$Path;Mode=ReadWrite;Pooling=False")
+    try {
+        $connection.Open()
+        $command = $connection.CreateCommand()
+        try {
+            $command.CommandText = 'UPDATE gamedata SET data = $data WHERE savegameid = 1'
+            [void]$command.Parameters.AddWithValue('$data', (New-GamedataBlob $OpenCount))
+            if ($command.ExecuteNonQuery() -ne 1) { throw 'Synthetic campaign marker update did not affect exactly one row.' }
+        }
+        finally { $command.Dispose() }
     }
     finally {
         $connection.Close()
@@ -154,12 +240,50 @@ function New-Campaign([string]$Name) {
     return $fixture
 }
 
-function Complete-Open1($Fixture) {
+function Complete-Open1(
+    $Fixture,
+    [switch]$WithWal,
+    [ValidateSet('None', 'MissingChunk')][string]$DatabaseMutation = 'None') {
     $initialized = [DateTimeOffset]::Parse([string]$Fixture.Initialize.InitializedUtc).ToUniversalTime()
     $initializeReceiptPath = Join-Path $Fixture.Evidence 'campaign-control\01-initialize.json'
     $initializeWritten = [DateTimeOffset](Get-Item -LiteralPath $initializeReceiptPath).LastWriteTimeUtc
     $started = if ($initialized -gt $initializeWritten) { $initialized.AddTicks(1) } else { $initializeWritten.AddTicks(1) }
     New-CompleteDatabase $Fixture.Database
+    if ($DatabaseMutation -eq 'MissingChunk') {
+        $mutationConnection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$($Fixture.Database);Mode=ReadWrite;Pooling=False")
+        try {
+            $mutationConnection.Open()
+            $mutationCommand = $mutationConnection.CreateCommand()
+            try {
+                $mutationCommand.CommandText = 'DELETE FROM chunk WHERE position = (SELECT position FROM chunk LIMIT 1)'
+                if ($mutationCommand.ExecuteNonQuery() -ne 1) { throw 'Synthetic database mutation did not remove one chunk.' }
+            }
+            finally { $mutationCommand.Dispose() }
+        }
+        finally {
+            $mutationConnection.Close()
+            $mutationConnection.Dispose()
+        }
+    }
+    $walConnection = $null
+    if ($WithWal) {
+        $walConnection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$($Fixture.Database);Mode=ReadWrite;Pooling=False")
+        $walConnection.Open()
+        $walCommand = $walConnection.CreateCommand()
+        try {
+            $walCommand.CommandText = 'PRAGMA journal_mode=WAL'
+            if ([string]$walCommand.ExecuteScalar() -ne 'wal') { throw 'Synthetic source could not enter WAL mode.' }
+            $walCommand.CommandText = 'PRAGMA wal_autocheckpoint=0'
+            [void]$walCommand.ExecuteNonQuery()
+            $walCommand.CommandText = 'CREATE TABLE walproof(value INTEGER NOT NULL); INSERT INTO walproof(value) VALUES(1);'
+            [void]$walCommand.ExecuteNonQuery()
+        }
+        finally { $walCommand.Dispose() }
+        $walPath = $Fixture.Database + '-wal'
+        if (-not (Test-Path -LiteralPath $walPath -PathType Leaf) -or (Get-Item -LiteralPath $walPath).Length -le 0) {
+            throw 'Synthetic persisted source did not retain a real WAL-backed update.'
+        }
+    }
     Start-Sleep -Milliseconds 2
     $completed = [DateTimeOffset]::UtcNow
     [IO.File]::SetCreationTimeUtc($Fixture.Database, $started.AddTicks(1).UtcDateTime)
@@ -170,7 +294,12 @@ function Complete-Open1($Fixture) {
     $log = @(
         "L00C_ACTIVATED instance=$instance marker=$marker run=1 open=1 isnew=True save=$save fixture=31990,31990"
         "L00C_TICKS_STABLE instance=$instance marker=$marker run=1 ticks=40 snapshot=$('A' * 64)"
+        "L00C_MAP_SNAPSHOT_COMMITTED instance=$instance marker=$marker maps=9 checksum=$('C' * 64) writes=1"
+        "L00C_DELAYED_SHUTDOWN_ARMED instance=$instance run=1 reason=fixture-stable delayms=15000 listener=41"
+        "L00C_DELAYED_SHUTDOWN_FIRED instance=$instance run=1 reason=fixture-stable"
+        "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker reason=fixture-stable"
         'World saved!'
+        'Stopped the server!'
     ) -join [Environment]::NewLine
     $logParent = Split-Path -Parent $Fixture.Open1Log
     if (-not (Test-Path -LiteralPath $logParent -PathType Container)) { [void](New-Item -ItemType Directory -Path $logParent) }
@@ -190,8 +319,16 @@ function Complete-Open1($Fixture) {
         ControllerPhaseAfter = 'RecordOpen1'
     }
     Write-NewJson $Fixture.Open1Session $session
-    $resultJson = (& $controllerPath -Phase RecordOpen1 -EvidenceDirectory $Fixture.Evidence -RepositoryRoot $RepositoryRoot) -join [Environment]::NewLine
-    $Fixture.Add('RecordOpen1', ($resultJson | ConvertFrom-Json))
+    try {
+        $resultJson = (& $controllerPath -Phase RecordOpen1 -EvidenceDirectory $Fixture.Evidence -RepositoryRoot $RepositoryRoot) -join [Environment]::NewLine
+        $Fixture.Add('RecordOpen1', ($resultJson | ConvertFrom-Json))
+    }
+    finally {
+        if ($null -ne $walConnection) {
+            $walConnection.Close()
+            $walConnection.Dispose()
+        }
+    }
 }
 
 function Authorize-Open2($Fixture) {
@@ -199,17 +336,20 @@ function Authorize-Open2($Fixture) {
     $Fixture.Add('AuthorizeOpen2', ($json | ConvertFrom-Json))
 }
 
-function Complete-Open2($Fixture, [bool]$UseFalseStableFormat = $false) {
+function Complete-Open2(
+    $Fixture,
+    [bool]$UseFalseStableFormat = $false,
+    [int]$PersistedOpenCount = 2,
+    [ValidateSet('None', 'MissingWorldSave', 'ReorderedTerminal')][string]$TerminalMutation = 'None') {
     $authorized = [DateTimeOffset]::Parse([string]$Fixture.AuthorizeOpen2.AuthorizedUtc).ToUniversalTime()
     $authorizationReceiptPath = Join-Path $Fixture.Evidence 'campaign-control\03-authorize-open2.json'
     $authorizationWritten = [DateTimeOffset](Get-Item -LiteralPath $authorizationReceiptPath).LastWriteTimeUtc
     $started = if ($authorized -gt $authorizationWritten) { $authorized.AddTicks(1) } else { $authorizationWritten.AddTicks(1) }
     Start-Sleep -Milliseconds 2
-    $completed = [DateTimeOffset]::UtcNow
     $session = [ordered]@{
         EvidenceSequence = 4
         StartedUtc = $started.ToString('o')
-        CompletedUtc = $completed.ToString('o')
+        CompletedUtc = [DateTimeOffset]::MinValue.ToString('o')
         WorldRole = 'activated-primary'
         SavegameIdentifier = [string]$Fixture.RecordOpen1.SavegameIdentifier
         MarkerId = [string]$Fixture.RecordOpen1.MarkerId
@@ -220,7 +360,6 @@ function Complete-Open2($Fixture, [bool]$UseFalseStableFormat = $false) {
         ControllerPhaseBefore = 'AuthorizeOpen2'
         ControllerPhaseAfter = 'Finalize'
     }
-    Write-NewJson $Fixture.Open2Session $session
     $logParent = Split-Path -Parent $Fixture.Open2Log
     if (-not (Test-Path -LiteralPath $logParent -PathType Container)) { [void](New-Item -ItemType Directory -Path $logParent) }
     $activatedLine = Expand-ProductionTemplate $activatedTemplate @{
@@ -251,8 +390,27 @@ function Complete-Open2($Fixture, [bool]$UseFalseStableFormat = $false) {
             'persistedSnapshot.Halo.Hash' = 'B' * 64
         }
     }
-    $open2Log = @($activatedLine, $stableLine) -join [Environment]::NewLine
+    $open2Log = @(
+        $activatedLine,
+        "L00C_PERSISTED_PRECHECK instance=$($session.InstanceId) marker=$($session.MarkerId) maps=9 exact=True",
+        $stableLine,
+        "L00C_DELAYED_SHUTDOWN_ARMED instance=$($session.InstanceId) run=$($session.WorldRunId) reason=persisted-reopen-stable delayms=15000 listener=42",
+        "L00C_DELAYED_SHUTDOWN_FIRED instance=$($session.InstanceId) run=$($session.WorldRunId) reason=persisted-reopen-stable",
+        "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$($session.InstanceId) marker=$($session.MarkerId) reason=persisted-reopen-stable",
+        'World saved!',
+        'Stopped the server!') -join [Environment]::NewLine
+    if ($TerminalMutation -eq 'MissingWorldSave') {
+        $open2Log = $open2Log -replace '(?m)^World saved!\r?\n?', ''
+    }
+    elseif ($TerminalMutation -eq 'ReorderedTerminal') {
+        $open2Log = $open2Log -replace 'World saved!\r?\nStopped the server!', "Stopped the server!`nWorld saved!"
+    }
     [IO.File]::WriteAllText($Fixture.Open2Log, $open2Log, [Text.UTF8Encoding]::new($false))
+    Set-DatabaseMarkerOpenCount $Fixture.Database $PersistedOpenCount
+    $completed = [DateTimeOffset]::UtcNow
+    $session.CompletedUtc = $completed.ToString('o')
+    [IO.File]::SetLastWriteTimeUtc($Fixture.Database, $completed.AddTicks(-1).UtcDateTime)
+    Write-NewJson $Fixture.Open2Session $session
     $json = (& $controllerPath -Phase Finalize -EvidenceDirectory $Fixture.Evidence -RepositoryRoot $RepositoryRoot) -join [Environment]::NewLine
     $Fixture.Add('Finalize', ($json | ConvertFrom-Json))
 }
@@ -309,13 +467,48 @@ try {
     Write-NewJson $premature.Open2Session ([ordered]@{ EvidenceSequence = 4 })
     Assert-Rejected { & $controllerPath -Phase AuthorizeOpen2 -EvidenceDirectory $premature.Evidence -RepositoryRoot $RepositoryRoot } 'Open2 already exists'
 
+    $sidecarDependent = New-Campaign 'sidecar-dependent'
+    Complete-Open1 $sidecarDependent
+    [IO.File]::WriteAllBytes($sidecarDependent.Snapshot + '-wal', [byte[]]@(1, 2, 3))
+    Assert-Rejected { Authorize-Open2 $sidecarDependent } 'Snapshot requiring a sidecar'
+
+    $hashMismatch = New-Campaign 'snapshot-hash-mismatch'
+    Complete-Open1 $hashMismatch
+    $snapshotBytes = [IO.File]::ReadAllBytes($hashMismatch.Snapshot)
+    $snapshotBytes[$snapshotBytes.Length - 1] = $snapshotBytes[$snapshotBytes.Length - 1] -bxor 0xff
+    [IO.File]::WriteAllBytes($hashMismatch.Snapshot, $snapshotBytes)
+    Assert-Rejected { Authorize-Open2 $hashMismatch } 'Snapshot hash mismatch'
+
     $falseStable = New-Campaign 'false-stable-field'
     Complete-Open1 $falseStable
     Authorize-Open2 $falseStable
     Assert-Rejected { Complete-Open2 $falseStable $true } 'Invented open field on persisted stable marker'
 
+    $staleOpenCount = New-Campaign 'stale-open-count'
+    Complete-Open1 $staleOpenCount
+    Authorize-Open2 $staleOpenCount
+    Assert-Rejected { Complete-Open2 $staleOpenCount $false 1 } 'Open2 database did not persist incremented count'
+
+    $incompleteOpen1 = New-Campaign 'incomplete-open1-database'
+    Assert-Rejected { Complete-Open1 $incompleteOpen1 -DatabaseMutation 'MissingChunk' } 'Open1 database missing one persisted chunk'
+
+    $missingWorldSave = New-Campaign 'missing-world-save'
+    Complete-Open1 $missingWorldSave
+    Authorize-Open2 $missingWorldSave
+    Assert-Rejected { Complete-Open2 $missingWorldSave $false 2 'MissingWorldSave' } 'Marker database substituted for missing world save'
+
+    $reorderedTerminal = New-Campaign 'reordered-terminal'
+    Complete-Open1 $reorderedTerminal
+    Authorize-Open2 $reorderedTerminal
+    Assert-Rejected { Complete-Open2 $reorderedTerminal $false 2 'ReorderedTerminal' } 'World save after stop'
+
     $baseline = New-Campaign 'baseline'
-    Complete-Open1 $baseline
+    Complete-Open1 $baseline -WithWal
+    $baselineReport = Get-Content -LiteralPath $baseline.Report -Raw | ConvertFrom-Json
+    if (-not [bool]$baselineReport.Autonomous -or [string]$baselineReport.IntegrityCheck -ne 'ok' -or
+        (Test-Path -LiteralPath ($baseline.Snapshot + '-wal')) -or (Test-Path -LiteralPath ($baseline.Snapshot + '-shm'))) {
+        throw 'RecordOpen1 did not archive the WAL-backed source as a standalone intact database.'
+    }
     Authorize-Open2 $baseline
     Complete-Open2 $baseline
     if ([string]$baseline.Initialize.Status -ne 'READY_FOR_OPEN1' -or
@@ -334,8 +527,16 @@ try {
         StaleRenamedReportRejected = $true
         RewrittenAttestationRejected = $true
         Open2AlreadyExistsRejected = $true
+        SidecarDependentSnapshotRejected = $true
+        SnapshotHashMismatchRejected = $true
         ReversedOrderRejected = $true
         FalseStableOpenFieldRejected = $true
+        Open2DatabaseIncrementRequired = $true
+        IncompleteOpen1DatabaseRejected = $true
+        DatabaseCannotSubstituteWorldSave = $true
+        ReorderedTerminalEventsRejected = $true
+        AutonomousOpen1AndOpen2SnapshotsRequired = $true
+        WalBackedOpen1SourceExercised = $true
         ProductionLogSchemaDerived = $true
         OperationalGuarantee = 'fresh tamper-evident chain, not attacker-resistant'
     } | ConvertTo-Json -Depth 5

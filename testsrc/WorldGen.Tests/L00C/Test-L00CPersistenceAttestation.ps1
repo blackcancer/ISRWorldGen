@@ -32,6 +32,10 @@ foreach ($fragment in @(
     'Open1LogSha256',
     'OracleSha256',
     'Open1EvidenceSequence',
+    'ExpectedOpenCount',
+    'MarkerEnvelope',
+    'Autonomous',
+    'IntegrityCheck',
     'Get-L00CAttestationId'
 )) {
     if (-not $databaseOracle.Contains($fragment)) {
@@ -90,7 +94,7 @@ $open2 = [pscustomobject]@{
     IsNew = $false
 }
 $report = [pscustomobject][ordered]@{
-    SchemaVersion = 1
+    SchemaVersion = 2
     ControllerPhase = 'RecordOpen1'
     EvidenceOrder = 'open1-complete<attestation<open2-start'
     CampaignId = $campaign
@@ -101,6 +105,8 @@ $report = [pscustomobject][ordered]@{
     MarkerId = $marker
     InstanceId = $instance
     WorldRunId = 1
+    ExpectedOpenCount = 1
+    ExpectedIsNew = $true
     Open1EvidenceSequence = 3
     ExpectedOpen2EvidenceSequence = 4
     Open1CompletedUtc = $open1Complete.ToString('o')
@@ -108,6 +114,21 @@ $report = [pscustomobject][ordered]@{
     DatabaseLength = (Get-Item -LiteralPath $databasePath).Length
     Open1LogSha256 = (Get-FileHash -LiteralPath $logPath -Algorithm SHA256).Hash
     Open1LogLength = (Get-Item -LiteralPath $logPath).Length
+    Autonomous = $true
+    IntegrityCheck = 'ok'
+    JournalMode = 'delete'
+    ActualMapChunks = 9
+    ActualChunks = 72
+    MarkerEnvelope = [ordered]@{
+        MarkerId = $marker
+        SavegameIdentifier = $save
+        Version = 'l00c-flat-v2-map-snapshot'
+        OpenCount = 1
+        PayloadSha256 = 'D' * 64
+        MapFootprintVersion = 'l00c-map-footprint-v1'
+        MapFootprintMapChunks = 9
+        MapFootprintSha256 = 'E' * 64
+    }
     AttestedUtc = $attested.ToString('o')
     AttestationId = ''
 }
@@ -164,6 +185,16 @@ try {
     Assert-Rejected { Invoke-Validation $report $reportPath $open1 $open2 $campaign ('9' * 40) $assemblyHash } 'Foreign candidate replay'
     Assert-Rejected { Invoke-Validation $report $reportPath $open1 $open2 $campaign $commit ('B' * 64) } 'Foreign assembly replay'
 
+    $wrongPersistedCount = $report | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $wrongPersistedCount.MarkerEnvelope.OpenCount = 2
+    $wrongPersistedCount.AttestationId = Get-L00CAttestationId $wrongPersistedCount
+    Assert-Rejected { Invoke-Validation $wrongPersistedCount $reportPath $open1 $open2 $campaign $commit $assemblyHash } 'Wrong persisted OpenCount'
+
+    $incompleteFootprint = $report | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $incompleteFootprint.ActualChunks = 71
+    $incompleteFootprint.AttestationId = Get-L00CAttestationId $incompleteFootprint
+    Assert-Rejected { Invoke-Validation $incompleteFootprint $reportPath $open1 $open2 $campaign $commit $assemblyHash } 'Incomplete 9/72 footprint'
+
     [ordered]@{
         TestId = 'L00-C-PERSISTENCE-ATTESTATION'
         Status = 'PASS'
@@ -174,6 +205,8 @@ try {
         ForeignCampaignRejected = $true
         ForeignCandidateRejected = $true
         ForeignAssemblyRejected = $true
+        WrongPersistedOpenCountRejected = $true
+        IncompleteFootprintRejected = $true
     } | ConvertTo-Json -Depth 4
 }
 finally {

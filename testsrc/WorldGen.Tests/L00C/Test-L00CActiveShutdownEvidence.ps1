@@ -20,20 +20,26 @@ function Assert-Rejected([scriptblock]$Action, [string]$Label) {
 $instance = '1' * 32
 $marker = '2' * 32
 $valid = @"
+L00C_PERSISTED_PRECHECK instance=$instance marker=$marker maps=9 exact=True
 L00C_PERSISTED_REOPEN_STABLE instance=$instance marker=$marker run=1 loadpriority=0 transientrequests=0 refreshpasses=0 refreshedmapchunks=0 keeploaded=0 unload=0 fixturewrites=0 mapsnapshotwrites=0 callbacks=0 center=$('A' * 64) halo=$('B' * 64)
 L00C_DELAYED_SHUTDOWN_ARMED instance=$instance run=1 reason=persisted-reopen-stable delayms=15000 listener=42
 L00C_DELAYED_SHUTDOWN_FIRED instance=$instance run=1 reason=persisted-reopen-stable
 L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker reason=persisted-reopen-stable
-L00C_MARKER_SAVED instance=$instance marker=$marker open=2
 World saved!
 Stopped the server!
 "@
 
 $result = Assert-L00CActiveShutdownLog -Log $valid -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false
+$withOptionalAutosave = $valid -replace 'World saved!', "L00C_MARKER_SAVED instance=$instance marker=$marker open=2`nWorld saved!"
+$autosaveResult = Assert-L00CActiveShutdownLog -Log $withOptionalAutosave -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false
+if ($autosaveResult.MarkerAutosaveCount -ne 1) { throw 'A correctly bound optional autosave was not reported.' }
 Assert-Rejected { Assert-L00CActiveShutdownLog -Log ($valid -replace 'L00C_DELAYED_SHUTDOWN_ARMED[^\r\n]+\r?\n', '') -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false } 'missing arm'
+Assert-Rejected { Assert-L00CActiveShutdownLog -Log ($valid -replace 'L00C_PERSISTED_PRECHECK[^\r\n]+\r?\n', '') -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false } 'missing persisted precheck'
 Assert-Rejected { Assert-L00CActiveShutdownLog -Log ($valid -replace 'delayms=15000', 'delayms=9999') -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false } 'unsafe active delay'
 Assert-Rejected { Assert-L00CActiveShutdownLog -Log ($valid -replace 'World saved!', 'Server suspend requested, but reached max wait time.') -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false } 'suspend timeout'
-Assert-Rejected { Assert-L00CActiveShutdownLog -Log ($valid -replace 'L00C_MARKER_SAVED[^\r\n]+\r?\n', '') -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false } 'missing committed marker save'
+Assert-Rejected { Assert-L00CActiveShutdownLog -Log ($valid -replace 'World saved!', "L00C_MARKER_SAVED instance=$instance marker=$marker open=2") -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false } 'marker autosave substituted for durable world save'
+Assert-Rejected { Assert-L00CActiveShutdownLog -Log ($valid -replace 'World saved!', "L00C_MARKER_SAVED instance=$instance marker=$marker open=99`nWorld saved!") -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false } 'wrong optional autosave open count'
+Assert-Rejected { Assert-L00CActiveShutdownLog -Log ($valid -replace "World saved!`r?`nStopped the server!", "Stopped the server!`nWorld saved!") -InstanceId $instance -MarkerId $marker -WorldRunId 1 -OpenCount 2 -IsNew $false } 'world save after stop'
 
 if (-not [string]::IsNullOrWhiteSpace($ObservedLogPath)) {
     if (-not (Test-Path -LiteralPath $ObservedLogPath -PathType Leaf)) { throw "Observed log is missing: $ObservedLogPath" }
@@ -49,6 +55,11 @@ if (-not [string]::IsNullOrWhiteSpace($ObservedLogPath)) {
     Status = 'PASS'
     DelayMilliseconds = $result.DelayMilliseconds
     SuspendTimeoutRejected = $true
-    MissingSaveRejected = $true
+    MissingWorldSaveRejected = $true
+    MissingPersistedPrecheckRejected = $true
+    MarkerSaveNotRequired = $true
+    BoundMarkerAutosaveAccepted = $true
+    MarkerSaveCannotSubstituteForDatabase = $true
+    ReorderedTerminalEventsRejected = $true
     ObservedLogValidated = -not [string]::IsNullOrWhiteSpace($ObservedLogPath)
 } | ConvertTo-Json -Depth 4

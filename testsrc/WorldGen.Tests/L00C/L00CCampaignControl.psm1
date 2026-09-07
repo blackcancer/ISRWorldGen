@@ -88,6 +88,8 @@ function Get-L00CCampaignReceiptId {
                 [string]$Receipt.SaveDatabasePath,
                 [string]$Receipt.SnapshotDatabasePath,
                 [string]$Receipt.PersistenceReportPath,
+                [string]$Receipt.Open2SnapshotDatabasePath,
+                [string]$Receipt.Open2PersistenceReportPath,
                 [string]$Receipt.Open1SessionPath,
                 [string]$Receipt.Open1LogPath,
                 [string]$Receipt.Open2SessionPath,
@@ -108,7 +110,6 @@ function Get-L00CCampaignReceiptId {
                 [string]$Receipt.WorldRunId,
                 [string]$Receipt.Open1Session.Sha256,
                 [string]$Receipt.Open1Log.Sha256,
-                [string]$Receipt.SourceDatabase.Sha256,
                 [string]$Receipt.SnapshotDatabase.Sha256,
                 [string]$Receipt.PersistenceReport.Sha256,
                 [string]$Receipt.PersistenceAttestationId
@@ -120,7 +121,6 @@ function Get-L00CCampaignReceiptId {
                 [string]$Receipt.ExpectedOpen2EvidenceSequence,
                 [string]$Receipt.SavegameIdentifier,
                 [string]$Receipt.MarkerId,
-                [string]$Receipt.SourceDatabaseSha256,
                 [string]$Receipt.Open1SessionSha256,
                 [string]$Receipt.Open1LogSha256,
                 [string]$Receipt.SnapshotDatabaseSha256,
@@ -140,6 +140,10 @@ function Get-L00CCampaignReceiptId {
                 [string]$Receipt.Open2WorldRunId,
                 [string]$Receipt.Open2Session.Sha256,
                 [string]$Receipt.Open2Log.Sha256,
+                [string]$Receipt.Open2SnapshotDatabase.Sha256,
+                [string]$Receipt.Open2PersistenceReport.Sha256,
+                [string]$Receipt.Open2PersistenceAttestationId,
+                [string]$Receipt.ExpectedNextOpenEvidenceSequence,
                 [string]$Receipt.PersistenceAttestationId
             )
         }

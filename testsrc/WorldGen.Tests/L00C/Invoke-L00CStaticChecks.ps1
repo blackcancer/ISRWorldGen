@@ -294,7 +294,11 @@ if ($Configuration -eq 'Debug') {
     $activeShutdownEvidenceOracle = (& $activeShutdownEvidenceOraclePath | Out-String | ConvertFrom-Json)
     if ($activeShutdownEvidenceOracle.Status -ne 'PASS' -or
         -not $activeShutdownEvidenceOracle.SuspendTimeoutRejected -or
-        -not $activeShutdownEvidenceOracle.MissingSaveRejected) {
+        -not $activeShutdownEvidenceOracle.MissingWorldSaveRejected -or
+        -not $activeShutdownEvidenceOracle.MissingPersistedPrecheckRejected -or
+        -not $activeShutdownEvidenceOracle.MarkerSaveNotRequired -or
+        -not $activeShutdownEvidenceOracle.MarkerSaveCannotSubstituteForDatabase -or
+        -not $activeShutdownEvidenceOracle.ReorderedTerminalEventsRejected) {
         throw 'The active delayed-shutdown evidence oracle did not pass.'
     }
     $activeShutdownEvidenceOracleStatus = $activeShutdownEvidenceOracle.Status
