@@ -370,9 +370,11 @@ function Get-CloneResultHash {
     param([Parameter(Mandatory)]$Snapshot)
 
     $canonical = @(
+        'isrworldgen.t02-05.sqlite-clone-result.v1',
         [string]$Snapshot.Integrity,
         [string]$Snapshot.GameDataBytes,
         [string]$Snapshot.ModDataCount,
+        [string]$Snapshot.StorageKey,
         [string]$Snapshot.KeyStatus,
         [string]$Snapshot.EnvelopeBytes,
         [string]$Snapshot.EnvelopeSha256,
@@ -444,6 +446,7 @@ function Read-CloneDatabaseSnapshot {
             Integrity = $integrity
             GameDataBytes = $gameDataBytes
             ModDataCount = $modDataCount
+            StorageKey = $storageKey
             KeyStatus = $keyStatus
             EnvelopeBytes = $envelopeBytes
             EnvelopeSha256 = $envelopeSha256
@@ -621,7 +624,7 @@ try {
         Integrity = $fullSnapshot.Integrity
         GameDataBytes = $fullSnapshot.GameDataBytes
         ModDataCount = $fullSnapshot.ModDataCount
-        StorageKey = $storageKey
+        StorageKey = $fullSnapshot.StorageKey
         KeyStatus = $fullSnapshot.KeyStatus
         EnvelopeBytes = $fullSnapshot.EnvelopeBytes
         EnvelopeSha256 = $fullSnapshot.EnvelopeSha256

@@ -177,9 +177,11 @@ function Get-ExtractionCloneResultHash {
     param([Parameter(Mandatory)]$Clone)
 
     return Get-TextSha256 (@(
+        'isrworldgen.t02-05.sqlite-clone-result.v1',
         [string]$Clone.Integrity,
         [string]$Clone.GameDataBytes,
         [string]$Clone.ModDataCount,
+        [string]$Clone.StorageKey,
         [string]$Clone.KeyStatus,
         [string]$Clone.EnvelopeBytes,
         [string]$Clone.EnvelopeSha256,
@@ -267,6 +269,11 @@ function Read-ExtractionReport {
                 throw "$CaseName SQLite source changed between pre-copy and post-extraction seals."
             }
         }
+    }
+    $mainSourceFiles = @($sourceFiles | Where-Object { $_.FileType -ceq 'Main' })
+    if ($mainSourceFiles.Count -ne 1 -or
+        $report.SourceMainPathSha256 -cne $sourceFiles[0].PathSha256) {
+        throw "$CaseName SQLite extraction main source path identity is contradictory."
     }
     if ($report.SourceSetSha256 -cne (Get-ExtractionSourceSetHash $sourceFiles)) {
         throw "$CaseName SQLite extraction source-set hash is invalid."
@@ -356,6 +363,15 @@ function Read-ExtractionReport {
             ($wal.MainOnlyStatus -ceq 'Readable' -and [string]$wal.MainOnlyResultSha256 -cnotmatch '^[0-9A-F]{64}$') -or
             ($wal.MainOnlyStatus -ceq 'Unreadable' -and $null -ne $wal.MainOnlyResultSha256)) {
             throw "$CaseName SQLite WAL contribution evidence is invalid."
+        }
+        $requiredStateProven = $wal.MainOnlyStatus -ceq 'Unreadable' -or
+            ($wal.MainOnlyStatus -ceq 'Readable' -and
+                $wal.MainOnlyResultSha256 -cne $wal.FullResultSha256)
+        $equivalentStateProven = $wal.MainOnlyStatus -ceq 'Readable' -and
+            $wal.MainOnlyResultSha256 -ceq $wal.FullResultSha256
+        if (($wal.WalContribution -ceq 'RequiredForObservedState' -and -not $requiredStateProven) -or
+            ($wal.WalContribution -ceq 'PresentStateEquivalent' -and -not $equivalentStateProven)) {
+            throw "$CaseName SQLite WAL contribution implication is contradictory."
         }
     }
     elseif ($wal.WalContribution -cne 'Absent' -or $wal.MainOnlyStatus -cne 'NotRun' -or

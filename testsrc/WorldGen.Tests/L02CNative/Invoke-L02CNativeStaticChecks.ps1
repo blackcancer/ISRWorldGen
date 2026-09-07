@@ -295,6 +295,7 @@ foreach ($fragment in @(
     "'Output replacement'",
     "'Cross-session extraction'",
     "'Extraction hash mismatch'",
+    "'Contradictory main source path hash'",
     "'Missing WAL'",
     "'Source changed after extraction'",
     "'Oversized source sidecar'",
@@ -352,7 +353,11 @@ $requiredRuntimeOracleFragments = @(
     'NewSealedSourceDirectory',
     'SealedSourceSetSha256',
     'SQLiteExtraction',
-    'RequiredForObservedState'
+    'RequiredForObservedState',
+    'PresentStateEquivalent',
+    'WAL contribution implication',
+    'main source path identity is contradictory',
+    'isrworldgen.t02-05.sqlite-clone-result.v1'
 )
 foreach ($fragment in $requiredRuntimeOracleFragments) {
     if (-not $runtimeOracleSource.Contains($fragment)) {
@@ -391,7 +396,10 @@ foreach ($fragment in @(
     "'PID mismatch'",
     "'Debugger session mismatch'",
     "'Log after debugger session'",
-    "'Rectangle dimensions mismatch'"
+    "'Rectangle dimensions mismatch'",
+    "'Required WAL with equivalent readable main'",
+    "'Equivalent WAL with unreadable main'",
+    "'Equivalent WAL with different readable main'"
 )) {
     if (-not $runtimeOracleTestSource.Contains($fragment)) {
         throw "Required T02-05 runtime evidence negative test is missing: $fragment"

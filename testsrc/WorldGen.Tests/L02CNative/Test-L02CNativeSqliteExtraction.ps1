@@ -50,6 +50,27 @@ function Get-RawSeal {
     }
 }
 
+function Get-CanonicalCloneResultHash {
+    param([Parameter(Mandatory)]$Clone)
+
+    $canonical = @(
+        'isrworldgen.t02-05.sqlite-clone-result.v1',
+        [string]$Clone.Integrity,
+        [string]$Clone.GameDataBytes,
+        [string]$Clone.ModDataCount,
+        [string]$Clone.StorageKey,
+        [string]$Clone.KeyStatus,
+        [string]$Clone.EnvelopeBytes,
+        [string]$Clone.EnvelopeSha256,
+        [string]$Clone.EnvelopeState,
+        [string]$Clone.ChunkRows,
+        [string]$Clone.MapChunkRows,
+        [string]$Clone.MapRegionRows
+    ) -join '|'
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+        [Text.Encoding]::UTF8.GetBytes($canonical)))
+}
+
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $testRoot = Join-Path $tempBase ('isrworldgen-l02c-sqlite-extraction-' + [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($testRoot) | Out-Null
@@ -98,12 +119,32 @@ try {
         'Extractor did not recover the committed envelope from the clone.'
     Assert-True ($report.Clone.WalEvidence.WalContribution -ceq 'RequiredForObservedState') `
         'Extractor did not prove that WAL was required to reconstruct the observed state.'
+    Assert-True ($report.SourceMainPathSha256 -ceq $report.SourceFiles[0].PathSha256) `
+        'Extractor emitted contradictory main source path hashes.'
+    Assert-True ($report.Clone.ResultSha256 -ceq (Get-CanonicalCloneResultHash $report.Clone)) `
+        'Extractor result hash does not cover the complete canonical clone result.'
     foreach ($file in @($report.SourceFiles)) {
         Assert-True (($file.PreCopy.PSObject.Properties.Value -join '|') -ceq
             ($file.AfterCopy.PSObject.Properties.Value -join '|')) 'After-copy source seal differs from pre-copy.'
         Assert-True (($file.PreCopy.PSObject.Properties.Value -join '|') -ceq
             ($file.PostExtraction.PSObject.Properties.Value -join '|')) 'Post-extraction source seal differs from pre-copy.'
     }
+
+    $noWalSource = Join-Path $testRoot 'no-wal-source.vcdbs'
+    New-L02CSqliteSourceFixture $noWalSource $envelope 0 $false
+    $noWalReportPath = Join-Path $testRoot 'no-wal-extraction.json'
+    & $extractor -SourceDatabasePath $noWalSource -OutputPath $noWalReportPath `
+        -SealedSourceDirectory (Join-Path $testRoot 'sealed-no-wal') -TestedCommit $commit `
+        -SessionId '44444444444444444444444444444444' -CaseRole reload -ServerPid $pidValue `
+        -LogPath $logPath -LogSha256 $logHash -SnapshotManifestPath $manifestPath `
+        -SnapshotManifestSha256 $manifestHash -RepositoryRoot $RepositoryRoot `
+        -VintageStoryPath $VintageStoryPath | Out-Null
+    $noWalReport = Get-Content -LiteralPath $noWalReportPath -Raw | ConvertFrom-Json -DateKind String
+    Assert-True (@($noWalReport.SourceFiles).Count -eq 1 -and
+        $noWalReport.Clone.WalEvidence.WalContribution -ceq 'Absent' -and
+        $noWalReport.Clone.WalEvidence.MainOnlyStatus -ceq 'NotRun' -and
+        $null -eq $noWalReport.Clone.WalEvidence.MainOnlyResultSha256) `
+        'Extractor emitted incoherent explicit no-WAL evidence.'
 
     Assert-Fails 'Output replacement' 'already exists' {
         & $extractor -SourceDatabasePath $sourcePath -OutputPath $reportPath `

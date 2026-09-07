@@ -379,3 +379,32 @@ après le commit afin de reconstruire les ProductVersion liées au nouveau HEAD.
 
 Le moteur et Visual Studio ne sont pas lancés pour cet erratum. T02-05 reste
 `NOT_RUN`; une re-review est obligatoire avant toute nouvelle campagne.
+
+## Addendum oracle v4 — implications WAL et identité main
+
+La re-review du scellement `64374a2` a relevé deux relations qui étaient
+produites honnêtement par l’extracteur mais insuffisamment imposées à un
+rapport fourni à l’oracle. Le validateur exige maintenant les implications
+bidirectionnelles suivantes :
+
+- `RequiredForObservedState` signifie que le clone main-only est `Unreadable`,
+  ou qu’il est `Readable` avec un `MainOnlyResultSha256` différent du résultat
+  complet ;
+- `PresentStateEquivalent` signifie exclusivement `Readable` et un hash
+  main-only strictement identique au hash complet ;
+- sans WAL, la composition est uniquement `Main`, la contribution est
+  `Absent`, le statut main-only est `NotRun` et son hash est nul.
+
+Le hash de résultat porte le domaine versionné
+`isrworldgen.t02-05.sqlite-clone-result.v1` et toutes les valeurs canoniques
+observées : intégrité, taille gamedata, nombre d’entrées ModData, clé de
+stockage, présence/état/longueur/hash de l’enveloppe et les trois compteurs
+géographiques. La comparaison WAL ne porte donc pas sur la seule forme du
+rapport. Enfin, il doit exister exactement une entrée `Main` et
+`SourceMainPathSha256` doit être strictement identique à son `PathSha256`.
+
+Les nouveaux témoins forgés couvrent `Required + Readable + même hash`,
+`Equivalent + Unreadable`, `Equivalent + Readable + hash différent` et la
+contradiction du hash de chemin main. L’auto-test oracle compte désormais 34
+cas négatifs. Les campagnes runtime historiques restent inchangées et ne sont
+pas promues ; la validation moteur de ce correctif reste `NOT_RUN`.

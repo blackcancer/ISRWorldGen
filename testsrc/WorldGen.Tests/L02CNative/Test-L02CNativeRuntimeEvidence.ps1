@@ -556,6 +556,40 @@ $logTimestamp [Event] Stopped the server!
         { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
     Write-Utf8Fixture $extractionReports.new $originalExtractionJson.new
 
+    $newExtraction = $originalExtractionJson.new | ConvertFrom-Json -DateKind String
+    $newExtraction.SourceMainPathSha256 = 'F' * 64
+    Write-JsonFixture $extractionReports.new $newExtraction
+    Assert-ValidationFails 'Contradictory main source path hash' 'main source path' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $extractionReports.new $originalExtractionJson.new
+
+    $heightExtraction = $originalExtractionJson.height | ConvertFrom-Json -DateKind String
+    $heightExtraction.Clone.WalEvidence.MainOnlyStatus = 'Readable'
+    $heightExtraction.Clone.WalEvidence.MainOnlyResultSha256 = $heightExtraction.Clone.ResultSha256
+    Write-JsonFixture $extractionReports.height $heightExtraction
+    Assert-ValidationFails 'Required WAL with equivalent readable main' 'WAL contribution implication' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $extractionReports.height $originalExtractionJson.height
+
+    $heightExtraction = $originalExtractionJson.height | ConvertFrom-Json -DateKind String
+    $heightExtraction.Clone.WalEvidence.WalContribution = 'PresentStateEquivalent'
+    $heightExtraction.Clone.WalEvidence.MainOnlyStatus = 'Unreadable'
+    $heightExtraction.Clone.WalEvidence.MainOnlyResultSha256 = $null
+    Write-JsonFixture $extractionReports.height $heightExtraction
+    Assert-ValidationFails 'Equivalent WAL with unreadable main' 'WAL contribution implication' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $extractionReports.height $originalExtractionJson.height
+
+    $heightExtraction = $originalExtractionJson.height | ConvertFrom-Json -DateKind String
+    $differentResultHash = if ($heightExtraction.Clone.ResultSha256 -cne ('A' * 64)) { 'A' * 64 } else { 'B' * 64 }
+    $heightExtraction.Clone.WalEvidence.WalContribution = 'PresentStateEquivalent'
+    $heightExtraction.Clone.WalEvidence.MainOnlyStatus = 'Readable'
+    $heightExtraction.Clone.WalEvidence.MainOnlyResultSha256 = $differentResultHash
+    Write-JsonFixture $extractionReports.height $heightExtraction
+    Assert-ValidationFails 'Equivalent WAL with different readable main' 'WAL contribution implication' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $extractionReports.height $originalExtractionJson.height
+
     $heightWal = Join-Path $sealedSources.height 'source.vcdbs-wal'
     $heightWalBackup = Join-Path $testRoot 'height-wal.backup'
     [IO.File]::Copy($heightWal, $heightWalBackup, $false)
@@ -631,7 +665,7 @@ $logTimestamp [Event] Stopped the server!
         Status = 'PASS'
         Configuration = $Configuration
         CreateNewReplacementRejected = $duplicateFailed
-        NegativeCases = 30
+        NegativeCases = 34
         BootstrapModuleBinding = $true
         PortablePdbPairing = $true
         VisualStudioProvenance = 'visual-studio-debugger-session-verified-v3'
