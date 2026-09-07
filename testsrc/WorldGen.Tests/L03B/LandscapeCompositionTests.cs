@@ -236,10 +236,12 @@ public sealed class LandscapeCompositionTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 2, 1, .1, .6, .3, .2));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, double.MaxValue, 1, double.Epsilon, .1, .6, .3, .1));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => LandscapeSignatureSampler.Sample(LandscapeFamilyCatalog.Get(LandscapeFamily.Plains), double.MaxValue, 0, 1, 1));
-        foreach (LandscapeFamilyProfile family in LandscapeFamilyCatalog.Profiles)
+        foreach (LandscapeFamilyProfile family in LandscapeFamilyCatalog.Profiles.Concat(Enum.GetValues<LandscapeFamily>().Select(item => new LandscapeFamilyProfile(item, 1_000_000, 2, 1, .2, .34, .33, .33))))
         {
-            double value = LandscapeSignatureSampler.Sample(family, LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, -LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, 1, 1, (long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, -(long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks);
+            double value = LandscapeSignatureSampler.Sample(family, LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, -LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, 1, 1, -(long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, (long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks);
+            double repeated = LandscapeSignatureSampler.Sample(family, LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, -LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, 1, 1, -(long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, (long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks);
             Assert.IsTrue(double.IsFinite(value) && value is >= -1 and <= 1);
+            Assert.AreEqual(value, repeated);
             Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => LandscapeSignatureSampler.Sample(family, 0, 0, 1, 1, long.MinValue, long.MaxValue));
         }
     }
