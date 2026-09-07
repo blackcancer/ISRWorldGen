@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using ISRWorldGen.Core.Geology.Landscapes;
 
 namespace ISRWorldGen.Tests.L03B;
 
@@ -146,6 +147,38 @@ internal static class L03BEvidenceProtocol
             payload.Artifacts,
             L03BTestSupport.Sha256(canonicalPayload));
         return JsonSerializer.SerializeToUtf8Bytes(manifest, ManifestJsonOptions);
+    }
+
+    internal static byte[] CreateBlindReviewForm(IReadOnlyList<string> codes)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+        if (codes.Count == 0 || codes.Distinct(StringComparer.Ordinal).Count() != codes.Count ||
+            codes.Any(code => code.Length != 3 || code[0] != 'S' || !char.IsAsciiDigit(code[1]) || !char.IsAsciiDigit(code[2])))
+        {
+            throw new ArgumentException("Blind review codes must be unique Sxx identifiers.", nameof(codes));
+        }
+
+        return JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schemaVersion = 1,
+            status = "AWAITING_BLIND_REVIEW",
+            instructions = new[]
+            {
+                "Copy this template outside the immutable evidence bundle.",
+                "For every code, record exactly one identifiedFamilyBeforeReveal, confidence from 0 to 100, and morphology observations while the sealed answer key remains unopened.",
+                "Hash and timestamp the completed response before requesting reveal of sealed/T03-06-S-review-key.json.",
+                "After reveal, append identifiedCorrectly for every entry; do not rewrite the prereveal identification or confidence.",
+            },
+            allowedFamilies = Enum.GetValues<LandscapeFamily>().Select(family => family.ToString()),
+            entries = codes.Select(code => new
+            {
+                code,
+                identifiedFamilyBeforeReveal = (string?)null,
+                confidence0To100BeforeReveal = (int?)null,
+                morphologyObservations = (string?)null,
+                identifiedCorrectlyAfterReveal = (bool?)null,
+            }),
+        }, ManifestJsonOptions);
     }
 
     private static void TerminateAndDrain(Process process, Task stdout, Task stderr)

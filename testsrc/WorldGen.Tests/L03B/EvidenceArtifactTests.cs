@@ -131,15 +131,16 @@ public sealed class EvidenceArtifactTests
         var fixtureMetrics = new List<BlindFixtureMetric>();
         var blindArtifacts = new List<L03BBlindArtifact>();
         var sealedFixtures = new List<object>();
-        var profileRows = new StringBuilder("code,direction,index,normalized-height\n");
+        var profileRows = new StringBuilder("code,direction,index,offset-x-blocks,offset-z-blocks,normalized-height\n");
+        var blindViews = new List<object>();
         var sampledByCode = new Dictionary<string, double[,]>(StringComparer.Ordinal);
         foreach ((string code, LandscapeFamily family) in blindOrder)
         {
             LandscapeFamilyProfile profile = LandscapeFamilyCatalog.Get(family);
-            FixtureSample fixture = SampleFixture(family, profile, 192, 192);
-            double[,] samples = fixture.Samples;
+            FixtureSample fixture = SampleFixture(family, profile);
+            double[,] samples = L03BEvidenceViews.Altitudes(fixture.View);
             sampledByCode.Add(code, samples);
-            BlindFixtureMetric metric = Measure(code, samples);
+            BlindFixtureMetric metric = Measure(code, fixture.View, samples);
             fixtureMetrics.Add(metric);
             Assert.IsGreaterThan(MinimumTargetVariance, metric.Variance, code);
             Assert.IsTrue(double.IsFinite(metric.Mean) && double.IsFinite(metric.Variance) &&
@@ -150,13 +151,47 @@ public sealed class EvidenceArtifactTests
                 metric.EightNeighborExtremaAtContrastFraction >= 0 && metric.SaturatedPixelCount >= 0,
                 $"Blind metrics must be finite and bounded where defined for {code}.");
 
-            byte[] bitmap = RenderBitmap(samples);
+            byte[] bitmap = RenderBitmap(fixture.View);
             string mapPath = Path.Combine(output, "blind", $"T03-06-{code}.bmp");
             WriteAtomic(mapPath, bitmap);
             blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, mapPath), L03BTestSupport.Sha256(bitmap)));
-            sealedFixtures.Add(new { code, family = family.ToString(), fixture.Seed, site = fixture.SiteId.ToString() });
+            byte[] transitionMask = L03BEvidenceViews.RenderTransitionMask(fixture.View);
+            string maskPath = Path.Combine(output, "blind", $"T03-06-{code}-transition-mask.pgm");
+            WriteAtomic(maskPath, transitionMask);
+            blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, maskPath), L03BTestSupport.Sha256(transitionMask)));
+            blindViews.Add(new
+            {
+                code,
+                widthPixels = fixture.View.Side,
+                heightPixels = fixture.View.Side,
+                fixture.View.SpanBlocks,
+                nominalStepBlocks = fixture.View.StepBlocks,
+                xOffsetsBlocks = fixture.View.Pixels.Where(pixel => pixel.Row == fixture.View.Side / 2)
+                    .OrderBy(pixel => pixel.Column).Select(pixel => pixel.X - fixture.View.CenterX),
+                zOffsetsBlocks = fixture.View.Pixels.Where(pixel => pixel.Column == fixture.View.Side / 2)
+                    .OrderBy(pixel => pixel.Row).Select(pixel => pixel.Z - fixture.View.CenterZ),
+                transitionMask = new
+                {
+                    path = RelativeArtifactPath(output, maskPath),
+                    sha256 = L03BTestSupport.Sha256(transitionMask),
+                    encoding = "PGM P5; 0=owner-pure, 255=transition/foreign contributor",
+                    transitionPixelCount = 0,
+                },
+                purityContract = "every rendered altitude has one owner, IsTransition=false, contributorCount=1, primaryWeight=1, foreignWeight=0, foreignContribution=0",
+            });
+            sealedFixtures.Add(new
+            {
+                code,
+                family = family.ToString(),
+                fixture.Seed,
+                site = fixture.SiteId.ToString(),
+                fixture.View.CenterX,
+                fixture.View.CenterZ,
+                fixture.View.SpanBlocks,
+                fixture.View.StepBlocks,
+            });
 
-            AppendProfiles(profileRows, code, samples);
+            AppendProfiles(profileRows, code, fixture.View, samples);
         }
 
         for (int left = 0; left < blindOrder.Count; left++)
@@ -178,12 +213,29 @@ public sealed class EvidenceArtifactTests
         string metricsPath = Path.Combine(output, "blind", "T03-06-S-blind-metrics.json");
         byte[] metricsBytes = JsonSerializer.SerializeToUtf8Bytes(fixtureMetrics, JsonOptions);
         WriteAtomic(metricsPath, metricsBytes);
+        string viewsPath = Path.Combine(output, "blind", "T03-06-S-blind-views.json");
+        byte[] viewsBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schemaVersion = 1,
+            coordinateUnit = "blocks",
+            requestedMacroSpanFactor = L03BEvidenceViews.RequestedMacroSpanFactor,
+            minimumMacroSpanFactor = L03BEvidenceViews.MinimumMacroSpanFactor,
+            selection = "largest declared span factor whose every sampled pixel passes the pure-owner contract; candidates and cells use stable order",
+            grayscale = new { minimum = -1d, maximum = 1d, mapping = "common linear grayscale shared by every S view" },
+            views = blindViews,
+        }, JsonOptions);
+        WriteAtomic(viewsPath, viewsBytes);
         blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, profilesPath), L03BTestSupport.Sha256(profileBytes)));
         blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, metricsPath), L03BTestSupport.Sha256(metricsBytes)));
+        blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, viewsPath), L03BTestSupport.Sha256(viewsBytes)));
+        string reviewFormPath = Path.Combine(output, "blind", "T03-06-S-review-form.json");
+        byte[] reviewFormBytes = L03BEvidenceProtocol.CreateBlindReviewForm(blindOrder.Select(item => item.Code).ToArray());
+        WriteAtomic(reviewFormPath, reviewFormBytes);
+        blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, reviewFormPath), L03BTestSupport.Sha256(reviewFormBytes)));
         byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
-            instruction = "Inspect S01..S06 maps and profiles before opening this separate key.",
+            instruction = "Do not open until a completed identification+confidence response copied from blind/T03-06-S-review-form.json has been timestamped and hashed.",
             nonce,
             entries = blindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
         }, JsonOptions);
@@ -204,7 +256,7 @@ public sealed class EvidenceArtifactTests
         string progressPath = Path.Combine(output, "sealed", "T03-06-S-progress.json");
         var corpusEntries = new List<CorpusMetric>(256);
         foreach ((string corpusName, IReadOnlyList<int> seeds, FrozenScaleProfile corpusProfile) in
-                 new[] { ("balanced", calibrationSeeds, balanced), ("vast", holdoutSeeds, vast) })
+                 new[] { ("calibration", calibrationSeeds, balanced), ("holdout", holdoutSeeds, vast) })
         {
             foreach (int seed in seeds)
             {
@@ -225,6 +277,28 @@ public sealed class EvidenceArtifactTests
         Assert.IsTrue(corpus.All(item => item.MinimumAltitudeBlocks >= item.DeepestOceanFloorBlocks));
         Assert.IsTrue(corpus.All(item => item.MaximumAltitudeBlocks <= item.HighestReliefBlocks));
         Assert.IsTrue(corpus.Any(item => item.MaximumBathymetryBlocks > 0));
+        TraitFailureRate[] traitFailureRates = corpus
+            .SelectMany(seed => seed.FamilyMorphology.SelectMany(family => family.Traits.Select(trait => new
+            {
+                seed.Corpus,
+                seed.Seed,
+                family.Family,
+                Trait = trait,
+            })))
+            .GroupBy(item => (item.Corpus, item.Family, item.Trait.Name))
+            .OrderBy(group => group.Key.Corpus, StringComparer.Ordinal)
+            .ThenBy(group => group.Key.Family, StringComparer.Ordinal)
+            .ThenBy(group => group.Key.Name, StringComparer.Ordinal)
+            .Select(group => new TraitFailureRate(
+                group.Key.Corpus,
+                group.Key.Family,
+                group.Key.Name,
+                group.Count(),
+                group.Count(item => !item.Trait.Passed),
+                group.Count(item => item.Trait.Passed),
+                group.Count(item => !item.Trait.Passed) / (double)group.Count(),
+                group.Where(item => !item.Trait.Passed).Select(item => item.Seed).Order().ToArray()))
+            .ToArray();
 
         object report = new
         {
@@ -276,6 +350,13 @@ public sealed class EvidenceArtifactTests
                         sha256 = L03BTestSupport.Sha256(profileBytes),
                     },
                     blindMetrics = new { path = RelativeArtifactPath(output, metricsPath), sha256 = L03BTestSupport.Sha256(metricsBytes) },
+                    viewGeometryAndTransitionMasks = new { path = RelativeArtifactPath(output, viewsPath), sha256 = L03BTestSupport.Sha256(viewsBytes) },
+                    reviewProtocol = new
+                    {
+                        path = RelativeArtifactPath(output, reviewFormPath),
+                        sha256 = L03BTestSupport.Sha256(reviewFormBytes),
+                        requiredPrerevealFields = new[] { "identifiedFamilyBeforeReveal", "confidence0To100BeforeReveal", "morphologyObservations" },
+                    },
                     separateKey = new
                     {
                         path = RelativeArtifactPath(output, keyPath),
@@ -290,10 +371,13 @@ public sealed class EvidenceArtifactTests
                     sha256 = L03BTestSupport.Sha256(File.ReadAllBytes(progressPath)),
                     protocol = "atomic seed/stage heartbeat; the terminal corpus report preserves each of the 256 seeds once.",
                 },
-                measures = "mean, variance, slope, multi-scale roughness, residual energy after planar detrend, eight-neighbor extrema at a documented contrast fraction, line/column/diagonal jumps, directional balance and saturation; descriptive only, not T03-06 thresholds",
+                measures = "pure-owner samples only: mean, variance, slope, multi-scale roughness, residual energy after planar detrend, eight-neighbor extrema at a documented contrast fraction, line/column/diagonal jumps, directional balance and saturation; descriptive only, not T03-06 thresholds",
                 grayscale = new { minimum = -1d, maximum = 1d, mapping = "common linear grayscale shared by every S view" },
                 unfilteredCorpus = corpus,
                 corpusFamilyCount,
+                traitFailureRates,
+                traitEvaluationStatus = traitFailureRates.All(item => item.Failures == 0) ? "ALL_PASSED" : "OBSERVED_FAILURES_RETAINED",
+                traitPolicy = "Every measured family/seed retains each individual outcome. Rates are failures/attempts; no median or percentile decides a trait.",
                 sealedFixtures,
             },
         };
@@ -374,6 +458,23 @@ public sealed class EvidenceArtifactTests
             }
         }
 
+        var measurements = new Dictionary<LandscapeFamily, L03BMorphologyMeasurement>();
+        var views = new Dictionary<LandscapeFamily, L03BPureLandscapeView>();
+        foreach (LandscapeFamily family in Enum.GetValues<LandscapeFamily>())
+        {
+            L03BPureLandscapeView? view = L03BEvidenceViews.TrySelectPureView(
+                model, atlas, family, seed, L03BEvidenceViews.CorpusMapSide);
+            if (view is null)
+            {
+                continue;
+            }
+            views.Add(family, view);
+            measurements.Add(family, L03BEvidenceViews.MeasureMorphology(view));
+        }
+        SeedFamilyMorphology[] familyMorphology = Enum.GetValues<LandscapeFamily>()
+            .Select(family => FamilyMorphologyForSeed(family, model, views, measurements))
+            .ToArray();
+
         return new CorpusMetric(
             corpus,
             seed,
@@ -389,16 +490,131 @@ public sealed class EvidenceArtifactTests
             samples.Max(item => item.AltitudeBlocks),
             samples.Max(item => item.BathymetryBlocks),
             model.VerticalPlan.DeepestOceanFloorBlocks,
-            model.VerticalPlan.HighestReliefBlocks);
+            model.VerticalPlan.HighestReliefBlocks,
+            familyMorphology);
     }
+
+    private static SeedFamilyMorphology FamilyMorphologyForSeed(
+        LandscapeFamily family,
+        LandscapeModel model,
+        IReadOnlyDictionary<LandscapeFamily, L03BPureLandscapeView> views,
+        IReadOnlyDictionary<LandscapeFamily, L03BMorphologyMeasurement> measurements)
+    {
+        int cellCount = model.Cells.Count(cell => cell.Family == family);
+        if (cellCount == 0)
+        {
+            return new SeedFamilyMorphology(family.ToString(), cellCount, "FAMILY_ABSENT", null, null, []);
+        }
+        if (!views.TryGetValue(family, out L03BPureLandscapeView? view) ||
+            !measurements.TryGetValue(family, out L03BMorphologyMeasurement? metric))
+        {
+            return new SeedFamilyMorphology(
+                family.ToString(),
+                cellCount,
+                "NO_DECLARED_PURE_VIEW",
+                null,
+                null,
+                [new ExpectedTrait("pure-owner-view-available", 0d, ">=", 1d, false)]);
+        }
+
+        ExpectedTrait[] traits = ExpectedTraits(family, metric, measurements);
+        return new SeedFamilyMorphology(
+            family.ToString(),
+            cellCount,
+            "MEASURED",
+            new PureViewGeometry(
+                view.OwnerCellId.ToString(),
+                view.CenterX,
+                view.CenterZ,
+                view.Side,
+                view.SpanBlocks,
+                view.StepBlocks,
+                view.SpanBlocks / LandscapeFamilyCatalog.Get(family).MacroWavelengthBlocks,
+                0),
+            metric,
+            traits);
+    }
+
+    private static ExpectedTrait[] ExpectedTraits(
+        LandscapeFamily family,
+        L03BMorphologyMeasurement metric,
+        IReadOnlyDictionary<LandscapeFamily, L03BMorphologyMeasurement> all)
+    {
+        var traits = new List<ExpectedTrait>();
+        switch (family)
+        {
+            case LandscapeFamily.RuggedRanges:
+                traits.Add(Trait("aligned-ridge-anisotropy", metric.GradientAnisotropy, ">", .6d));
+                traits.Add(Trait("multiple-prominent-peaks", metric.ProminentPeaks, ">=", 2d));
+                AddRatio("anisotropy-vs-old-massifs", metric.GradientAnisotropy, all, LandscapeFamily.OldMassifs, value => value.GradientAnisotropy, 1.5d);
+                break;
+            case LandscapeFamily.OldMassifs:
+                traits.Add(Trait("multiple-rounded-summits", metric.ProminentPeaks, ">=", 2d));
+                traits.Add(Trait("rounded-valley", metric.ProminentValleys, ">=", 1d));
+                if (all.TryGetValue(LandscapeFamily.RuggedRanges, out L03BMorphologyMeasurement? ranges))
+                {
+                    traits.Add(Trait("less-directional-than-ranges", Ratio(ranges.GradientAnisotropy, metric.GradientAnisotropy), ">", 1.5d));
+                }
+                break;
+            case LandscapeFamily.Plateaus:
+                traits.Add(Trait("high-flat-interior-fraction", metric.HighFlatFraction, ">", .75d));
+                traits.Add(Trait("escarpment-curvature-contrast", Ratio(metric.Curvature90, metric.MedianCurvature), ">", 8d));
+                AddRatio("elevated-flatness-vs-plains", metric.HighFlatFraction, all, LandscapeFamily.Plains, value => value.HighFlatFraction, 1d);
+                break;
+            case LandscapeFamily.SedimentaryBasins:
+                traits.Add(Trait("closed-floor-broad-rim", Ratio(metric.BroadRimLift, metric.NominalReliefIncrement), ">", 20d));
+                AddRatio("rim-lift-vs-plains", metric.BroadRimLift, all, LandscapeFamily.Plains, value => value.BroadRimLift, 4d);
+                break;
+            case LandscapeFamily.Plains:
+                L03BMorphologyMeasurement[] others = all.Where(pair => pair.Key != LandscapeFamily.Plains).Select(pair => pair.Value).ToArray();
+                if (others.Length > 0)
+                {
+                    traits.Add(Trait("lowest-physical-slope", Ratio(others.Min(value => value.PhysicalSlope), metric.PhysicalSlope), ">", 1d));
+                    traits.Add(Trait("lowest-physical-curvature", Ratio(others.Min(value => value.PhysicalCurvature), metric.PhysicalCurvature), ">", 1d));
+                }
+                break;
+            case LandscapeFamily.VolcanicDomains:
+                traits.Add(Trait("caldera-rim-lift", Ratio(metric.CraterLift, metric.NominalReliefIncrement), ">", 2d));
+                traits.Add(Trait("outer-cone-drop", Ratio(metric.ConeDrop, metric.NominalReliefIncrement), ">", 2.5d));
+                traits.Add(Trait("separated-summits", metric.ProminentPeaks, ">=", 2d));
+                traits.Add(Trait("caldera-valleys", metric.ProminentValleys, ">=", 2d));
+                AddRatio("caldera-lift-vs-plains", metric.CraterLift, all, LandscapeFamily.Plains, value => value.CraterLift, 1d);
+                AddRatio("summits-vs-plains", metric.ProminentPeaks, all, LandscapeFamily.Plains, value => value.ProminentPeaks, 1d);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(family));
+        }
+        return traits.ToArray();
+
+        void AddRatio(
+            string name,
+            double numerator,
+            IReadOnlyDictionary<LandscapeFamily, L03BMorphologyMeasurement> source,
+            LandscapeFamily denominatorFamily,
+            Func<L03BMorphologyMeasurement, double> denominator,
+            double expected)
+        {
+            if (source.TryGetValue(denominatorFamily, out L03BMorphologyMeasurement? other))
+            {
+                traits.Add(Trait(name, Ratio(numerator, denominator(other)), ">", expected));
+            }
+        }
+    }
+
+    private static ExpectedTrait Trait(string name, double observed, string comparison, double expected) =>
+        new(name, observed, comparison, expected, comparison == ">=" ? observed >= expected : observed > expected);
+
+    private static double Ratio(double numerator, double denominator) => denominator == 0d
+        ? (numerator > 0d ? double.MaxValue : 0d)
+        : numerator / denominator;
 
     private static void WriteCampaignProgress(string path, string corpus, int seed, string stage) =>
         WriteAtomic(path, JsonSerializer.SerializeToUtf8Bytes(new { corpus, seed, stage }, JsonOptions));
 
-    private static FixtureSample SampleFixture(LandscapeFamily family, LandscapeFamilyProfile profile, int width, int height)
+    private static FixtureSample SampleFixture(LandscapeFamily family, LandscapeFamilyProfile profile)
     {
-        // Targeted fixtures may choose their owning cell, but maps always traverse the published composition
-        // (site blending, family amplitude and vertical-budget input), never a raw signature sampler.
+        // Targeted maps traverse the published composition, but only after the
+        // selector has proved every rendered pixel belongs to one pure owner core.
         int[] fixtureSeeds = [20260907, -20260907, 731, -731, 196883, -196883, 48731, -48731];
         FrozenScaleProfile frozen = L03BTestSupport.FrozenProfile("vast-expeditions");
         foreach (int seed in fixtureSeeds)
@@ -407,42 +623,30 @@ public sealed class EvidenceArtifactTests
             (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(seed, frozen);
             LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, frozen,
                 new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), frozen.SiteQuota, 1.25)));
-            double span = profile.MacroWavelengthBlocks * 1.7;
-            foreach (LandscapeCellProfile cell in model.Cells.Where(item => item.Family == family))
+            L03BPureLandscapeView? view = L03BEvidenceViews.TrySelectPureView(
+                model, atlas, family, seed, L03BEvidenceViews.BlindMapSide);
+            if (view is not null)
             {
-                AtlasSite site = atlas.Sites.Single(item => item.Id == cell.CellId);
-                double half = span / 2d;
-                if (site.X - half < atlas.Bounds.MinX || site.X + half > atlas.Bounds.MaxXExclusive - 1 ||
-                    site.Z - half < atlas.Bounds.MinZ || site.Z + half > atlas.Bounds.MaxZExclusive - 1)
-                {
-                    continue;
-                }
-
-                var samples = new double[height, width];
-                for (int z = 0; z < height; z++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        long sampleX = checked((long)Math.Round(site.X + (((x / (double)(width - 1)) - .5) * span)));
-                        long sampleZ = checked((long)Math.Round(site.Z + (((z / (double)(height - 1)) - .5) * span)));
-                        samples[z, x] = model.Sample(sampleX, sampleZ).ModelAltitudeNormalized;
-                    }
-                }
-                return new FixtureSample(samples, seed, site.Id);
+                return new FixtureSample(view, seed, view.OwnerCellId);
             }
         }
         throw new AssertFailedException(
-            $"No declared targeted fixture contains family {family}.");
+            $"No declared targeted fixture contains a pure owner view for family {family} at the declared minimum span {profile.MacroWavelengthBlocks * L03BEvidenceViews.MinimumMacroSpanFactor:R} blocks.");
     }
 
-    private static BlindFixtureMetric Measure(string code, double[,] samples)
+    private static BlindFixtureMetric Measure(string code, L03BPureLandscapeView view, double[,] samples)
     {
+        L03BEvidenceViews.RequirePure(view);
         double[] values = samples.Cast<double>().ToArray();
         double mean = values.Average();
         double variance = values.Select(value => (value - mean) * (value - mean)).Average();
         DirectionalJumpStatistics jumps = AdjacentJumpStatistics(samples);
         return new BlindFixtureMetric(
             code,
+            view.Side,
+            view.SpanBlocks,
+            view.StepBlocks,
+            0,
             mean,
             variance,
             MeanAbsoluteSlope(samples),
@@ -456,21 +660,26 @@ public sealed class EvidenceArtifactTests
             samples.Cast<double>().Count(value => Math.Abs(value) >= .999));
     }
 
-    private static void AppendProfiles(StringBuilder rows, string code, double[,] samples)
+    private static void AppendProfiles(StringBuilder rows, string code, L03BPureLandscapeView view, double[,] samples)
     {
         int width = samples.GetLength(1);
         int height = samples.GetLength(0);
-        AppendProfile("horizontal", index => samples[height / 2, index], width);
-        AppendProfile("vertical", index => samples[index, width / 2], height);
-        AppendProfile("diagonal-main", index => samples[index, index], Math.Min(width, height));
-        AppendProfile("diagonal-anti", index => samples[index, width - 1 - index], Math.Min(width, height));
+        AppendProfile("horizontal", index => (height / 2, index), width);
+        AppendProfile("vertical", index => (index, width / 2), height);
+        AppendProfile("diagonal-main", index => (index, index), Math.Min(width, height));
+        AppendProfile("diagonal-anti", index => (index, width - 1 - index), Math.Min(width, height));
 
-        void AppendProfile(string kind, Func<int, double> sample, int length)
+        void AppendProfile(string kind, Func<int, (int Row, int Column)> location, int length)
         {
             for (int index = 0; index < length; index++)
             {
-                rows.Append(code).Append(',').Append(kind).Append(',').Append(index).Append(',')
-                    .Append(sample(index).ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
+                (int row, int column) = location(index);
+                L03BEvidencePixel pixel = view.Pixels.Single(item => item.Row == row && item.Column == column);
+                rows.Append(code).Append(',').Append(kind).Append(',')
+                    .Append(index).Append(',')
+                    .Append(pixel.X - view.CenterX).Append(',')
+                    .Append(pixel.Z - view.CenterZ).Append(',')
+                    .Append(samples[row, column].ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
             }
         }
     }
@@ -722,8 +931,9 @@ public sealed class EvidenceArtifactTests
         }
     }
 
-    private static byte[] RenderBitmap(double[,] samples)
+    private static byte[] RenderBitmap(L03BPureLandscapeView view)
     {
+        double[,] samples = L03BEvidenceViews.Altitudes(view);
         int width = samples.GetLength(1);
         int height = samples.GetLength(0);
         int stride = checked(((width * 3) + 3) & ~3);
@@ -834,10 +1044,14 @@ public sealed class EvidenceArtifactTests
         bool StrictlyMonotone,
         bool QuantizedNonDecreasing);
 
-    private sealed record FixtureSample(double[,] Samples, int Seed, StableId SiteId);
+    private sealed record FixtureSample(L03BPureLandscapeView View, int Seed, StableId SiteId);
 
     private sealed record BlindFixtureMetric(
         string Code,
+        int SidePixels,
+        double SpanBlocks,
+        double NominalStepBlocks,
+        int TransitionPixelCount,
         double Mean,
         double Variance,
         double MeanAbsoluteSlope,
@@ -885,5 +1099,41 @@ public sealed class EvidenceArtifactTests
         double MaximumAltitudeBlocks,
         double MaximumBathymetryBlocks,
         long DeepestOceanFloorBlocks,
-        long HighestReliefBlocks);
+        long HighestReliefBlocks,
+        IReadOnlyList<SeedFamilyMorphology> FamilyMorphology);
+
+    private sealed record SeedFamilyMorphology(
+        string Family,
+        int CellCount,
+        string Status,
+        PureViewGeometry? View,
+        L03BMorphologyMeasurement? Measurement,
+        IReadOnlyList<ExpectedTrait> Traits);
+
+    private sealed record PureViewGeometry(
+        string OwnerCellId,
+        long CenterX,
+        long CenterZ,
+        int SidePixels,
+        double SpanBlocks,
+        double NominalStepBlocks,
+        double MacroSpanFactor,
+        int TransitionPixelCount);
+
+    private sealed record ExpectedTrait(
+        string Name,
+        double Observed,
+        string Comparison,
+        double Expected,
+        bool Passed);
+
+    private sealed record TraitFailureRate(
+        string Corpus,
+        string Family,
+        string Trait,
+        int Attempts,
+        int Failures,
+        int Passes,
+        double FailureRate,
+        IReadOnlyList<int> FailedSeeds);
 }

@@ -82,6 +82,27 @@ public sealed class EvidenceProtocolTests
     }
 
     [TestMethod]
+    public void BlindReviewFormRequiresIdentificationAndConfidenceBeforeKeyReveal()
+    {
+        byte[] formBytes = L03BEvidenceProtocol.CreateBlindReviewForm(["S03", "S01", "S02"]);
+        using JsonDocument form = JsonDocument.Parse(formBytes);
+        Assert.AreEqual("AWAITING_BLIND_REVIEW", form.RootElement.GetProperty("status").GetString());
+        JsonElement[] entries = form.RootElement.GetProperty("entries").EnumerateArray().ToArray();
+        CollectionAssert.AreEqual(new[] { "S03", "S01", "S02" },
+            entries.Select(entry => entry.GetProperty("code").GetString()).ToArray());
+        Assert.IsTrue(entries.All(entry =>
+            entry.GetProperty("identifiedFamilyBeforeReveal").ValueKind == JsonValueKind.Null &&
+            entry.GetProperty("confidence0To100BeforeReveal").ValueKind == JsonValueKind.Null &&
+            entry.GetProperty("morphologyObservations").ValueKind == JsonValueKind.Null));
+        string instructions = string.Join(' ', form.RootElement.GetProperty("instructions")
+            .EnumerateArray().Select(item => item.GetString()));
+        StringAssert.Contains(instructions, "answer key remains unopened");
+        StringAssert.Contains(instructions, "Hash and timestamp the completed response before requesting reveal");
+        Assert.ThrowsExactly<ArgumentException>(() => L03BEvidenceProtocol.CreateBlindReviewForm(["S01", "S01"]));
+        Assert.ThrowsExactly<ArgumentException>(() => L03BEvidenceProtocol.CreateBlindReviewForm(["family"]));
+    }
+
+    [TestMethod]
     public void RunnerTextKeepsTheExclusivePreflightAndSealedTrxProtocol()
     {
         string script = File.ReadAllText(Path.Combine(L03BTestSupport.FindRepositoryRoot(),
