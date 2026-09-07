@@ -3,15 +3,28 @@ namespace ISRWorldGen.WorldgenProbe;
 
 internal sealed class DelayedShutdownGate
 {
+    public const int MinimumActiveDelayMilliseconds = 10_000;
+    public const int MaximumDelayMilliseconds = 60_000;
+
     private readonly object gate = new();
     private DelayedShutdownReservation? active;
     private bool closing = true;
 
     public static int ValidateDelayMilliseconds(int delayMilliseconds)
     {
-        if (delayMilliseconds != 0 && (delayMilliseconds < 50 || delayMilliseconds > 60_000))
+        if (delayMilliseconds != 0 && (delayMilliseconds < 50 || delayMilliseconds > MaximumDelayMilliseconds))
         {
-            throw new InvalidOperationException($"L00-C delayed shutdown must be 0 or within 50..60000 ms, not {delayMilliseconds} ms.");
+            throw new InvalidOperationException($"L00-C delayed shutdown must be 0 or within 50..{MaximumDelayMilliseconds} ms, not {delayMilliseconds} ms.");
+        }
+        return delayMilliseconds;
+    }
+
+    public static int ValidateActiveDelayMilliseconds(int delayMilliseconds)
+    {
+        ValidateDelayMilliseconds(delayMilliseconds);
+        if (delayMilliseconds < MinimumActiveDelayMilliseconds)
+        {
+            throw new InvalidOperationException($"L00-C active shutdown delay must be within {MinimumActiveDelayMilliseconds}..{MaximumDelayMilliseconds} ms, not {delayMilliseconds} ms.");
         }
         return delayMilliseconds;
     }

@@ -11,7 +11,7 @@ param(
     [string]$SeedSavePath,
     [switch]$AllowExisting,
     [ValidateScript({ $_ -eq 0 -or ($_ -ge 50 -and $_ -le 60000) })]
-    [int]$AutoShutdownDelayMilliseconds = 0
+    [int]$AutoShutdownDelayMilliseconds = 15000
 )
 
 Set-StrictMode -Version Latest

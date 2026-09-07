@@ -11,6 +11,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'L00CInitializationRefusalEvidence.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'L00CActiveShutdownEvidence.psm1') -Force
 
 if (-not (Test-Path -LiteralPath $EvidencePath -PathType Leaf)) {
     throw "L00-C evidence is missing: $EvidencePath"
@@ -226,6 +227,9 @@ foreach ($session in $orderedEvidenceSessions) {
     }
     elseif ($session.WorldRole -like 'activated-*') {
         Assert-Equal $session.GracefulShutdown $true "Session $($session.Cycle) graceful shutdown"
+        [void](Assert-L00CActiveShutdownLog -Log $log -InstanceId ([string]$session.InstanceId) `
+            -MarkerId ([string]$session.MarkerId) -WorldRunId ([long]$session.WorldRunId) `
+            -OpenCount ([int]$session.OpenCount) -IsNew ([bool]$session.IsNew))
         $marker = [regex]::Escape([string]$session.MarkerId)
         $open = [regex]::Escape([string]$session.OpenCount)
         $isNew = ([string]$session.IsNew).ToLowerInvariant()

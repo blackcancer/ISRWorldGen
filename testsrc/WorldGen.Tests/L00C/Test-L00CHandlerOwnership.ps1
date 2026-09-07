@@ -80,7 +80,7 @@ $tickMethod = $source.Substring($tickStart, $tickEnd - $tickStart)
 $snapshotCapture = $tickMethod.IndexOf('marker.MapFootprint = CaptureCurrentMapFootprint()', [StringComparison]::Ordinal)
 $snapshotCommit = $tickMethod.IndexOf('markerPublication.Commit(', $snapshotCapture, [StringComparison]::Ordinal)
 $snapshotLog = $tickMethod.IndexOf('L00C_MAP_SNAPSHOT_COMMITTED', $snapshotCommit, [StringComparison]::Ordinal)
-$shutdown = $tickMethod.IndexOf('RequestShutdownIfConfigured("fixture-stable")', $snapshotLog, [StringComparison]::Ordinal)
+$shutdown = $tickMethod.IndexOf('RequestActiveShutdown(runId, "fixture-stable")', $snapshotLog, [StringComparison]::Ordinal)
 if ($snapshotCapture -lt 0 -or $snapshotCommit -le $snapshotCapture -or $snapshotLog -le $snapshotCommit -or $shutdown -le $snapshotLog) {
     throw 'The new-world marker/map snapshot must be captured and committed only after bounded stability, before graceful shutdown.'
 }

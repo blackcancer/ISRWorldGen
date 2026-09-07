@@ -263,6 +263,11 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             marker = markerPublication.Begin(persistedMarker);
         }
 
+        // Active lab runs must let the server's chunk DB, compression, and
+        // relight workers settle after RunGame before requesting suspension.
+        // Invalid active timing fails closed here, while still Initializing.
+        DelayedShutdownGate.ValidateActiveDelayMilliseconds(config.AutoShutdownDelayMilliseconds);
+
         if (!saveGame.IsNew)
         {
             ResolveMaterials();
@@ -554,7 +559,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             }
 
             Log($"L00C_PERSISTED_REOPEN_STABLE instance={instanceId} marker={marker!.MarkerId} run={runId} loadpriority={priorityLoads} transientrequests={transientRequests} refreshpasses={refreshPasses} refreshedmapchunks={refreshedMapChunks} keeploaded=0 unload=0 fixturewrites={fixtureWrites} mapsnapshotwrites={mapSnapshotWrites} callbacks={fixtureCallbackCount} center={persistedSnapshot.Fixture.Hash} halo={persistedSnapshot.Halo.Hash}");
-            RequestShutdownIfConfigured("persisted-reopen-stable");
+            RequestActiveShutdown(runId, "persisted-reopen-stable");
         }
     }
 
@@ -584,23 +589,39 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void RequestInactiveWitnessShutdown(long runId)
     {
-        int delayMilliseconds = DelayedShutdownGate.ValidateDelayMilliseconds(config.AutoShutdownDelayMilliseconds);
-        if (!config.AutoShutdown || delayMilliseconds == 0)
+        RequestScheduledShutdown(runId, "inactive-witness-complete", requireActiveDelay: false);
+    }
+
+    private void RequestActiveShutdown(long runId, string reason)
+    {
+        RequestScheduledShutdown(runId, reason, requireActiveDelay: true);
+    }
+
+    private void RequestScheduledShutdown(long runId, string reason, bool requireActiveDelay)
+    {
+        if (!config.AutoShutdown)
         {
-            RequestShutdownIfConfigured("inactive-witness-complete");
+            return;
+        }
+        int delayMilliseconds = requireActiveDelay
+            ? DelayedShutdownGate.ValidateActiveDelayMilliseconds(config.AutoShutdownDelayMilliseconds)
+            : DelayedShutdownGate.ValidateDelayMilliseconds(config.AutoShutdownDelayMilliseconds);
+        if (delayMilliseconds == 0)
+        {
+            RequestShutdownIfConfigured(reason);
             return;
         }
 
         ICoreServerAPI serverApi = RequireApi();
         DelayedShutdownReservation reservation = delayedShutdown.Begin(
-            () => FireDelayedShutdown(runId, "inactive-witness-complete"));
+            () => FireDelayedShutdown(runId, reason));
         long listenerId = 0;
         try
         {
             listenerId = serverApi.Event.RegisterCallback(
                 _ => delayedShutdown.Complete(reservation),
                 delayMilliseconds);
-            Log($"L00C_DELAYED_SHUTDOWN_ARMED instance={instanceId} run={runId} reason=inactive-witness-complete delayms={delayMilliseconds} listener={listenerId}");
+            Log($"L00C_DELAYED_SHUTDOWN_ARMED instance={instanceId} run={runId} reason={reason} delayms={delayMilliseconds} listener={listenerId}");
             if (!delayedShutdown.Attach(reservation, listenerId))
             {
                 serverApi.Event.UnregisterCallback(listenerId);
@@ -1241,7 +1262,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             Log($"L00C_MAP_SNAPSHOT_COMMITTED instance={instanceId} marker={marker.MarkerId} maps={marker.MapFootprint.MapChunks.Count} checksum={marker.MapFootprint.ContentSha256} writes={mapSnapshotWrites}");
             initialSnapshot = null;
             initialHaloSnapshot = null;
-            RequestShutdownIfConfigured("fixture-stable");
+            RequestActiveShutdown(runId, "fixture-stable");
         }
         catch (Exception exception)
         {
@@ -2074,7 +2095,7 @@ internal sealed class L00CProbeConfig
     public bool Enabled { get; set; }
     public bool AutoRun { get; set; }
     public bool AutoShutdown { get; set; }
-    public int AutoShutdownDelayMilliseconds { get; set; }
+    public int AutoShutdownDelayMilliseconds { get; set; } = 15_000;
     public int FixtureChunkX { get; set; } = 31990;
     public int FixtureChunkZ { get; set; } = 31990;
     public string? ExpectedMissingHandlerTarget { get; set; }

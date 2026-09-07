@@ -28,7 +28,8 @@ $complete = $gateType.GetMethod('Complete')
 $reject = $gateType.GetMethod('Reject')
 $cancel = $gateType.GetMethod('Cancel')
 $validateDelay = $gateType.GetMethod('ValidateDelayMilliseconds')
-foreach ($method in @($open, $begin, $attach, $complete, $reject, $cancel, $validateDelay)) {
+$validateActiveDelay = $gateType.GetMethod('ValidateActiveDelayMilliseconds')
+foreach ($method in @($open, $begin, $attach, $complete, $reject, $cancel, $validateDelay, $validateActiveDelay)) {
     if ($null -eq $method) { throw 'The production delayed-shutdown gate contract is incomplete.' }
 }
 
@@ -50,9 +51,11 @@ Open-Gate $asyncGate
 $script:asyncFires = 0
 $asyncReservation = Begin-Reservation $asyncGate ([Action]{ $script:asyncFires++ })
 $asyncAttached = [bool]$attach.Invoke($asyncGate, @($asyncReservation, [long]102))
+$script:secondArmRejected = $false
+try { [void](Begin-Reservation $asyncGate ([Action]{})) } catch { $script:secondArmRejected = $true }
 [void]$complete.Invoke($asyncGate, @($asyncReservation))
 [void]$complete.Invoke($asyncGate, @($asyncReservation))
-if (-not $asyncAttached -or $script:asyncFires -ne 1) { throw 'Asynchronous delayed callback did not fire exactly once.' }
+if (-not $asyncAttached -or $script:asyncFires -ne 1 -or -not $script:secondArmRejected) { throw 'Asynchronous delayed callback was not unique and exactly-once.' }
 
 $transitionGate = New-Gate
 Open-Gate $transitionGate
@@ -88,10 +91,21 @@ foreach ($invalid in @(1, 49, 60001)) {
     try { [void]$validateDelay.Invoke($null, @($invalid)) } catch { continue }
     throw "Invalid delay $invalid was accepted."
 }
+foreach ($valid in @(10000, 15000, 60000)) {
+    if ([int]$validateActiveDelay.Invoke($null, @($valid)) -ne $valid) { throw "Valid active delay $valid drifted." }
+}
+foreach ($invalid in @(0, 50, 9999, 60001)) {
+    try { [void]$validateActiveDelay.Invoke($null, @($invalid)) } catch { continue }
+    throw "Invalid active delay $invalid was accepted."
+}
 
 foreach ($fragment in @(
     'AutoShutdownDelayMilliseconds',
     'RequestInactiveWitnessShutdown(runId)',
+    'RequestActiveShutdown(runId, "persisted-reopen-stable")',
+    'RequestActiveShutdown(runId, "fixture-stable")',
+    'RequestScheduledShutdown(runId, reason, requireActiveDelay: true)',
+    'DelayedShutdownGate.ValidateActiveDelayMilliseconds(config.AutoShutdownDelayMilliseconds)',
     'serverApi.Event.RegisterCallback(',
     'serverApi.Event.UnregisterCallback(listenerId)',
     'L00C_DELAYED_SHUTDOWN_ARMED',
@@ -113,7 +127,8 @@ if ($disposeDelayed -lt 0 -or $disposeDelayedCatch -le $disposeDelayed -or
     $disposeTransient -le $disposeDelayedCatch -or $disposeTransientCatch -le $disposeTransient) {
     throw 'Dispose does not isolate delayed-listener cancellation from transient callback reset.'
 }
-if (-not $profileSource.Contains('AutoShutdownDelayMilliseconds = $AutoShutdownDelayMilliseconds')) {
+if (-not $profileSource.Contains('AutoShutdownDelayMilliseconds = $AutoShutdownDelayMilliseconds') -or
+    -not $profileSource.Contains('[int]$AutoShutdownDelayMilliseconds = 15000')) {
     throw 'The isolated lab profile cannot select the bounded delayed shutdown.'
 }
 $witnessStart = $source.IndexOf('private void CompleteInactiveWitness(', [StringComparison]::Ordinal)
@@ -128,6 +143,22 @@ $requestEnd = $source.IndexOf('private void FireDelayedShutdown(', $requestStart
 $requestMethod = $source.Substring($requestStart, $requestEnd - $requestStart)
 if ($requestMethod -match 'LoadChunk|GetChunk|FIXTURE|ApplyTargetedReplacement|ChunkColumn') {
     throw 'Delayed witness shutdown contains a generation or chunk-access path.'
+}
+$reopenStart = $source.IndexOf('private void CompletePersistedReopen(', [StringComparison]::Ordinal)
+$reopenEnd = $source.IndexOf('private void CompleteInactiveWitness(', $reopenStart, [StringComparison]::Ordinal)
+$reopenMethod = $source.Substring($reopenStart, $reopenEnd - $reopenStart)
+if ($reopenMethod.IndexOf('L00C_PERSISTED_REOPEN_STABLE', [StringComparison]::Ordinal) -lt 0 -or
+    $reopenMethod.IndexOf('RequestActiveShutdown(runId, "persisted-reopen-stable")', [StringComparison]::Ordinal) -le $reopenMethod.IndexOf('L00C_PERSISTED_REOPEN_STABLE', [StringComparison]::Ordinal) -or
+    $reopenMethod.Contains('RequestShutdownIfConfigured("persisted-reopen-stable")')) {
+    throw 'Persisted reopen does not arm its run-bound active shutdown after stable attestation.'
+}
+$tickStart = $source.IndexOf('private void OnServerTickCore(', [StringComparison]::Ordinal)
+$tickEnd = $source.IndexOf('private PersistedFootprintSnapshot InspectPersistedFootprintBlocking(', $tickStart, [StringComparison]::Ordinal)
+$tickMethod = $source.Substring($tickStart, $tickEnd - $tickStart)
+if ($tickMethod.IndexOf('L00C_MAP_SNAPSHOT_COMMITTED', [StringComparison]::Ordinal) -lt 0 -or
+    $tickMethod.IndexOf('RequestActiveShutdown(runId, "fixture-stable")', [StringComparison]::Ordinal) -le $tickMethod.IndexOf('L00C_MAP_SNAPSHOT_COMMITTED', [StringComparison]::Ordinal) -or
+    $tickMethod.Contains('RequestShutdownIfConfigured("fixture-stable")')) {
+    throw 'New-world fixture does not arm its run-bound active shutdown after snapshot commit.'
 }
 $completeStart = $source.IndexOf('private void CompleteInactiveWitness(', [StringComparison]::Ordinal)
 $completeEnd = $source.IndexOf('private void RequestInactiveWitnessShutdown(', $completeStart, [StringComparison]::Ordinal)
@@ -164,5 +195,8 @@ if ($failureDelayedClose -lt 0 -or $failureTransientClose -le $failureDelayedClo
     LateDisposeFires = $script:disposeFires
     ValidBounds = '0|50|60000'
     InvalidBounds = '1|49|60001'
+    ValidActiveBounds = '10000|15000|60000'
+    InvalidActiveBounds = '0|50|9999|60001'
+    SecondArmRejected = $script:secondArmRejected
     ProductionWiringInspected = $true
 } | ConvertTo-Json -Depth 4

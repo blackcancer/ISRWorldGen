@@ -123,6 +123,8 @@ $required = @(
     'AutoShutdownDelayMilliseconds',
     'L00C_DELAYED_SHUTDOWN_ARMED',
     'L00C_DELAYED_SHUTDOWN_FIRED',
+    'ValidateActiveDelayMilliseconds',
+    'RequestActiveShutdown',
     'PersistedReopenPublicationTransaction',
     'ValidateAndCopy',
     'L00C_MAP_SNAPSHOT_COMMITTED',
@@ -226,6 +228,7 @@ $markerEnvelopeOracleStatus = 'NOT_APPLICABLE'
 $initializationFailClosedOracleStatus = 'NOT_APPLICABLE'
 $initializationRefusalEvidenceOracleStatus = 'NOT_APPLICABLE'
 $delayedShutdownOracleStatus = 'NOT_APPLICABLE'
+$activeShutdownEvidenceOracleStatus = 'NOT_APPLICABLE'
 $reopenTransactionOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
     $markerOraclePath = Join-Path $PSScriptRoot 'Test-L00CMarkerPublication.ps1'
@@ -287,6 +290,14 @@ if ($Configuration -eq 'Debug') {
         throw 'The production delayed-shutdown oracle did not pass.'
     }
     $delayedShutdownOracleStatus = $delayedShutdownOracle.Status
+    $activeShutdownEvidenceOraclePath = Join-Path $PSScriptRoot 'Test-L00CActiveShutdownEvidence.ps1'
+    $activeShutdownEvidenceOracle = (& $activeShutdownEvidenceOraclePath | Out-String | ConvertFrom-Json)
+    if ($activeShutdownEvidenceOracle.Status -ne 'PASS' -or
+        -not $activeShutdownEvidenceOracle.SuspendTimeoutRejected -or
+        -not $activeShutdownEvidenceOracle.MissingSaveRejected) {
+        throw 'The active delayed-shutdown evidence oracle did not pass.'
+    }
+    $activeShutdownEvidenceOracleStatus = $activeShutdownEvidenceOracle.Status
     $reopenTransactionOraclePath = Join-Path $PSScriptRoot 'Test-L00CPersistedReopenTransaction.ps1'
     $reopenTransactionOracle = (& $reopenTransactionOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
     if ($reopenTransactionOracle.Status -ne 'PASS' -or -not $reopenTransactionOracle.CommitIsFinalCriticalOperation) {
@@ -317,6 +328,7 @@ $result = [ordered]@{
     InitializationFailClosedOracle = $initializationFailClosedOracleStatus
     InitializationRefusalEvidenceOracle = $initializationRefusalEvidenceOracleStatus
     DelayedShutdownOracle = $delayedShutdownOracleStatus
+    ActiveShutdownEvidenceOracle = $activeShutdownEvidenceOracleStatus
     PersistedReopenTransactionOracle = $reopenTransactionOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
