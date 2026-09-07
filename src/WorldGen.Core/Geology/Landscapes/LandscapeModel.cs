@@ -60,12 +60,16 @@ public readonly record struct LandscapeSample(
     StableId DominantCellId,
     LandscapeFamily DominantFamily,
     double ModelAltitudeNormalized,
+    double GeologicalDatumNormalized,
+    double PrimaryResidualContributionNormalized,
+    double ForeignResidualContributionNormalized,
     double AltitudeBlocks,
     double BathymetryBlocks,
     double PrimaryResidualWeight,
     bool IsTransition,
     int ActiveResidualContributorCount,
-    double ForeignResidualWeight);
+    double ForeignResidualWeight,
+    double TransitionDistanceRatio);
 
 /// <summary>
 /// Immutable regional frame.  The extents describe the owning Voronoi cell in a
@@ -154,6 +158,8 @@ public sealed class LandscapeModel
         double primaryResidual = SampleResidual(dominant, x, z);
         double primaryDatum = LandscapeAltitudeBounds.GeologicalDatum(dominant.Cell);
         double neighbourWeight = 0d;
+        double greatestTransitionDistanceRatio = 0d;
+        double foreignResidual = 0d;
         int activeContributors = 1;
         double weightedResidual = primaryResidual;
         double weightedDatum = primaryDatum;
@@ -176,8 +182,13 @@ public sealed class LandscapeModel
             // C1 changes in weights, never a strict-second-neighbour switch.
             neighbourWeight += weight;
             activeContributors++;
-            weightedResidual += weight * SampleResidual(candidate, x, z);
+            double candidateResidual = SampleResidual(candidate, x, z);
+            weightedResidual += weight * candidateResidual;
+            foreignResidual += weight * candidateResidual;
             weightedDatum += weight * LandscapeAltitudeBounds.GeologicalDatum(candidate.Cell);
+            greatestTransitionDistanceRatio = Math.Max(
+                greatestTransitionDistanceRatio,
+                Math.Sqrt(dominantDistance / ((dx * dx) + (dz * dz))));
         }
         double totalWeight = 1d + neighbourWeight;
         // Datum and residual are intentionally different fields.  The datum is
@@ -185,6 +196,8 @@ public sealed class LandscapeModel
         // explicit C1 transition band, and never receive distant-site contributions.
         double geologicalDatum = weightedDatum / totalWeight;
         double morphologyResidual = weightedResidual / totalWeight;
+        double primaryResidualContribution = primaryResidual / totalWeight;
+        double foreignResidualContribution = foreignResidual / totalWeight;
         double modelAltitude = geologicalDatum + morphologyResidual;
 
         if (!double.IsFinite(modelAltitude) || modelAltitude is < -1 or > 1)
@@ -200,12 +213,16 @@ public sealed class LandscapeModel
             dominant.Cell.CellId,
             dominant.Cell.Family,
             modelAltitude,
+            geologicalDatum,
+            primaryResidualContribution,
+            foreignResidualContribution,
             altitudeBlocks,
             bathymetryBlocks,
             1d / totalWeight,
             neighbourWeight > 0d,
             activeContributors,
-            neighbourWeight / totalWeight);
+            neighbourWeight / totalWeight,
+            greatestTransitionDistanceRatio);
     }
 
     private double SampleResidual(SiteEntry entry, long x, long z)
