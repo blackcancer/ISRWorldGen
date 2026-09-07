@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Numerics;
@@ -185,43 +186,105 @@ public sealed class PlateAtlasSnapshot
 
     public Hash256 ContentChecksum { get; }
 
+    /// <summary>Recomputes the immutable snapshot checksum using its canonical binary representation.</summary>
+    public Hash256 RecomputeContentChecksum() => ComputeChecksum(this);
+
     private static Hash256 ComputeChecksum(PlateAtlasSnapshot snapshot)
     {
-        var builder = new StringBuilder();
-        builder.Append("ISRW-PLATE-ATLAS-V2\n").Append(snapshot.Identity.NativeSeed).Append('|')
-            .Append(snapshot.Identity.AlgorithmVersion).Append('|').Append(snapshot.Identity.SchemaVersion).Append('|')
-            .Append(snapshot.Identity.GeographyConfigHash).Append('|').Append(snapshot.Identity.GenerationAssetHash).Append('|')
-            .Append(snapshot.Identity.DeterminismProfileId).Append('|').Append(snapshot.AtlasContentChecksum).Append('|')
-            .Append(snapshot.ContinentalModelChecksum).Append('|')
-            .Append(snapshot.ScaleProfileId).Append('|').Append(snapshot.ScaleProfileVersion).Append('|')
-            .Append(snapshot.AtlasResolutionBlocks).Append('|').Append(snapshot.AtlasTileSizeBlocks).Append('\n');
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendString(hash, "ISRW-PLATE-ATLAS-V3");
+        AppendInt32(hash, snapshot.Identity.NativeSeed);
+        AppendUInt32(hash, snapshot.Identity.AlgorithmVersion);
+        AppendUInt32(hash, snapshot.Identity.SchemaVersion);
+        AppendHash(hash, snapshot.Identity.GeographyConfigHash);
+        AppendHash(hash, snapshot.Identity.GenerationAssetHash);
+        AppendString(hash, snapshot.Identity.DeterminismProfileId);
+        AppendHash(hash, snapshot.AtlasContentChecksum);
+        AppendHash(hash, snapshot.ContinentalModelChecksum);
+        AppendString(hash, snapshot.ScaleProfileId);
+        AppendUInt32(hash, snapshot.ScaleProfileVersion);
+        AppendInt32(hash, snapshot.AtlasResolutionBlocks);
+        AppendInt32(hash, snapshot.AtlasTileSizeBlocks);
         foreach (PlateDomain plate in snapshot.Plates)
         {
-            builder.Append("P|").Append(plate.PlateId).Append('|')
-                .Append(plate.Velocity.X.ToString("R", CultureInfo.InvariantCulture)).Append('|')
-                .Append(plate.Velocity.Z.ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+            AppendByte(hash, (byte)'P');
+            AppendStableId(hash, plate.PlateId);
+            AppendDouble(hash, plate.Velocity.X);
+            AppendDouble(hash, plate.Velocity.Z);
         }
 
         foreach (PlateCellState cell in snapshot.Cells)
         {
-            builder.Append("C|").Append(cell.CellId).Append('|').Append(cell.PlateId).Append('|')
-                .Append((int)cell.CrustKind).Append('|').Append(cell.RelativeAgePpm).Append('|')
-                .Append(cell.ContinentalHeightPpm).Append('|')
-                .Append(cell.UpliftNormalized.ToString("R", CultureInfo.InvariantCulture)).Append('|')
-                .Append(cell.SubsidenceNormalized.ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+            AppendByte(hash, (byte)'C');
+            AppendStableId(hash, cell.CellId);
+            AppendStableId(hash, cell.PlateId);
+            AppendInt32(hash, (int)cell.CrustKind);
+            AppendInt32(hash, cell.RelativeAgePpm);
+            AppendInt32(hash, cell.ContinentalHeightPpm);
+            AppendDouble(hash, cell.UpliftNormalized);
+            AppendDouble(hash, cell.SubsidenceNormalized);
         }
 
         foreach (PlateBoundaryRecord boundary in snapshot.Boundaries)
         {
-            builder.Append("B|").Append(boundary.CellA).Append('|').Append(boundary.CellB).Append('|')
-                .Append(boundary.PlateA).Append('|').Append(boundary.PlateB).Append('|').Append((int)boundary.Kind).Append('|')
-                .Append(boundary.IntensityNormalized.ToString("R", CultureInfo.InvariantCulture)).Append('|')
-                .Append(boundary.UpliftNormalized.ToString("R", CultureInfo.InvariantCulture)).Append('|')
-                .Append(boundary.SubsidenceNormalized.ToString("R", CultureInfo.InvariantCulture)).Append('|')
-                .Append(boundary.ShearNormalized.ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+            AppendByte(hash, (byte)'B');
+            AppendStableId(hash, boundary.CellA);
+            AppendStableId(hash, boundary.CellB);
+            AppendStableId(hash, boundary.PlateA);
+            AppendStableId(hash, boundary.PlateB);
+            AppendInt32(hash, (int)boundary.Kind);
+            AppendDouble(hash, boundary.IntensityNormalized);
+            AppendDouble(hash, boundary.UpliftNormalized);
+            AppendDouble(hash, boundary.SubsidenceNormalized);
+            AppendDouble(hash, boundary.ShearNormalized);
         }
 
-        return Hash256.Compute(Encoding.UTF8.GetBytes(builder.ToString()));
+        return Hash256.FromCanonicalBytes(hash.GetHashAndReset());
+    }
+
+    private static void AppendByte(IncrementalHash hash, byte value) => hash.AppendData([value]);
+
+    private static void AppendInt32(IncrementalHash hash, int value)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32BigEndian(bytes, value);
+        hash.AppendData(bytes);
+    }
+
+    private static void AppendUInt32(IncrementalHash hash, uint value)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(uint)];
+        BinaryPrimitives.WriteUInt32BigEndian(bytes, value);
+        hash.AppendData(bytes);
+    }
+
+    private static void AppendDouble(IncrementalHash hash, double value)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(long)];
+        BinaryPrimitives.WriteInt64BigEndian(bytes, BitConverter.DoubleToInt64Bits(value));
+        hash.AppendData(bytes);
+    }
+
+    private static void AppendStableId(IncrementalHash hash, StableId value)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(ulong) * 2];
+        BinaryPrimitives.WriteUInt64BigEndian(bytes[..sizeof(ulong)], value.High);
+        BinaryPrimitives.WriteUInt64BigEndian(bytes[sizeof(ulong)..], value.Low);
+        hash.AppendData(bytes);
+    }
+
+    private static void AppendHash(IncrementalHash hash, Hash256 value)
+    {
+        Span<byte> bytes = stackalloc byte[Hash256.ByteWidth];
+        value.WriteCanonicalBytes(bytes);
+        hash.AppendData(bytes);
+    }
+
+    private static void AppendString(IncrementalHash hash, string value)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(value);
+        AppendInt32(hash, bytes.Length);
+        hash.AppendData(bytes);
     }
 }
 

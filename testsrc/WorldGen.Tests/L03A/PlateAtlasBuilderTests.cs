@@ -2,6 +2,7 @@ using ISRWorldGen.Core.Atlas.Geometry;
 using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Geology.Plates;
+using System.Globalization;
 
 namespace ISRWorldGen.Tests.L03A;
 
@@ -147,6 +148,42 @@ public sealed class PlateAtlasBuilderTests
             PlateAtlasProvenance.ComputeAtlasContentChecksum(atlasA),
             PlateAtlasProvenance.ComputeAtlasContentChecksum(rebuiltWithReversedInput),
             "Canonical atlas provenance must not depend on source site enumeration order.");
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void PlateSnapshotChecksumIsInvariantToCurrentCultureAndNumericSigns()
+    {
+        FrozenScaleProfile profile = L03ATestSupport.FrozenProfile("balanced");
+        GenerationIdentity identity = L03ATestSupport.Identity(-20260906, profile);
+        AtlasMesh atlas = BuildAtlas(identity, L03ATestSupport.Bounds(profile));
+        PlateGenerationSettings settings = new(
+            plateCount: 7,
+            L03ATestSupport.ContinentalSettings(),
+            maximumCells: 1_000,
+            maximumBoundaryEdges: 4_000,
+            maximumBoundaryInfluenceEvaluations: 4_000_000);
+        PlateAtlasSnapshot snapshot = L03ATestSupport.Success(
+            PlateAtlasBuilder.Build(identity, atlas, profile, settings));
+        Hash256 baseline = snapshot.ContentChecksum;
+        CultureInfo originalCulture = CultureInfo.CurrentCulture;
+        CultureInfo originalUiCulture = CultureInfo.CurrentUICulture;
+        var altered = (CultureInfo)CultureInfo.GetCultureInfo("fr-FR").Clone();
+        altered.NumberFormat.NegativeSign = "~";
+        altered.NumberFormat.NumberDecimalSeparator = ",";
+
+        try
+        {
+            CultureInfo.CurrentCulture = altered;
+            CultureInfo.CurrentUICulture = altered;
+            Hash256 underAlteredCulture = snapshot.RecomputeContentChecksum();
+            Assert.AreEqual(baseline, underAlteredCulture);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 
     private static AtlasMesh BuildAtlas(GenerationIdentity identity, WorldBounds bounds, bool reverseInput = false)
