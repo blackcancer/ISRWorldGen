@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
+using System.Buffers.Binary;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using ISRWorldGen.Core.Atlas.Geometry;
 using ISRWorldGen.Core.Atlas.Profiles;
@@ -72,6 +74,7 @@ public sealed class LandscapeModel
         int blendSiteCount,
         ReliefVerticalPlan verticalPlan,
         Hash256 plateSnapshotChecksum,
+        Hash256 atlasContentChecksum,
         GenerationIdentity identity,
         FrozenScaleProfile profile)
     {
@@ -82,6 +85,7 @@ public sealed class LandscapeModel
         Cells = Array.AsReadOnly(cells.OrderBy(item => item.CellId, LandscapeStableIdComparer.Instance).ToArray());
         VerticalPlan = verticalPlan;
         PlateSnapshotChecksum = plateSnapshotChecksum;
+        AtlasContentChecksum = atlasContentChecksum;
         ScaleProfileId = profile.Id;
         ScaleProfileVersion = profile.ProfileVersion;
         ContentChecksum = ComputeChecksum(this, identity);
@@ -92,6 +96,9 @@ public sealed class LandscapeModel
     public ReliefVerticalPlan VerticalPlan { get; }
 
     public Hash256 PlateSnapshotChecksum { get; }
+
+    /// <summary>Canonical checksum of the exact atlas sealed into the parent plate snapshot.</summary>
+    public Hash256 AtlasContentChecksum { get; }
 
     public string ScaleProfileId { get; }
 
@@ -185,7 +192,9 @@ public sealed class LandscapeModel
             x,
             z,
             nativeSeed,
-            cell.CellId.Low ^ cell.CellId.High);
+            cell.CellId.Low ^ cell.CellId.High,
+            entry.X,
+            entry.Z);
         double continental = cell.ContinentalHeightPpm / 1_000_000d;
         if (continental >= 0)
         {
@@ -205,33 +214,42 @@ public sealed class LandscapeModel
 
     private static Hash256 ComputeChecksum(LandscapeModel model, GenerationIdentity identity)
     {
-        var builder = new StringBuilder();
-        builder.Append("ISRW-LANDSCAPE-MODEL-V1\n")
-            .Append(identity.NativeSeed).Append('|').Append(identity.GeographyConfigHash).Append('|')
-            .Append(model.PlateSnapshotChecksum).Append('|').Append(model.ScaleProfileId).Append('|')
-            .Append(model.ScaleProfileVersion).Append('|').Append(model.blendSiteCount).Append('\n')
-            .Append(model.VerticalPlan.RockFloorTopBlocks).Append('|')
-            .Append(model.VerticalPlan.DeepestOceanFloorBlocks).Append('|')
-            .Append(model.VerticalPlan.MaximumCavernCeilingBlocks).Append('|')
-            .Append(model.VerticalPlan.HighestReliefBlocks).Append('|')
-            .Append(model.VerticalPlan.MaximumOceanDepthBlocks).Append('|')
-            .Append(model.VerticalPlan.MinimumCavernInteriorHeightBlocks).Append('|')
-            .Append(model.VerticalPlan.MaximumReliefAboveSeaBlocks).Append('\n');
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendString(hash, "ISRW-LANDSCAPE-MODEL-V2");
+        AppendInt32(hash, identity.NativeSeed); AppendUInt32(hash, identity.AlgorithmVersion); AppendUInt32(hash, identity.SchemaVersion);
+        AppendHash(hash, identity.GeographyConfigHash); AppendHash(hash, identity.GenerationAssetHash); AppendString(hash, identity.DeterminismProfileId);
+        AppendHash(hash, model.PlateSnapshotChecksum); AppendHash(hash, model.AtlasContentChecksum);
+        AppendString(hash, model.ScaleProfileId); AppendUInt32(hash, model.ScaleProfileVersion); AppendInt32(hash, model.blendSiteCount);
+        AppendInt64(hash, model.VerticalPlan.RockFloorTopBlocks); AppendInt64(hash, model.VerticalPlan.DeepestOceanFloorBlocks);
+        AppendInt64(hash, model.VerticalPlan.MaximumCavernCeilingBlocks); AppendInt64(hash, model.VerticalPlan.HighestReliefBlocks);
+        AppendInt64(hash, model.VerticalPlan.MaximumOceanDepthBlocks); AppendInt64(hash, model.VerticalPlan.MinimumCavernInteriorHeightBlocks);
+        AppendInt64(hash, model.VerticalPlan.MaximumReliefAboveSeaBlocks);
         foreach (LandscapeCellProfile cell in model.Cells)
         {
-            builder.Append(cell.CellId).Append('|').Append(cell.PlateId).Append('|').Append((int)cell.Family).Append('|')
-                .Append((int)cell.CrustKind).Append('|').Append(cell.RelativeAgePpm).Append('|')
-                .Append(cell.ContinentalHeightPpm).Append('|')
-                .Append(cell.UpliftNormalized.ToString("R", CultureInfo.InvariantCulture)).Append('|')
-                .Append(cell.SubsidenceNormalized.ToString("R", CultureInfo.InvariantCulture)).Append('|')
-                .Append(cell.FamilyParameterChecksum).Append('\n');
+            AppendStableId(hash, cell.CellId); AppendStableId(hash, cell.PlateId); AppendInt32(hash, (int)cell.Family);
+            AppendInt32(hash, (int)cell.CrustKind); AppendInt32(hash, cell.RelativeAgePpm); AppendInt32(hash, cell.ContinentalHeightPpm);
+            AppendDouble(hash, cell.UpliftNormalized); AppendDouble(hash, cell.SubsidenceNormalized); AppendHash(hash, cell.FamilyParameterChecksum);
         }
+        return Hash256.FromCanonicalBytes(hash.GetHashAndReset());
+    }
 
-        return Hash256.Compute(Encoding.UTF8.GetBytes(builder.ToString()));
+    private static void AppendInt32(IncrementalHash hash, int value) { Span<byte> b = stackalloc byte[sizeof(int)]; BinaryPrimitives.WriteInt32BigEndian(b, value); hash.AppendData(b); }
+    private static void AppendInt64(IncrementalHash hash, long value) { Span<byte> b = stackalloc byte[sizeof(long)]; BinaryPrimitives.WriteInt64BigEndian(b, value); hash.AppendData(b); }
+    private static void AppendUInt32(IncrementalHash hash, uint value) { Span<byte> b = stackalloc byte[sizeof(uint)]; BinaryPrimitives.WriteUInt32BigEndian(b, value); hash.AppendData(b); }
+    private static void AppendDouble(IncrementalHash hash, double value) => AppendInt64(hash, BitConverter.DoubleToInt64Bits(value));
+    private static void AppendHash(IncrementalHash hash, Hash256 value) { Span<byte> b = stackalloc byte[Hash256.ByteWidth]; value.WriteCanonicalBytes(b); hash.AppendData(b); }
+    private static void AppendStableId(IncrementalHash hash, StableId value) { Span<byte> b = stackalloc byte[sizeof(ulong) * 2]; BinaryPrimitives.WriteUInt64BigEndian(b[..sizeof(ulong)], value.High); BinaryPrimitives.WriteUInt64BigEndian(b[sizeof(ulong)..], value.Low); hash.AppendData(b); }
+    private static void AppendString(IncrementalHash hash, string value)
+    {
+        int bytes = Encoding.UTF8.GetByteCount(value);
+        if (bytes > LandscapeChecksumEncoding.MaximumStringUtf8Bytes) throw new InvalidOperationException("Landscape canonical text exceeds its bounded encoding.");
+        AppendInt32(hash, bytes); hash.AppendData(Encoding.UTF8.GetBytes(value));
     }
 
     internal readonly record struct SiteEntry(long X, long Z, double BlendScaleBlocks, LandscapeCellProfile Cell);
 }
+
+internal static class LandscapeChecksumEncoding { internal const int MaximumStringUtf8Bytes = 128; }
 
 public static class LandscapeModelBuilder
 {
@@ -268,6 +286,18 @@ public static class LandscapeModelBuilder
         {
             return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.plate-profile",
                 "Plate snapshot metadata does not match the frozen scale profile.");
+        }
+        if (Encoding.UTF8.GetByteCount(identity.DeterminismProfileId) > LandscapeChecksumEncoding.MaximumStringUtf8Bytes ||
+            Encoding.UTF8.GetByteCount(profile.Id) > LandscapeChecksumEncoding.MaximumStringUtf8Bytes)
+        {
+            return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.canonical-text",
+                "Generation identity or profile identifier exceeds the bounded landscape checksum encoding.");
+        }
+
+        if (!PlateAtlasProvenance.Matches(plates, identity, profile, atlas))
+        {
+            return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.plate-provenance",
+                "Plate snapshot provenance does not seal this generation identity, frozen profile, and atlas.");
         }
 
         if (atlas.Sites.Count != plates.Cells.Count)
@@ -343,6 +373,7 @@ public static class LandscapeModelBuilder
             settings.BlendSiteCount,
             plan,
             plates.ContentChecksum,
+            plates.AtlasContentChecksum,
             identity,
             profile));
     }

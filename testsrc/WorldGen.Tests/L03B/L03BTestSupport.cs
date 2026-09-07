@@ -35,7 +35,8 @@ internal static class L03BTestSupport
 
     internal static (AtlasMesh Atlas, PlateAtlasSnapshot Plates) PlateFixture(
         int seed,
-        FrozenScaleProfile profile)
+        FrozenScaleProfile profile,
+        Action<string>? progress = null)
     {
         GenerationIdentity identity = Identity(seed, profile);
         WorldDomain domain = profile.AtlasIndexProfile.Domain;
@@ -44,16 +45,19 @@ internal static class L03BTestSupport
             domain.Z.MinInclusive,
             domain.X.MaxExclusive,
             domain.Z.MaxExclusive);
+        progress?.Invoke("atlas-sites");
         GeneratedSiteSet sites = Success(AtlasSiteGenerator.Generate(
             identity,
             bounds,
             new AtlasSiteGenerationSettings(profile.RequestedSiteCount)));
+        progress?.Invoke("atlas-geometry");
         AtlasMesh atlas = Success(AtlasGeometryBuilder.Build(
             identity,
             bounds,
             sites.Sites,
             new AtlasGeometryBuildOptions(1, GeometryCacheMode.Cold)));
         var continentSettings = new ContinentalFieldSettings(5, 18, 64, 1_000_000);
+        progress?.Invoke("plates");
         PlateAtlasSnapshot plates = Success(PlateAtlasBuilder.Build(
             identity,
             atlas,

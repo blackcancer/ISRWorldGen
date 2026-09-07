@@ -45,15 +45,23 @@ public static class LandscapeFamilyCatalog
 public static class LandscapeSignatureSampler
 {
     public static double Sample(LandscapeFamilyProfile p, double x, double z, int seed, ulong streamOrdinal)
+        => Sample(p, x, z, seed, streamOrdinal, 0, 0);
+
+    /// <summary>Samples relative to the owning site so every finite-world cell receives its local morphology.</summary>
+    public static double Sample(LandscapeFamilyProfile p, double x, double z, int seed, ulong streamOrdinal, long anchorX, long anchorZ)
     {
         ArgumentNullException.ThrowIfNull(p);
         if (!double.IsFinite(x) || !double.IsFinite(z)) throw new ArgumentOutOfRangeException(nameof(x), "Landscape coordinates must be finite.");
+        x -= anchorX; z -= anchorZ;
         StableId s = StableId.Derive(RandomDomain.Geology, StableId.Zero, streamOrdinal);
         return p.Family switch
         {
-            LandscapeFamily.RuggedRanges => Ranges(x, z, seed, s, p), LandscapeFamily.OldMassifs => Massifs(x, z, seed, s, p),
-            LandscapeFamily.Plateaus => Plateau(x, z, seed, s, p), LandscapeFamily.SedimentaryBasins => Basin(x, z, seed, s, p),
-            LandscapeFamily.Plains => Plain(x, z, seed, s, p), LandscapeFamily.VolcanicDomains => Volcanoes(x, z, seed, s, p),
+            LandscapeFamily.RuggedRanges => Ranges(x, z, seed, s, p),
+            LandscapeFamily.OldMassifs => Massifs(x, z, seed, s, p),
+            LandscapeFamily.Plateaus => Plateau(x, z, seed, s, p),
+            LandscapeFamily.SedimentaryBasins => Basin(x, z, seed, s, p),
+            LandscapeFamily.Plains => Plain(x, z, seed, s, p),
+            LandscapeFamily.VolcanicDomains => Volcanoes(x, z, seed, s, p),
             _ => throw new ArgumentOutOfRangeException(nameof(p), p.Family, "Unknown landscape family."),
         };
     }

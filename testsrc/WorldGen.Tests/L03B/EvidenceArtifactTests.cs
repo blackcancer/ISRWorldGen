@@ -25,21 +25,21 @@ public sealed class EvidenceArtifactTests
 
     private static readonly (string Code, LandscapeFamily Family)[] BlindOrder =
     [
-        ("V01", LandscapeFamily.Plateaus),
-        ("V02", LandscapeFamily.RuggedRanges),
-        ("V03", LandscapeFamily.Plains),
-        ("V04", LandscapeFamily.VolcanicDomains),
-        ("V05", LandscapeFamily.OldMassifs),
-        ("V06", LandscapeFamily.SedimentaryBasins),
+        ("Q01", LandscapeFamily.VolcanicDomains),
+        ("Q02", LandscapeFamily.Plains),
+        ("Q03", LandscapeFamily.SedimentaryBasins),
+        ("Q04", LandscapeFamily.Plateaus),
+        ("Q05", LandscapeFamily.RuggedRanges),
+        ("Q06", LandscapeFamily.OldMassifs),
     ];
 
     [TestMethod]
     [DoNotParallelize]
     public void T0305AndT0306PublishAtomicBlindReviewEvidence()
     {
-        string output = Path.Combine(L03BTestSupport.FindRepositoryRoot(), ".local", "L03B", "evidence");
+        string output = Path.Combine(L03BTestSupport.FindRepositoryRoot(), ".local", "L03B", "evidence-q");
         Directory.CreateDirectory(output);
-        string reportPath = Path.Combine(output, "T03-05-06.json");
+        string reportPath = Path.Combine(output, "T03-05-06-Q.json");
         string commit = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_COMMIT") ?? "WORKING_TREE";
         string configuration = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_CONFIGURATION") ?? "UNKNOWN";
         WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
@@ -104,7 +104,7 @@ public sealed class EvidenceArtifactTests
         foreach ((string code, LandscapeFamily family) in BlindOrder)
         {
             LandscapeFamilyProfile profile = LandscapeFamilyCatalog.Get(family);
-            double[,] samples = SampleFixture(profile, 96, 96);
+            double[,] samples = SampleFixture(family, profile, 96, 96);
             sampledByCode.Add(code, samples);
             BlindFixtureMetric metric = Measure(code, profile, samples);
             fixtureMetrics.Add(metric);
@@ -148,10 +148,10 @@ public sealed class EvidenceArtifactTests
         byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
-            instruction = "Inspect V01..V06 maps and profiles before opening this separate key.",
+            instruction = "Inspect Q01..Q06 maps and profiles before opening this separate key.",
             entries = BlindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
         }, JsonOptions);
-        string keyPath = Path.Combine(output, "T03-06-review-key.json");
+        string keyPath = Path.Combine(output, "T03-06-Q-review-key.json");
         WriteAtomic(keyPath, keyBytes);
 
         IReadOnlyList<int> calibrationSeeds = L03BTestSupport.SeedCorpus("calibration_seeds");
@@ -160,9 +160,21 @@ public sealed class EvidenceArtifactTests
         Assert.HasCount(64, holdoutSeeds);
         FrozenScaleProfile balanced = L03BTestSupport.FrozenProfile("balanced");
         FrozenScaleProfile vast = L03BTestSupport.FrozenProfile("vast-expeditions");
-        CorpusMetric[] corpus = calibrationSeeds.Select(seed => CorpusMetricFor("calibration", seed, balanced))
-            .Concat(holdoutSeeds.Select(seed => CorpusMetricFor("holdout", seed, vast)))
-            .ToArray();
+        string progressPath = Path.Combine(output, "T03-06-Q-progress.json");
+        var corpusEntries = new List<CorpusMetric>(256);
+        foreach ((string corpusName, IReadOnlyList<int> seeds, FrozenScaleProfile corpusProfile) in
+                 new[] { ("balanced", calibrationSeeds, balanced), ("vast", holdoutSeeds, vast) })
+        {
+            foreach (int seed in seeds)
+            {
+                WriteCampaignProgress(progressPath, corpusName, seed, "atlas");
+                CorpusMetric metric = CorpusMetricFor(corpusName, seed, corpusProfile, stage =>
+                    WriteCampaignProgress(progressPath, corpusName, seed, stage));
+                corpusEntries.Add(metric);
+                WriteCampaignProgress(progressPath, corpusName, seed, "complete");
+            }
+        }
+        CorpusMetric[] corpus = corpusEntries.ToArray();
         Assert.HasCount(256, corpus);
         int corpusFamilyCount = corpus.SelectMany(item => item.CellFamilyCounts.Keys).Distinct().Count();
         Assert.IsGreaterThanOrEqualTo(MinimumCorpusFamilies, corpusFamilyCount);
@@ -282,10 +294,12 @@ public sealed class EvidenceArtifactTests
             quantizedNonDecreasing);
     }
 
-    private static CorpusMetric CorpusMetricFor(string corpus, int seed, FrozenScaleProfile profile)
+    private static CorpusMetric CorpusMetricFor(string corpus, int seed, FrozenScaleProfile profile, Action<string>? progress = null)
     {
         GenerationIdentity identity = L03BTestSupport.Identity(seed, profile);
-        (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(seed, profile);
+        progress?.Invoke("atlas");
+        (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(seed, profile, progress);
+        progress?.Invoke("landscape");
         ReliefBudgetRequest budget = new(64, 48, 128);
         LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(
             identity,
@@ -294,6 +308,7 @@ public sealed class EvidenceArtifactTests
             profile,
             new LandscapeGenerationSettings(budget, profile.SiteQuota, 4)));
         var samples = new List<LandscapeSample>();
+        progress?.Invoke("samples");
         for (int z = 1; z <= 8; z++)
         {
             for (int x = 1; x <= 8; x++)
@@ -322,23 +337,42 @@ public sealed class EvidenceArtifactTests
             model.VerticalPlan.HighestReliefBlocks);
     }
 
-    private static double[,] SampleFixture(LandscapeFamilyProfile profile, int width, int height)
-    {
-        var samples = new double[height, width];
-        for (int z = 0; z < height; z++)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                samples[z, x] = LandscapeSignatureSampler.Sample(
-                    profile,
-                    x * 512d,
-                    z * 512d,
-                    20260906,
-                    9);
-            }
-        }
+    private static void WriteCampaignProgress(string path, string corpus, int seed, string stage) =>
+        WriteAtomic(path, JsonSerializer.SerializeToUtf8Bytes(new { corpus, seed, stage }, JsonOptions));
 
-        return samples;
+    private static double[,] SampleFixture(LandscapeFamily family, LandscapeFamilyProfile profile, int width, int height)
+    {
+        // Targeted fixtures may choose their owning cell, but maps always traverse the published composition
+        // (site blending, family amplitude and vertical-budget input), never a raw signature sampler.
+        int[] fixtureSeeds = [20260907, -20260907, 731, -731, 196883, -196883, 48731, -48731];
+        FrozenScaleProfile frozen = L03BTestSupport.FrozenProfile("vast-expeditions");
+        foreach (int seed in fixtureSeeds)
+        {
+            GenerationIdentity identity = L03BTestSupport.Identity(seed, frozen);
+            (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(seed, frozen);
+            LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, frozen,
+                new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), frozen.SiteQuota, 4)));
+            LandscapeCellProfile? cell = model.Cells.FirstOrDefault(item => item.Family == family);
+            if (cell is null || cell.Value.CellId == default)
+            {
+                continue;
+            }
+            AtlasSite site = atlas.Sites.Single(item => item.Id == cell.Value.CellId);
+            var samples = new double[height, width];
+            double span = profile.MacroWavelengthBlocks * 1.7;
+            for (int z = 0; z < height; z++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    long sampleX = Math.Clamp((long)Math.Round(site.X + (((x / (double)(width - 1)) - .5) * span)), atlas.Bounds.MinX, atlas.Bounds.MaxXExclusive - 1);
+                    long sampleZ = Math.Clamp((long)Math.Round(site.Z + (((z / (double)(height - 1)) - .5) * span)), atlas.Bounds.MinZ, atlas.Bounds.MaxZExclusive - 1);
+                    samples[z, x] = model.Sample(sampleX, sampleZ).ModelAltitudeNormalized;
+                }
+            }
+            return samples;
+        }
+        throw new AssertFailedException(
+            $"No declared targeted fixture contains family {family}.");
     }
 
     private static BlindFixtureMetric Measure(

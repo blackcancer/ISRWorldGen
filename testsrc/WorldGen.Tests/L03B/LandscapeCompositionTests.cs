@@ -3,6 +3,7 @@ using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Geology.Landscapes;
 using ISRWorldGen.Core.Geology.Plates;
+using System.Globalization;
 
 namespace ISRWorldGen.Tests.L03B;
 
@@ -127,6 +128,64 @@ public sealed class LandscapeCompositionTests
 
         AssertFailure(budget, GenerationFailureCode.BudgetExceeded, "geology.landscapes.cell-budget");
         AssertFailure(mismatch, GenerationFailureCode.InvalidInput, "geology.landscapes.profile-hash");
+    }
+
+    [TestMethod]
+    public void MismatchedAtlasAndSealedPlateSnapshotFailBeforeSamplingAndCannotShareChecksum()
+    {
+        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
+        GenerationIdentity identityA = L03BTestSupport.Identity(7301, profile);
+        GenerationIdentity identityB = L03BTestSupport.Identity(7302, profile);
+        (AtlasMesh atlasA, PlateAtlasSnapshot platesA) = L03BTestSupport.PlateFixture(identityA.NativeSeed, profile);
+        (AtlasMesh atlasB, PlateAtlasSnapshot platesB) = L03BTestSupport.PlateFixture(identityB.NativeSeed, profile);
+        var settings = new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4);
+
+        GenerationResult<LandscapeModel> rejected = LandscapeModelBuilder.Build(identityA, atlasB, platesA, profile, settings);
+        AssertFailure(rejected, GenerationFailureCode.InvalidInput, "geology.landscapes.plate-provenance");
+
+        LandscapeModel modelA = L03BTestSupport.Success(LandscapeModelBuilder.Build(identityA, atlasA, platesA, profile, settings));
+        LandscapeModel modelB = L03BTestSupport.Success(LandscapeModelBuilder.Build(identityB, atlasB, platesB, profile, settings));
+        Assert.AreNotEqual(modelA.ContentChecksum, modelB.ContentChecksum);
+        Assert.AreEqual(platesA.ContentChecksum, modelA.PlateSnapshotChecksum);
+        Assert.AreEqual(platesA.AtlasContentChecksum, modelA.AtlasContentChecksum);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void ContentChecksumIsInvariantUnderHostileCulture()
+    {
+        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
+        GenerationIdentity identity = L03BTestSupport.Identity(-437287116, profile);
+        (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
+        var settings = new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4);
+        Hash256 invariant = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile, settings)).ContentChecksum;
+        CultureInfo old = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+            Hash256 hostile = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile, settings)).ContentChecksum;
+            Assert.AreEqual(invariant, hostile);
+        }
+        finally { CultureInfo.CurrentCulture = old; }
+    }
+
+    [TestMethod]
+    public void SiteAnchoredMorphologyTranslatesToRemoteVastWorldCellsWithNonzeroVariance()
+    {
+        LandscapeFamilyProfile family = LandscapeFamilyCatalog.Get(LandscapeFamily.VolcanicDomains);
+        double near = LandscapeSignatureSampler.Sample(family, 12_400, -8_200, 97, 123, 0, 0);
+        double remote = LandscapeSignatureSampler.Sample(family, 912_400, -808_200, 97, 123, 900_000, -800_000);
+        Assert.AreEqual(near, remote, "A remote owner site must receive the same local morphology.");
+
+        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("vast-expeditions");
+        GenerationIdentity identity = L03BTestSupport.Identity(90210, profile);
+        (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
+        LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4)));
+        double[] samples = Enumerable.Range(1, 64).Select(index => model.Sample(
+            (profile.WidthBlocks * index) / 65,
+            (profile.LengthBlocks * ((index * 23) % 64 + 1)) / 65).ModelAltitudeNormalized).ToArray();
+        Assert.IsGreaterThan(0.0001, Variance(samples));
     }
 
     private static IEnumerable<(long X, long Z)> SampleCoordinates(FrozenScaleProfile profile)
