@@ -11,10 +11,13 @@ public enum LandscapeFamily { RuggedRanges, OldMassifs, Plateaus, SedimentaryBas
 /// <summary>Dimensionless morphology parameters. Wavelength fields describe extent, not a common wave basis.</summary>
 public sealed class LandscapeFamilyProfile
 {
+    public const double MinimumWavelengthBlocks = 1;
+    public const double MaximumWavelengthBlocks = 1_000_000_000;
+    public const double MaximumWavelengthRatio = 1_000_000;
     public LandscapeFamilyProfile(LandscapeFamily family, double macro, double meso, double detail, double amplitude, double macroWeight, double mesoWeight, double detailWeight)
     {
         if (!Enum.IsDefined(family)) throw new ArgumentOutOfRangeException(nameof(family));
-        if (!double.IsFinite(macro) || !double.IsFinite(meso) || !double.IsFinite(detail) || macro <= meso || meso <= detail || detail <= 0) throw new ArgumentOutOfRangeException(nameof(macro), "Wavelengths must be finite, positive, and macro > meso > detail.");
+        if (!double.IsFinite(macro) || !double.IsFinite(meso) || !double.IsFinite(detail) || macro > MaximumWavelengthBlocks || detail < MinimumWavelengthBlocks || macro <= meso || meso <= detail || macro / detail > MaximumWavelengthRatio) throw new ArgumentOutOfRangeException(nameof(macro), "Wavelengths must be finite, operationally bounded, ordered, and have a bounded ratio.");
         if (!double.IsFinite(amplitude) || amplitude is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(amplitude));
         if (!double.IsFinite(macroWeight) || !double.IsFinite(mesoWeight) || !double.IsFinite(detailWeight) || macroWeight < 0 || mesoWeight < 0 || detailWeight < 0 || Math.Abs((macroWeight + mesoWeight + detailWeight) - 1) > 1e-12) throw new ArgumentOutOfRangeException(nameof(macroWeight), "Weights must be finite, nonnegative, and sum to one.");
         Family = family; MacroWavelengthBlocks = macro; MesoWavelengthBlocks = meso; DetailWavelengthBlocks = detail; ReliefAmplitudeNormalized = amplitude; MacroWeight = macroWeight; MesoWeight = mesoWeight; DetailWeight = detailWeight; ParameterChecksum = Checksum(this);
@@ -50,6 +53,7 @@ public static class LandscapeFamilyCatalog
 /// <summary>Stateless global-coordinate sampler. Each family has its own geometric primitive.</summary>
 public static class LandscapeSignatureSampler
 {
+    public const double MaximumAbsoluteCoordinateBlocks = 4_000_000_000_000d;
     public static double Sample(LandscapeFamilyProfile p, double x, double z, int seed, ulong streamOrdinal)
         => Sample(p, x, z, seed, streamOrdinal, 0, 0);
 
@@ -57,7 +61,7 @@ public static class LandscapeSignatureSampler
     public static double Sample(LandscapeFamilyProfile p, double x, double z, int seed, ulong streamOrdinal, long anchorX, long anchorZ)
     {
         ArgumentNullException.ThrowIfNull(p);
-        if (!double.IsFinite(x) || !double.IsFinite(z)) throw new ArgumentOutOfRangeException(nameof(x), "Landscape coordinates must be finite.");
+        if (!double.IsFinite(x) || !double.IsFinite(z) || Math.Abs(x) > MaximumAbsoluteCoordinateBlocks || Math.Abs(z) > MaximumAbsoluteCoordinateBlocks) throw new ArgumentOutOfRangeException(nameof(x), "Landscape coordinates must be finite and within the qualified long-world bound.");
         x -= anchorX; z -= anchorZ;
         StableId s = StableId.Derive(RandomDomain.Geology, StableId.Zero, streamOrdinal);
         return p.Family switch

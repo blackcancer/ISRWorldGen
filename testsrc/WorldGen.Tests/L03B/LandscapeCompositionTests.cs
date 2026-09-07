@@ -234,6 +234,13 @@ public sealed class LandscapeCompositionTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 20, 1, .1, .6, .3, .1));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 2, 1, 1.1, .6, .3, .1));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, 10, 2, 1, .1, .6, .3, .2));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new LandscapeFamilyProfile(LandscapeFamily.Plains, double.MaxValue, 1, double.Epsilon, .1, .6, .3, .1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => LandscapeSignatureSampler.Sample(LandscapeFamilyCatalog.Get(LandscapeFamily.Plains), double.MaxValue, 0, 1, 1));
+        foreach (LandscapeFamilyProfile family in LandscapeFamilyCatalog.Profiles)
+        {
+            double value = LandscapeSignatureSampler.Sample(family, LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, -LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, 1, 1);
+            Assert.IsTrue(double.IsFinite(value) && value is >= -1 and <= 1);
+        }
     }
 
     [TestMethod]
