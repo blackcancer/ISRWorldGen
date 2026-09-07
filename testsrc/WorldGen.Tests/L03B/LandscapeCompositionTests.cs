@@ -324,8 +324,9 @@ public sealed class LandscapeCompositionTests
             new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), profile.SiteQuota, 1.25)));
 
         // These are local regressions for the two prior rank-exchange reports, not a campaign acceptance threshold.
-        Assert.IsLessThan(.2, AdjacentDelta(model, 896, 1020, 896, 1021));
-        Assert.IsLessThan(.75, AdjacentDelta(model, 2104, 1024, 2105, 1024));
+        // The independently measured compact-support maxima were about 8.1e-4; 1.1e-3 leaves only run-to-run margin.
+        Assert.IsLessThan(.0011, AdjacentDelta(model, 896, 1020, 896, 1021));
+        Assert.IsLessThan(.0011, AdjacentDelta(model, 2104, 1024, 2105, 1024));
 
         foreach (IEnumerable<(long X, long Z)> line in new[]
         {
@@ -336,8 +337,8 @@ public sealed class LandscapeCompositionTests
         {
             double[] samples = line.Select(point => model.Sample(point.X, point.Z).ModelAltitudeNormalized).ToArray();
             Assert.IsTrue(samples.All(value => double.IsFinite(value) && value is >= -1 and <= 1));
-            Assert.IsLessThan(1d, samples.Zip(samples.Skip(1), (left, right) => Math.Abs(left - right)).Max(),
-                "A one-block scan must stay inside the normalized composition envelope.");
+            Assert.IsLessThan(.0011, samples.Zip(samples.Skip(1), (left, right) => Math.Abs(left - right)).Max(),
+                "Compact-support scan margin around the independently measured local maximum; not a T03-06 policy threshold.");
         }
     }
 
@@ -356,13 +357,13 @@ public sealed class LandscapeCompositionTests
         FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
         GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
         (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
-        LandscapeModel broad = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+        LandscapeModel narrow = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
             new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.05)));
-        LandscapeModel local = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+        LandscapeModel wide = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
             new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.5)));
-        Assert.AreNotEqual(broad.ContentChecksum, local.ContentChecksum);
+        Assert.AreNotEqual(narrow.ContentChecksum, wide.ContentChecksum);
         Assert.IsTrue(SampleCoordinates(profile).Any(point =>
-            broad.Sample(point.X, point.Z).ModelAltitudeNormalized != local.Sample(point.X, point.Z).ModelAltitudeNormalized));
+            narrow.Sample(point.X, point.Z).ModelAltitudeNormalized != wide.Sample(point.X, point.Z).ModelAltitudeNormalized));
     }
 
     [TestMethod]
@@ -405,7 +406,7 @@ public sealed class LandscapeCompositionTests
                 (atlas.Bounds.MaxXExclusive - 1, atlas.Bounds.MinZ),
                 (atlas.Bounds.MinX, atlas.Bounds.MaxZExclusive - 1),
                 (atlas.Bounds.MaxXExclusive - 1, atlas.Bounds.MaxZExclusive - 1),
-                .. SampleCoordinates(profile),
+                .. GridCoordinates(profile, 33),
             ];
             int[] counts = points.Select(point => (int)contributors.Invoke(model, [point.X, point.Z])!).ToArray();
             Console.WriteLine($"{profileId}: sites={atlas.Sites.Count}, contributors min={counts.Min()}, max={counts.Max()}, mean={counts.Average():R}");
@@ -451,6 +452,19 @@ public sealed class LandscapeCompositionTests
 
     private static AtlasSite Site(int index, long x, long z) =>
         new(StableId.Derive(RandomDomain.Sites, StableId.Zero, (ulong)index), x, z);
+
+    private static IEnumerable<(long X, long Z)> GridCoordinates(FrozenScaleProfile profile, int side)
+    {
+        for (int z = 0; z < side; z++)
+        {
+            for (int x = 0; x < side; x++)
+            {
+                yield return (
+                    ((profile.WidthBlocks - 1) * x) / (side - 1),
+                    ((profile.LengthBlocks - 1) * z) / (side - 1));
+            }
+        }
+    }
 
     private static double AdjacentDelta(LandscapeModel model, long leftX, long leftZ, long rightX, long rightZ)
         => Math.Abs(model.Sample(leftX, leftZ).ModelAltitudeNormalized - model.Sample(rightX, rightZ).ModelAltitudeNormalized);
