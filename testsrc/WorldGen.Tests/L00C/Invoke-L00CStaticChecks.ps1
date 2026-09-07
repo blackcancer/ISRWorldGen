@@ -257,7 +257,10 @@ if ($Configuration -eq 'Debug') {
     $persistenceAttestationOracleStatus = $persistenceOracle.Status
     $campaignControllerOraclePath = Join-Path $PSScriptRoot 'Test-L00CCampaignController.ps1'
     $campaignControllerOracle = (& $campaignControllerOraclePath -RepositoryRoot $RepositoryRoot | Out-String | ConvertFrom-Json)
-    if ($campaignControllerOracle.Status -ne 'PASS') {
+    if ($campaignControllerOracle.Status -ne 'PASS' -or
+        -not $campaignControllerOracle.WalBackedOpen1SourceExercised -or
+        -not $campaignControllerOracle.WalPayloadReadWithoutSource -or
+        -not $campaignControllerOracle.MissingWalPayloadRejected) {
         throw 'The four-phase campaign controller oracle did not pass.'
     }
     $campaignControllerOracleStatus = $campaignControllerOracle.Status
@@ -298,7 +301,10 @@ if ($Configuration -eq 'Debug') {
         -not $activeShutdownEvidenceOracle.MissingPersistedPrecheckRejected -or
         -not $activeShutdownEvidenceOracle.MarkerSaveNotRequired -or
         -not $activeShutdownEvidenceOracle.MarkerSaveCannotSubstituteForDatabase -or
-        -not $activeShutdownEvidenceOracle.ReorderedTerminalEventsRejected) {
+        -not $activeShutdownEvidenceOracle.ReorderedTerminalEventsRejected -or
+        -not $activeShutdownEvidenceOracle.ShutdownLifecycleOrderRequired -or
+        -not $activeShutdownEvidenceOracle.DisposeErrorRejected -or
+        -not $activeShutdownEvidenceOracle.PersistedActivationOrderRequired) {
         throw 'The active delayed-shutdown evidence oracle did not pass.'
     }
     $activeShutdownEvidenceOracleStatus = $activeShutdownEvidenceOracle.Status

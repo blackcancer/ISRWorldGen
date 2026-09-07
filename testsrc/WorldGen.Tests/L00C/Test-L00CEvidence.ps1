@@ -620,12 +620,10 @@ Assert-Equal ([int]$open2DatabaseReport.Open1EvidenceSequence) ([int]$primaryOpe
 Assert-Equal ([int]$finalizeReceipt.ExpectedNextOpenEvidenceSequence) ([int]$orderedPrimary[2].EvidenceSequence) 'Open3 attests the persisted open2 successor'
 $primaryOpen3Index = [Array]::IndexOf($allSessions, $orderedPrimary[2])
 $primaryOpen3Log = Get-Content -LiteralPath $sessionLogPaths[$primaryOpen3Index] -Raw
-$open3Instance = [regex]::Escape([string]$orderedPrimary[2].InstanceId)
-$open3Marker = [regex]::Escape([string]$primaryOpen2.MarkerId)
-if ($primaryOpen3Log -notmatch "L00C_PERSISTED_PRECHECK instance=$open3Instance marker=$open3Marker maps=9 exact=True" -or
-    $primaryOpen3Log -notmatch "L00C_ACTIVATED instance=$open3Instance marker=$open3Marker .* open=3 isnew=False ") {
-    throw 'Primary open3 does not attest that the incremented open2 database was read again.'
-}
+[void](Assert-L00CPersistedActivationOrder -Log $primaryOpen3Log `
+    -InstanceId ([string]$orderedPrimary[2].InstanceId) `
+    -MarkerId ([string]$primaryOpen2.MarkerId) `
+    -OpenCount 3)
 
 Import-Module (Join-Path $PSScriptRoot 'L00CPersistenceAttestation.psm1') -Force
 $persistenceAttestation = Assert-L00CPersistenceAttestation `

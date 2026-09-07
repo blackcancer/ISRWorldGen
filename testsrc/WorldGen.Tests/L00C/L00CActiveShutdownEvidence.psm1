@@ -30,11 +30,17 @@ function Assert-L00CActiveShutdownLog {
     $armedPattern = "L00C_DELAYED_SHUTDOWN_ARMED instance=$instance run=$run reason=$reasonPattern delayms=([0-9]+) listener=([1-9][0-9]*)"
     $firedPattern = "L00C_DELAYED_SHUTDOWN_FIRED instance=$instance run=$run reason=$reasonPattern"
     $shutdownPattern = "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker reason=$reasonPattern"
+    $runPhasePattern = 'Entering runphase Shutdown'
+    $disposedPattern = "L00C_DISPOSED instance=$instance [^\r\n]*exact=True[^\r\n]*"
+    $modsNotifiedPattern = 'Mods and systems notified, now saving everything\.\.\.'
     $markerSavedPattern = "L00C_MARKER_SAVED instance=$instance marker=$marker open=$open"
     $anyMarkerSavedPattern = "L00C_MARKER_SAVED instance=$instance marker=$marker open=([^\s]+)"
 
     if ($Log -match 'Server suspend requested, but reached max wait time') {
         throw 'Active shutdown encountered a server-suspension timeout.'
+    }
+    if ($Log -match 'L00C_DISPOSE_ERROR') {
+        throw 'Active shutdown encountered a probe dispose error.'
     }
 
     $precheck = if ($IsNew) { $null } else { [regex]::Match($Log, $precheckPattern) }
@@ -48,18 +54,27 @@ function Assert-L00CActiveShutdownLog {
     $armedRegex = [regex]::new($armedPattern)
     $firedRegex = [regex]::new($firedPattern)
     $shutdownRegex = [regex]::new($shutdownPattern)
+    $runPhaseRegex = [regex]::new($runPhasePattern)
+    $disposedRegex = [regex]::new($disposedPattern)
+    $modsNotifiedRegex = [regex]::new($modsNotifiedPattern)
     $worldSavedRegex = [regex]::new('World saved!')
     $stoppedRegex = [regex]::new('Stopped the server!')
     $armed = if ($ready.Success) { $armedRegex.Match($Log, $ready.Index + $ready.Length) } else { $armedRegex.Match($Log) }
     $fired = if ($armed.Success) { $firedRegex.Match($Log, $armed.Index + $armed.Length) } else { $firedRegex.Match($Log) }
     $shutdown = if ($fired.Success) { $shutdownRegex.Match($Log, $fired.Index + $fired.Length) } else { $shutdownRegex.Match($Log) }
-    $worldSaved = if ($shutdown.Success) { $worldSavedRegex.Match($Log, $shutdown.Index + $shutdown.Length) } else { $worldSavedRegex.Match($Log) }
+    $runPhase = if ($shutdown.Success) { $runPhaseRegex.Match($Log, $shutdown.Index + $shutdown.Length) } else { $runPhaseRegex.Match($Log) }
+    $disposed = if ($runPhase.Success) { $disposedRegex.Match($Log, $runPhase.Index + $runPhase.Length) } else { $disposedRegex.Match($Log) }
+    $modsNotified = if ($disposed.Success) { $modsNotifiedRegex.Match($Log, $disposed.Index + $disposed.Length) } else { $modsNotifiedRegex.Match($Log) }
+    $worldSaved = if ($modsNotified.Success) { $worldSavedRegex.Match($Log, $modsNotified.Index + $modsNotified.Length) } else { $worldSavedRegex.Match($Log) }
     $stopped = if ($worldSaved.Success) { $stoppedRegex.Match($Log, $worldSaved.Index + $worldSaved.Length) } else { $stoppedRegex.Match($Log) }
     $required = @(
         [pscustomobject]@{ Label = 'ready'; Match = $ready },
         [pscustomobject]@{ Label = 'armed'; Match = $armed },
         [pscustomobject]@{ Label = 'fired'; Match = $fired },
         [pscustomobject]@{ Label = 'graceful shutdown request'; Match = $shutdown },
+        [pscustomobject]@{ Label = 'shutdown runphase'; Match = $runPhase },
+        [pscustomobject]@{ Label = 'probe disposal'; Match = $disposed },
+        [pscustomobject]@{ Label = 'mods-notified boundary'; Match = $modsNotified },
         [pscustomobject]@{ Label = 'world save'; Match = $worldSaved },
         [pscustomobject]@{ Label = 'server stop'; Match = $stopped }
     )
@@ -78,14 +93,20 @@ function Assert-L00CActiveShutdownLog {
     }
     if ([regex]::Matches($Log, $armedPattern).Count -ne 1 -or
         [regex]::Matches($Log, $firedPattern).Count -ne 1 -or
-        [regex]::Matches($Log, $shutdownPattern).Count -ne 1) {
-        throw 'Active shutdown was not armed, fired, and requested exactly once.'
+        [regex]::Matches($Log, $shutdownPattern).Count -ne 1 -or
+        [regex]::Matches($Log, $runPhasePattern).Count -ne 1 -or
+        [regex]::Matches($Log, $disposedPattern).Count -ne 1 -or
+        [regex]::Matches($Log, $modsNotifiedPattern).Count -ne 1 -or
+        [regex]::Matches($Log, 'World saved!').Count -ne 1 -or
+        [regex]::Matches($Log, 'Stopped the server!').Count -ne 1) {
+        throw 'Active shutdown lifecycle events were not each observed exactly once.'
     }
     if ((-not $IsNew -and $precheck.Index -ge $ready.Index) -or
         $ready.Index -ge $armed.Index -or $armed.Index -ge $fired.Index -or
-        $fired.Index -ge $shutdown.Index -or $shutdown.Index -ge $worldSaved.Index -or
-        $worldSaved.Index -ge $stopped.Index) {
-        throw 'Active shutdown did not prove PRECHECK (reopen) < READY < ARMED < FIRED < GRACEFUL < World saved < Stopped.'
+        $fired.Index -ge $shutdown.Index -or $shutdown.Index -ge $runPhase.Index -or
+        $runPhase.Index -ge $disposed.Index -or $disposed.Index -ge $modsNotified.Index -or
+        $modsNotified.Index -ge $worldSaved.Index -or $worldSaved.Index -ge $stopped.Index) {
+        throw 'Active shutdown did not prove PRECHECK (reopen) < READY < ARMED < FIRED < GRACEFUL < Shutdown runphase < DISPOSED < Mods notified < World saved < Stopped.'
     }
 
     $anyMarkerSaves = [regex]::Matches($Log, $anyMarkerSavedPattern)
@@ -104,4 +125,31 @@ function Assert-L00CActiveShutdownLog {
     }
 }
 
-Export-ModuleMember -Function Assert-L00CActiveShutdownLog
+function Assert-L00CPersistedActivationOrder {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Log,
+        [Parameter(Mandatory = $true)][string]$InstanceId,
+        [Parameter(Mandatory = $true)][string]$MarkerId,
+        [Parameter(Mandatory = $true)][int]$OpenCount
+    )
+
+    $instance = [regex]::Escape($InstanceId)
+    $marker = [regex]::Escape($MarkerId)
+    $open = [regex]::Escape([string]$OpenCount)
+    $precheckPattern = "L00C_PERSISTED_PRECHECK instance=$instance marker=$marker maps=9 exact=True"
+    $activatedPattern = "L00C_ACTIVATED instance=$instance marker=$marker [^\r\n]* open=$open isnew=False "
+    $prechecks = [regex]::Matches($Log, $precheckPattern)
+    $activations = [regex]::Matches($Log, $activatedPattern)
+    if ($prechecks.Count -ne 1 -or $activations.Count -ne 1 -or $prechecks[0].Index -ge $activations[0].Index) {
+        throw "Persisted activation open $OpenCount did not prove one PRECHECK before one ACTIVATED marker."
+    }
+
+    [pscustomobject]@{
+        Status = 'PASS'
+        PrecheckIndex = $prechecks[0].Index
+        ActivatedIndex = $activations[0].Index
+    }
+}
+
+Export-ModuleMember -Function Assert-L00CActiveShutdownLog, Assert-L00CPersistedActivationOrder

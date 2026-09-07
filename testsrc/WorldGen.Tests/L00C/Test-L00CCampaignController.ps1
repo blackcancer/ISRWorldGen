@@ -103,6 +103,33 @@ function Write-Varint([IO.Stream]$Stream, [int]$Value) {
     } while ($remaining -ne 0)
 }
 
+function Assert-WalProofInAutonomousSnapshot([string]$SnapshotPath) {
+    if ((Test-Path -LiteralPath ($SnapshotPath + '-wal')) -or (Test-Path -LiteralPath ($SnapshotPath + '-shm'))) {
+        throw 'WAL proof snapshot is not autonomous because a SQLite sidecar is present.'
+    }
+
+    $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$SnapshotPath;Mode=ReadOnly;Pooling=False")
+    try {
+        $connection.Open()
+        $command = $connection.CreateCommand()
+        try {
+            $command.CommandText = 'PRAGMA integrity_check'
+            if ([string]$command.ExecuteScalar() -ne 'ok') { throw 'WAL proof snapshot failed integrity_check.' }
+            $command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='walproof'"
+            if ([int64]$command.ExecuteScalar() -ne 1) { throw 'WAL proof table is absent from the autonomous snapshot.' }
+            $command.CommandText = 'SELECT COUNT(*) FROM walproof'
+            if ([int64]$command.ExecuteScalar() -ne 1) { throw 'WAL proof snapshot does not contain exactly one proof row.' }
+            $command.CommandText = 'SELECT COUNT(*) FROM walproof WHERE value=1'
+            if ([int64]$command.ExecuteScalar() -ne 1) { throw 'WAL proof value=1 was not preserved in the autonomous snapshot.' }
+        }
+        finally { $command.Dispose() }
+    }
+    finally {
+        $connection.Close()
+        $connection.Dispose()
+    }
+}
+
 function New-MarkerPayload([int]$OpenCount) {
     $mapListType = [Collections.Generic.List``1].MakeGenericType($script:mapSnapshotType)
     $maps = [Activator]::CreateInstance($mapListType)
@@ -298,6 +325,9 @@ function Complete-Open1(
         "L00C_DELAYED_SHUTDOWN_ARMED instance=$instance run=1 reason=fixture-stable delayms=15000 listener=41"
         "L00C_DELAYED_SHUTDOWN_FIRED instance=$instance run=1 reason=fixture-stable"
         "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$instance marker=$marker reason=fixture-stable"
+        'Entering runphase Shutdown'
+        "L00C_DISPOSED instance=$instance removedowned=17 restorednative=16 exact=True callbacks=1 forwarded=0"
+        'Mods and systems notified, now saving everything...'
         'World saved!'
         'Stopped the server!'
     ) -join [Environment]::NewLine
@@ -391,12 +421,15 @@ function Complete-Open2(
         }
     }
     $open2Log = @(
-        $activatedLine,
         "L00C_PERSISTED_PRECHECK instance=$($session.InstanceId) marker=$($session.MarkerId) maps=9 exact=True",
+        $activatedLine,
         $stableLine,
         "L00C_DELAYED_SHUTDOWN_ARMED instance=$($session.InstanceId) run=$($session.WorldRunId) reason=persisted-reopen-stable delayms=15000 listener=42",
         "L00C_DELAYED_SHUTDOWN_FIRED instance=$($session.InstanceId) run=$($session.WorldRunId) reason=persisted-reopen-stable",
         "L00C_GRACEFUL_SHUTDOWN_REQUEST instance=$($session.InstanceId) marker=$($session.MarkerId) reason=persisted-reopen-stable",
+        'Entering runphase Shutdown',
+        "L00C_DISPOSED instance=$($session.InstanceId) removedowned=0 restorednative=0 exact=True callbacks=0 forwarded=0",
+        'Mods and systems notified, now saving everything...',
         'World saved!',
         'Stopped the server!') -join [Environment]::NewLine
     if ($TerminalMutation -eq 'MissingWorldSave') {
@@ -518,6 +551,41 @@ try {
         throw 'Valid controller campaign did not traverse all four production phases.'
     }
 
+    [Microsoft.Data.Sqlite.SqliteConnection]::ClearAllPools()
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+    $sourceQuarantine = Join-Path $baseline.Root 'source-quarantine'
+    [void](New-Item -ItemType Directory -Path $sourceQuarantine)
+    foreach ($sourceComponent in @($baseline.Database, ($baseline.Database + '-wal'), ($baseline.Database + '-shm'))) {
+        if (Test-Path -LiteralPath $sourceComponent -PathType Leaf) {
+            Move-Item -LiteralPath $sourceComponent -Destination $sourceQuarantine
+        }
+    }
+    foreach ($sourceComponent in @($baseline.Database, ($baseline.Database + '-wal'), ($baseline.Database + '-shm'))) {
+        if (Test-Path -LiteralPath $sourceComponent) {
+            throw "WAL proof source component was not quarantined: $sourceComponent"
+        }
+    }
+    Assert-WalProofInAutonomousSnapshot $baseline.Snapshot
+
+    $missingWalProof = Join-Path $baseline.Root 'missing-walproof.vcdbs'
+    Copy-Item -LiteralPath $baseline.Snapshot -Destination $missingWalProof
+    $missingWalConnection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$missingWalProof;Mode=ReadWrite;Pooling=False")
+    try {
+        $missingWalConnection.Open()
+        $missingWalCommand = $missingWalConnection.CreateCommand()
+        try {
+            $missingWalCommand.CommandText = 'DELETE FROM walproof'
+            if ([int]$missingWalCommand.ExecuteNonQuery() -ne 1) { throw 'Synthetic WAL negative could not remove its proof row.' }
+        }
+        finally { $missingWalCommand.Dispose() }
+    }
+    finally {
+        $missingWalConnection.Close()
+        $missingWalConnection.Dispose()
+    }
+    Assert-Rejected { Assert-WalProofInAutonomousSnapshot $missingWalProof } 'Autonomous snapshot missing the WAL-carried proof row'
+
     [ordered]@{
         TestId = 'L00-C-CAMPAIGN-CONTROLLER'
         Status = 'PASS'
@@ -537,6 +605,8 @@ try {
         ReorderedTerminalEventsRejected = $true
         AutonomousOpen1AndOpen2SnapshotsRequired = $true
         WalBackedOpen1SourceExercised = $true
+        WalPayloadReadWithoutSource = $true
+        MissingWalPayloadRejected = $true
         ProductionLogSchemaDerived = $true
         OperationalGuarantee = 'fresh tamper-evident chain, not attacker-resistant'
     } | ConvertTo-Json -Depth 5
