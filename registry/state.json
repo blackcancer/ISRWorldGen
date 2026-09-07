@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-07T04:06:47.0744015Z",
-  "integrated_commit": "0d7a1cce329c1d68c2ea22fa77169d540d4e9fe4",
+  "updated_utc": "2026-09-07T05:34:33.8326901Z",
+  "integrated_commit": "f6330f834dda1683eebe697ac775eedab9456764",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -135,11 +135,22 @@
       "blocker": null
     },
     "L03-A": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
-      "evidence": [],
+      "status": "DONE",
+      "owner": "agent:l03_a",
+      "branch": "agent/l03-a",
+      "base_commit": "94ec68b89256317499191437113d0fe72359e29a",
+      "evidence": [
+        "worklogs/L03-A.md",
+        "commit:386240c205c82118e0a4890e6e4896546ebda18e",
+        "commit:40b516927a8d6a5fddd44c4fb938af0760d6aaba",
+        "commit:0ab66176b2d26197c304e33fd7d24dc5320ccf80",
+        "commit:3209e0564c94c239d06c8adecaca7eca612ecb68",
+        "commit:f6330f834dda1683eebe697ac775eedab9456764",
+        "local:.local/L03A/evidence/T03-01-02.json",
+        "local:.local/L03A-integrated/tests/debug/L03A-integrated-debug.trx",
+        "local:.local/L03A-integrated/tests/release/L03A-integrated-release-full-commit.trx",
+        "local:.local/L03A-integrated/tests/global-release/ISRWorldGen-integrated-release-full-commit.trx"
+      ],
       "blocker": null
     },
     "L03-B": {

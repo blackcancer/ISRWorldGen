@@ -50,3 +50,24 @@
 Prochaine action : valider et pousser ce registre, puis déléguer L03-A sur ce
 checkpoint. Dès que l’utilisateur confirme la reconnexion Vintage Story,
 reprendre T00-06 client par F5 avant L11-A.
+
+## Reprise au 2026-09-07 — L03-A intégré
+
+- Le candidat L03-A a d'abord été rejeté sur quatre P2 : faux profils de
+  campagne, seuil 75 % insuffisamment gardé, publication prématurée de PASS et
+  coût tectonique sans budget couplé. Aucun de ces défauts n'a été intégré.
+- Le candidat corrigé `6b2c8a98050bfacc454bcb322549fe53add50fc9` a ensuite
+  reçu un verdict indépendant `ACCEPT` sans finding restant. Les profils réels
+  `balanced` et `vast-expeditions`, 192+64 seeds, les frontières de tuiles, le
+  préflight `edges × cells` et les sept cartes ont été vérifiés.
+- Le code est intégré sur `main` à
+  `f6330f834dda1683eebe697ac775eedab9456764`. Format, builds Debug/Release,
+  ciblés 10/10 dans les deux configurations et global Release 205/205 sont
+  verts sur l'intégration.
+- T03-01 et T03-02 sont `PASS`; L03-A est `DONE`. La prochaine mission
+  admissible est L03-B.
+- L00-C reste en attente de la seule réauthentification client T00-06 et ne
+  bloque pas la chaîne Core L03.
+
+Prochaine action : valider et pousser ce checkpoint, puis déléguer L03-B sur
+le hash publié exact. Reprendre T00-06 par F5 dès confirmation de connexion.
