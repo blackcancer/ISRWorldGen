@@ -145,26 +145,17 @@ public sealed class LandscapeModel
         }
 
         SiteEntry dominant = sites[selectedIndices[0]];
-        double modelAltitude;
-        if (selectedDistances[0] == 0)
+        double weighted = 0;
+        double totalWeight = 0;
+        for (int selected = 0; selected < selectedCount; selected++)
         {
-            modelAltitude = SampleCell(dominant, x, z);
+            double distance = Math.Sqrt(selectedDistances[selected]);
+            double normalizedDistance = distance / sites[selectedIndices[selected]].BlendScaleBlocks;
+            double weight = 1 / ((1 + normalizedDistance) * (1 + normalizedDistance));
+            weighted += SampleCell(sites[selectedIndices[selected]], x, z) * weight;
+            totalWeight += weight;
         }
-        else
-        {
-            double weighted = 0;
-            double totalWeight = 0;
-            for (int selected = 0; selected < selectedCount; selected++)
-            {
-                double distance = Math.Sqrt(selectedDistances[selected]);
-                double normalizedDistance = distance / sites[selectedIndices[selected]].BlendScaleBlocks;
-                double weight = 1 / ((1 + normalizedDistance) * (1 + normalizedDistance));
-                weighted += SampleCell(sites[selectedIndices[selected]], x, z) * weight;
-                totalWeight += weight;
-            }
-
-            modelAltitude = weighted / totalWeight;
-        }
+        double modelAltitude = weighted / totalWeight;
 
         if (!double.IsFinite(modelAltitude) || modelAltitude is < -1 or > 1)
         {
@@ -294,12 +285,6 @@ public static class LandscapeModelBuilder
                 "Generation identity or profile identifier exceeds the bounded landscape checksum encoding.");
         }
 
-        if (!PlateAtlasProvenance.Matches(plates, identity, profile, atlas))
-        {
-            return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.plate-provenance",
-                "Plate snapshot provenance does not seal this generation identity, frozen profile, and atlas.");
-        }
-
         if (atlas.Sites.Count != plates.Cells.Count)
         {
             return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.cell-identity",
@@ -312,10 +297,23 @@ public static class LandscapeModelBuilder
                 $"Atlas has {atlas.Sites.Count} cells for explicit landscape budget {settings.MaximumCells}.");
         }
 
+        if (atlas.Sites.Count > profile.SiteQuota)
+        {
+            return Failure(identity, GenerationFailureCode.BudgetExceeded, "geology.landscapes.profile-site-quota",
+                $"Atlas has {atlas.Sites.Count} sites for frozen profile quota {profile.SiteQuota}.");
+        }
+
         if (settings.BlendSiteCount > atlas.Sites.Count)
         {
             return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.blend-count",
                 "Blend site count cannot exceed the atlas site count.");
+        }
+
+        // All count/quota checks above are intentionally non-allocating; provenance canonicalization may sort.
+        if (!PlateAtlasProvenance.Matches(plates, identity, profile, atlas))
+        {
+            return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.plate-provenance",
+                "Plate snapshot provenance does not seal this generation identity, frozen profile, and atlas.");
         }
 
         GenerationResult<ReliefVerticalPlan> planResult = ReliefVerticalBudgetPlanner.Create(

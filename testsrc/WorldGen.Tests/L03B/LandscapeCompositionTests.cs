@@ -188,6 +188,27 @@ public sealed class LandscapeCompositionTests
         Assert.IsGreaterThan(0.0001, Variance(samples));
     }
 
+    [TestMethod]
+    public void PublishedMorphologyParametersEachChangeTheSampleAndSiteLimitIsContinuous()
+    {
+        LandscapeFamilyProfile source = LandscapeFamilyCatalog.Get(LandscapeFamily.RuggedRanges);
+        double baseline = LandscapeSignatureSampler.Sample(source, 12_345, -6_789, 73, 11);
+        foreach (LandscapeFamilyProfile changed in new[]
+        {
+            new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks * 1.7, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, source.MacroWeight, source.MesoWeight, source.DetailWeight),
+            new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks * 1.7, source.ReliefAmplitudeNormalized, source.MacroWeight, source.MesoWeight, source.DetailWeight),
+            new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, .35, .50, .15),
+            new LandscapeFamilyProfile(source.Family, source.MacroWavelengthBlocks, source.MesoWavelengthBlocks, source.DetailWavelengthBlocks, source.ReliefAmplitudeNormalized, .55, .15, .30),
+        }) Assert.AreNotEqual(baseline, LandscapeSignatureSampler.Sample(changed, 12_345, -6_789, 73, 11));
+
+        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
+        GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
+        (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
+        LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile, new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4)));
+        AtlasSite site = atlas.Sites[0];
+        Assert.IsLessThan(.01, Math.Abs(model.Sample(site.X, site.Z).ModelAltitudeNormalized - model.Sample(Math.Min(site.X + 1, atlas.Bounds.MaxXExclusive - 1), site.Z).ModelAltitudeNormalized));
+    }
+
     private static IEnumerable<(long X, long Z)> SampleCoordinates(FrozenScaleProfile profile)
     {
         for (int z = 1; z <= 7; z++)
