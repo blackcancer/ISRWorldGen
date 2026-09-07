@@ -21,6 +21,9 @@ public sealed class EvidenceArtifactTests
     private const double MinimumTargetVariance = 0.0001;
     private const double MinimumPairwiseMeanAbsoluteDifference = 0.035;
     private const int MinimumCorpusFamilies = 5;
+    // Descriptive metric, deliberately not an acceptance threshold: a local extremum must differ from
+    // every one of its eight neighbours by at least one percent of the sampled fixture range.
+    private const double EightNeighborExtremaContrastFraction = .01;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -55,6 +58,9 @@ public sealed class EvidenceArtifactTests
         Directory.CreateDirectory(Path.Combine(output, "blind"));
         Directory.CreateDirectory(Path.Combine(output, "sealed"));
         string reportPath = Path.Combine(output, "sealed", "T03-05-06-S.json");
+        string manifestPath = Path.Combine(output, "blind", "T03-06-S-manifest.json");
+        WriteBlindManifest(manifestPath, commit, tree, configuration, testAssemblyHash, coreAssemblyHash,
+            automatedStatus: "RUNNING", qualitativeReviewStatus: "REVIEW_REQUIRED", overallStatus: "RUNNING", Array.Empty<BlindArtifact>());
         WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
@@ -63,12 +69,13 @@ public sealed class EvidenceArtifactTests
             qualitativeReviewStatus = "REVIEW_REQUIRED",
             overallStatus = "RUNNING",
             commit,
+            tree,
             configuration,
         }, JsonOptions));
 
         try
         {
-            RunCampaign(output, reportPath, commit, configuration, nonce, blindOrder);
+            RunCampaign(output, reportPath, manifestPath, commit, tree, configuration, nonce, blindOrder, testAssemblyHash, coreAssemblyHash);
         }
         catch (Exception exception)
         {
@@ -80,9 +87,12 @@ public sealed class EvidenceArtifactTests
                 qualitativeReviewStatus = "NOT_RUN",
                 overallStatus = "FAIL",
                 commit,
+                tree,
                 configuration,
                 failure = new { type = exception.GetType().FullName, exception.Message },
             }, JsonOptions));
+            WriteBlindManifest(manifestPath, commit, tree, configuration, testAssemblyHash, coreAssemblyHash,
+                automatedStatus: "FAIL", qualitativeReviewStatus: "NOT_RUN", overallStatus: "FAIL", Array.Empty<BlindArtifact>());
             throw;
         }
     }
@@ -90,10 +100,14 @@ public sealed class EvidenceArtifactTests
     private static void RunCampaign(
         string output,
         string reportPath,
+        string manifestPath,
         string commit,
+        string tree,
         string configuration,
         string nonce,
-        IReadOnlyList<(string Code, LandscapeFamily Family)> blindOrder)
+        IReadOnlyList<(string Code, LandscapeFamily Family)> blindOrder,
+        string testAssemblyHash,
+        string coreAssemblyHash)
     {
         VerticalMetric[] verticalMetrics = new[] { "laboratory", "balanced", "vast-expeditions" }
             .Select(VerticalMetricFor)
@@ -117,7 +131,7 @@ public sealed class EvidenceArtifactTests
         Assert.AreEqual("geology.landscapes.vertical-above-sea", impossibleAbove.Error.Stage);
 
         var fixtureMetrics = new List<BlindFixtureMetric>();
-        var mapRecords = new List<object>();
+        var blindArtifacts = new List<BlindArtifact>();
         var sealedFixtures = new List<object>();
         var profileRows = new StringBuilder("code,direction,index,normalized-height\n");
         var sampledByCode = new Dictionary<string, double[,]>(StringComparer.Ordinal);
@@ -134,19 +148,14 @@ public sealed class EvidenceArtifactTests
                 double.IsFinite(metric.MeanAbsoluteSlope) && double.IsFinite(metric.RugosityLag1) &&
                 double.IsFinite(metric.RugosityLag4) && double.IsFinite(metric.RugosityLag12) &&
                 double.IsFinite(metric.ResidualPlanEnergy) && metric.Jumps.IsFinite &&
-                double.IsFinite(metric.Anisotropy) && metric.Anisotropy is >= 0 and <= 1 &&
-                metric.SignificantExtrema >= 0 && metric.SaturatedPixelCount >= 0,
+                double.IsFinite(metric.DirectionalBalance) && metric.DirectionalBalance is >= 0 and <= 1 &&
+                metric.EightNeighborExtremaAtContrastFraction >= 0 && metric.SaturatedPixelCount >= 0,
                 $"Blind metrics must be finite and bounded where defined for {code}.");
 
             byte[] bitmap = RenderBitmap(samples);
             string mapPath = Path.Combine(output, "blind", $"T03-06-{code}.bmp");
             WriteAtomic(mapPath, bitmap);
-            mapRecords.Add(new
-            {
-                code,
-                file = Path.GetFileName(mapPath),
-                sha256 = L03BTestSupport.Sha256(bitmap),
-            });
+            blindArtifacts.Add(new BlindArtifact(RelativeArtifactPath(output, mapPath), L03BTestSupport.Sha256(bitmap)));
             sealedFixtures.Add(new { code, family = family.ToString(), fixture.Seed, site = fixture.SiteId.ToString() });
 
             AppendProfiles(profileRows, code, samples);
@@ -171,6 +180,8 @@ public sealed class EvidenceArtifactTests
         string metricsPath = Path.Combine(output, "blind", "T03-06-S-blind-metrics.json");
         byte[] metricsBytes = JsonSerializer.SerializeToUtf8Bytes(fixtureMetrics, JsonOptions);
         WriteAtomic(metricsPath, metricsBytes);
+        blindArtifacts.Add(new BlindArtifact(RelativeArtifactPath(output, profilesPath), L03BTestSupport.Sha256(profileBytes)));
+        blindArtifacts.Add(new BlindArtifact(RelativeArtifactPath(output, metricsPath), L03BTestSupport.Sha256(metricsBytes)));
         byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
@@ -225,6 +236,7 @@ public sealed class EvidenceArtifactTests
             overallStatus = "REVIEW_REQUIRED",
             reason = "T03-06 requires independent recognition review; numeric thresholds are a predeclared non-normative alarm only.",
             commit,
+            tree,
             configuration,
             targetFramework = "net10.0",
             runtime = new { runtimeVersion = Environment.Version.ToString(), os = Environment.OSVersion.VersionString },
@@ -257,16 +269,16 @@ public sealed class EvidenceArtifactTests
             {
                 blindReview = new
                 {
-                    maps = mapRecords,
+                    maps = blindArtifacts.Where(item => item.Path.EndsWith(".bmp", StringComparison.Ordinal)),
                     profiles = new
                     {
-                        file = Path.GetFileName(profilesPath),
+                        path = RelativeArtifactPath(output, profilesPath),
                         sha256 = L03BTestSupport.Sha256(profileBytes),
                     },
-                    blindMetrics = new { file = Path.GetFileName(metricsPath), sha256 = L03BTestSupport.Sha256(metricsBytes) },
+                    blindMetrics = new { path = RelativeArtifactPath(output, metricsPath), sha256 = L03BTestSupport.Sha256(metricsBytes) },
                     separateKey = new
                     {
-                        file = Path.GetFileName(keyPath),
+                        path = RelativeArtifactPath(output, keyPath),
                         sha256 = L03BTestSupport.Sha256(keyBytes),
                         instruction = "Reviewer must inspect neutral-code artifacts before opening the key.",
                     },
@@ -274,11 +286,11 @@ public sealed class EvidenceArtifactTests
                 },
                 progress = new
                 {
-                    file = Path.GetFileName(progressPath),
+                    path = RelativeArtifactPath(output, progressPath),
                     sha256 = L03BTestSupport.Sha256(File.ReadAllBytes(progressPath)),
                     protocol = "atomic seed/stage heartbeat; the terminal corpus report preserves each of the 256 seeds once.",
                 },
-                measures = "mean, variance, slope, multi-scale roughness, residual energy after planar detrend, extrema, line/column/diagonal jumps, anisotropy and saturation; descriptive only, not T03-06 thresholds",
+                measures = "mean, variance, slope, multi-scale roughness, residual energy after planar detrend, eight-neighbor extrema at a documented contrast fraction, line/column/diagonal jumps, directional balance and saturation; descriptive only, not T03-06 thresholds",
                 grayscale = new { minimum = -1d, maximum = 1d, mapping = "common linear grayscale shared by every S view" },
                 unfilteredCorpus = corpus,
                 corpusFamilyCount,
@@ -288,6 +300,8 @@ public sealed class EvidenceArtifactTests
 
         // PASS is the last atomic write, after every assertion and every referenced artifact.
         WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(report, JsonOptions));
+        WriteBlindManifest(manifestPath, commit, tree, configuration, testAssemblyHash, coreAssemblyHash,
+            automatedStatus: "PASS", qualitativeReviewStatus: "REVIEW_REQUIRED", overallStatus: "REVIEW_REQUIRED", blindArtifacts);
     }
 
     private static VerticalMetric VerticalMetricFor(string profileId)
@@ -436,9 +450,9 @@ public sealed class EvidenceArtifactTests
             Roughness(samples, 4),
             Roughness(samples, 12),
             ResidualPlanEnergy(samples),
-            SignificantExtrema(samples),
+            EightNeighborExtremaAtContrastFraction(samples),
             jumps,
-            Anisotropy(samples),
+            DirectionalBalance(samples),
             samples.Cast<double>().Count(value => Math.Abs(value) >= .999));
     }
 
@@ -490,10 +504,10 @@ public sealed class EvidenceArtifactTests
         return energy / samples.Length;
     }
 
-    private static int SignificantExtrema(double[,] samples)
+    private static int EightNeighborExtremaAtContrastFraction(double[,] samples)
     {
         int count = 0;
-        double prominence = (samples.Cast<double>().Max() - samples.Cast<double>().Min()) * .01;
+        double prominence = (samples.Cast<double>().Max() - samples.Cast<double>().Min()) * EightNeighborExtremaContrastFraction;
         for (int z = 1; z < samples.GetLength(0) - 1; z++) for (int x = 1; x < samples.GetLength(1) - 1; x++)
         {
             double value = samples[z, x];
@@ -535,7 +549,8 @@ public sealed class EvidenceArtifactTests
         return new JumpStatistics(maximum, p95, maximum == 0 ? 0 : p95 / maximum);
     }
 
-    private static double Anisotropy(double[,] samples)
+    // One means equal mean horizontal and vertical change; zero means one direction has no change.
+    private static double DirectionalBalance(double[,] samples)
     {
         double horizontal = 0;
         double vertical = 0;
@@ -657,18 +672,28 @@ public sealed class EvidenceArtifactTests
         process.Start();
         string stdout = process.StandardOutput.ReadToEnd();
         string stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        if (!process.WaitForExit(10_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("Git provenance check timed out.");
+        }
         if (process.ExitCode != 0) throw new InvalidOperationException($"Git provenance check failed: {stderr.Trim()}");
         return stdout.Trim();
     }
 
     private static int GitExitCode(string repository, params string[] arguments)
     {
-        using var process = Process.Start(new ProcessStartInfo("git") { WorkingDirectory = repository, UseShellExecute = false, CreateNoWindow = true });
-        if (process is null) throw new InvalidOperationException("Git provenance process did not start.");
+        using var process = new Process { StartInfo = new ProcessStartInfo("git") { WorkingDirectory = repository, UseShellExecute = false, CreateNoWindow = true } };
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add($"safe.directory={repository.Replace('\\', '/')}");
         foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-        process.WaitForExit(10_000);
-        return process.HasExited ? process.ExitCode : throw new TimeoutException("Git provenance check timed out.");
+        process.Start();
+        if (!process.WaitForExit(10_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("Git provenance check timed out.");
+        }
+        return process.ExitCode;
     }
 
     private static byte[] RenderBitmap(double[,] samples)
@@ -714,9 +739,52 @@ public sealed class EvidenceArtifactTests
 
     private static void WriteAtomic(string path, byte[] content)
     {
-        string temporaryPath = path + ".tmp";
-        File.WriteAllBytes(temporaryPath, content);
-        File.Move(temporaryPath, path, overwrite: true);
+        string temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllBytes(temporaryPath, content);
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
+    private static string RelativeArtifactPath(string output, string path) =>
+        Path.GetRelativePath(output, path).Replace('\\', '/');
+
+    private static void WriteBlindManifest(
+        string manifestPath,
+        string commit,
+        string tree,
+        string configuration,
+        string testAssemblyHash,
+        string coreAssemblyHash,
+        string automatedStatus,
+        string qualitativeReviewStatus,
+        string overallStatus,
+        IReadOnlyList<BlindArtifact> artifacts)
+    {
+        BlindArtifact[] ordered = artifacts.OrderBy(item => item.Path, StringComparer.Ordinal).ToArray();
+        string signatureText = string.Join("\n", new[]
+        {
+            "ISRW-L03B-S-blind-bundle-v1", commit, tree, configuration, testAssemblyHash, coreAssemblyHash,
+        }.Concat(ordered.Select(item => item.Path + "\\t" + item.Sha256)));
+        WriteAtomic(manifestPath, JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schemaVersion = 1,
+            automatedStatus,
+            qualitativeReviewStatus,
+            overallStatus,
+            commit,
+            tree,
+            configuration,
+            testAssemblySha256 = testAssemblyHash,
+            coreAssemblySha256 = coreAssemblyHash,
+            artifacts = ordered,
+            bundleSignature = L03BTestSupport.Sha256(Encoding.UTF8.GetBytes(signatureText)),
+        }, JsonOptions));
     }
 
     private static void WriteInt32(byte[] destination, int offset, int value)
@@ -757,10 +825,12 @@ public sealed class EvidenceArtifactTests
         double RugosityLag4,
         double RugosityLag12,
         double ResidualPlanEnergy,
-        int SignificantExtrema,
+        int EightNeighborExtremaAtContrastFraction,
         DirectionalJumpStatistics Jumps,
-        double Anisotropy,
+        double DirectionalBalance,
         int SaturatedPixelCount);
+
+    private sealed record BlindArtifact(string Path, string Sha256);
 
     private sealed record JumpStatistics(double Maximum, double P95, double P95ToMaximumRatio);
 
