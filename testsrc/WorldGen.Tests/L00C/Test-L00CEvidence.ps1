@@ -219,7 +219,10 @@ foreach ($session in $orderedEvidenceSessions) {
             throw 'Missing-handler session must retain its refusal database when the server created one.'
         }
         $refusalDatabasePath = Assert-Artifact $session.RefusalDatabase "Session $($session.Cycle) refusal database"
-        [void](Test-L00CInitializationRefusalDatabase -DatabasePath $refusalDatabasePath -GamePath $GamePath)
+        [void](Test-L00CInitializationRefusalDatabase -DatabasePath $refusalDatabasePath `
+            -ExpectedSha256 ([string]$session.RefusalDatabase.Sha256) `
+            -ExpectedLength ([long]$session.RefusalDatabase.Length) `
+            -GamePath $GamePath)
     }
     elseif ($session.WorldRole -like 'activated-*') {
         Assert-Equal $session.GracefulShutdown $true "Session $($session.Cycle) graceful shutdown"

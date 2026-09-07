@@ -124,11 +124,115 @@ function Find-L00CByteSequence {
     return $false
 }
 
+function New-L00CInitializationRefusalDatabaseSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceDatabasePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationDatabasePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$StoppedLogPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$InstanceId,
+
+        [string]$GamePath = 'D:\Jeux\Vintagestory'
+    )
+
+    if (-not (Test-Path -LiteralPath $SourceDatabasePath -PathType Leaf)) {
+        throw "Missing-handler source database is missing: $SourceDatabasePath"
+    }
+    if (-not (Test-Path -LiteralPath $StoppedLogPath -PathType Leaf)) {
+        throw "Missing-handler stopped log is missing: $StoppedLogPath"
+    }
+    $source = (Resolve-Path -LiteralPath $SourceDatabasePath).Path
+    $stoppedLog = (Resolve-Path -LiteralPath $StoppedLogPath).Path
+    $destination = [IO.Path]::GetFullPath($DestinationDatabasePath)
+    $destinationParent = Split-Path -Parent $destination
+    if (-not (Test-Path -LiteralPath $destinationParent -PathType Container)) {
+        throw "Missing-handler snapshot directory is missing: $destinationParent"
+    }
+    foreach ($candidate in @($destination, $destination + '-wal', $destination + '-shm')) {
+        if (Test-Path -LiteralPath $candidate) {
+            throw "Missing-handler snapshot destination must be new: $candidate"
+        }
+    }
+
+    $log = Get-Content -LiteralPath $stoppedLog -Raw
+    [void](Assert-L00CInitializationRefusalLog -WorldRole 'missing-handler' -Log $log -InstanceId $InstanceId)
+    Import-L00CSqliteRuntime $GamePath
+
+    $sourceWal = $source + '-wal'
+    $sourceWalPresent = Test-Path -LiteralPath $sourceWal -PathType Leaf
+    $sourceWalLength = if ($sourceWalPresent) { (Get-Item -LiteralPath $sourceWal).Length } else { 0 }
+
+    # Reserve the exact destination atomically. SQLite then initializes only
+    # this owned, empty file; an existing artifact can never be overwritten.
+    $reservation = [IO.File]::Open($destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $reservation.Dispose()
+
+    $sourceConnection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$source;Mode=ReadOnly;Pooling=False")
+    $destinationConnection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$destination;Mode=ReadWriteCreate;Pooling=False")
+    try {
+        $sourceConnection.Open()
+        $destinationConnection.Open()
+        $sourceConnection.BackupDatabase($destinationConnection)
+        $journalCommand = $destinationConnection.CreateCommand()
+        try {
+            $journalCommand.CommandText = 'PRAGMA journal_mode=DELETE'
+            $journalMode = [string]$journalCommand.ExecuteScalar()
+            if ($journalMode -ne 'delete') {
+                throw "Autonomous snapshot could not leave WAL mode: $journalMode"
+            }
+        }
+        finally {
+            $journalCommand.Dispose()
+        }
+    }
+    finally {
+        $destinationConnection.Close()
+        $destinationConnection.Dispose()
+        $sourceConnection.Close()
+        $sourceConnection.Dispose()
+        [Microsoft.Data.Sqlite.SqliteConnection]::ClearAllPools()
+    }
+
+    $sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+    $length = (Get-Item -LiteralPath $destination).Length
+    $validation = Test-L00CInitializationRefusalDatabase -DatabasePath $destination `
+        -ExpectedSha256 $sha256 -ExpectedLength $length -GamePath $GamePath
+
+    return [pscustomobject]@{
+        Status = 'PASS'
+        CapturedUtc = [DateTimeOffset]::UtcNow.ToString('o')
+        SourceDatabasePath = $source
+        SourceDatabaseLength = (Get-Item -LiteralPath $source).Length
+        SourceWalPresent = $sourceWalPresent
+        SourceWalLength = $sourceWalLength
+        StoppedLogSha256 = (Get-FileHash -LiteralPath $stoppedLog -Algorithm SHA256).Hash
+        DestinationDatabasePath = $destination
+        Sha256 = $sha256
+        Length = $length
+        CreateNew = $true
+        Autonomous = [bool]$validation.Autonomous
+        IntegrityCheck = [string]$validation.IntegrityCheck
+    }
+}
+
 function Test-L00CInitializationRefusalDatabase {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$DatabasePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedSha256,
+
+        [Parameter(Mandatory = $true)]
+        [long]$ExpectedLength,
 
         [string]$GamePath = 'D:\Jeux\Vintagestory'
     )
@@ -137,13 +241,38 @@ function Test-L00CInitializationRefusalDatabase {
         throw "Missing-handler refusal database is missing: $DatabasePath"
     }
     $resolvedDatabase = (Resolve-Path -LiteralPath $DatabasePath).Path
+    if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$' -or $ExpectedLength -le 0) {
+        throw 'Missing-handler snapshot hash or length is malformed.'
+    }
+    $actualSha256 = (Get-FileHash -LiteralPath $resolvedDatabase -Algorithm SHA256).Hash
+    $actualLength = (Get-Item -LiteralPath $resolvedDatabase).Length
+    if (-not $actualSha256.Equals($ExpectedSha256, [StringComparison]::OrdinalIgnoreCase) -or $actualLength -ne $ExpectedLength) {
+        throw "Missing-handler snapshot identity mismatch: sha256=$actualSha256 length=$actualLength."
+    }
+    foreach ($sidecar in @($resolvedDatabase + '-wal', $resolvedDatabase + '-shm')) {
+        if (Test-Path -LiteralPath $sidecar) {
+            throw "Missing-handler snapshot is not autonomous because a SQLite sidecar exists: $sidecar"
+        }
+    }
     Import-L00CSqliteRuntime $GamePath
 
     $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$resolvedDatabase;Mode=ReadOnly;Pooling=False")
     $counts = @{}
     $markerEnvelopeOccurrences = 0
+    $integrityCheck = $null
+    $journalMode = $null
     try {
         $connection.Open()
+        $command = $connection.CreateCommand()
+        try {
+            $command.CommandText = 'PRAGMA integrity_check'
+            $integrityCheck = [string]$command.ExecuteScalar()
+            $command.CommandText = 'PRAGMA journal_mode'
+            $journalMode = [string]$command.ExecuteScalar()
+        }
+        finally {
+            $command.Dispose()
+        }
         foreach ($tableName in @('mapchunk', 'chunk', 'mapregion')) {
             $command = $connection.CreateCommand()
             try {
@@ -183,6 +312,12 @@ function Test-L00CInitializationRefusalDatabase {
         $connection.Dispose()
     }
 
+    if ($integrityCheck -ne 'ok') {
+        throw "Missing-handler snapshot failed SQLite integrity_check: $integrityCheck"
+    }
+    if ($journalMode -eq 'wal') {
+        throw 'Missing-handler snapshot retains WAL journal mode and is not accepted as a standalone artifact.'
+    }
     if ($counts.mapchunk -ne 0 -or $counts.chunk -ne 0 -or $counts.mapregion -ne 0) {
         throw "Missing-handler refusal persisted geography: mapchunk=$($counts.mapchunk) chunk=$($counts.chunk) mapregion=$($counts.mapregion)."
     }
@@ -193,9 +328,12 @@ function Test-L00CInitializationRefusalDatabase {
     return [pscustomobject]@{
         Status = 'PASS'
         OpenMode = 'ReadOnly'
+        Autonomous = $true
+        IntegrityCheck = $integrityCheck
+        JournalMode = $journalMode
         DatabasePath = $resolvedDatabase
-        DatabaseSha256 = (Get-FileHash -LiteralPath $resolvedDatabase -Algorithm SHA256).Hash
-        DatabaseLength = (Get-Item -LiteralPath $resolvedDatabase).Length
+        DatabaseSha256 = $actualSha256
+        DatabaseLength = $actualLength
         MapChunkRows = [long]$counts.mapchunk
         ChunkRows = [long]$counts.chunk
         MapRegionRows = [long]$counts.mapregion
@@ -203,4 +341,4 @@ function Test-L00CInitializationRefusalDatabase {
     }
 }
 
-Export-ModuleMember -Function Assert-L00CInitializationRefusalLog, Test-L00CInitializationRefusalDatabase
+Export-ModuleMember -Function Assert-L00CInitializationRefusalLog, New-L00CInitializationRefusalDatabaseSnapshot, Test-L00CInitializationRefusalDatabase

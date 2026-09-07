@@ -39,29 +39,26 @@ function New-RefusalLog([string]$InstanceId) {
     ) -join [Environment]::NewLine
 }
 
-function New-EmptyRefusalDatabase([string]$Path) {
+function Open-WalBackedRefusalDatabase([string]$Path) {
     $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$Path;Mode=ReadWriteCreate;Pooling=False")
+    $connection.Open()
+    $command = $connection.CreateCommand()
     try {
-        $connection.Open()
-        $command = $connection.CreateCommand()
-        try {
-            $command.CommandText = @'
+        $command.CommandText = @'
+PRAGMA journal_mode=WAL;
+PRAGMA wal_autocheckpoint=0;
 CREATE TABLE chunk (position integer PRIMARY KEY, data BLOB);
 CREATE TABLE gamedata (savegameid integer PRIMARY KEY, data BLOB);
 CREATE TABLE mapchunk (position integer PRIMARY KEY, data BLOB);
 CREATE TABLE mapregion (position integer PRIMARY KEY, data BLOB);
 INSERT INTO gamedata(savegameid, data) VALUES (1, X'01020304');
 '@
-            [void]$command.ExecuteNonQuery()
-        }
-        finally {
-            $command.Dispose()
-        }
+        [void]$command.ExecuteNonQuery()
     }
     finally {
-        $connection.Close()
-        $connection.Dispose()
+        $command.Dispose()
     }
+    return $connection
 }
 
 $sqliteDirectory = Join-Path $GamePath 'Lib'
@@ -87,17 +84,56 @@ Assert-Rejected { Assert-L00CInitializationRefusalLog -WorldRole 'missing-handle
 
 $temporaryRoot = Join-Path $RepositoryRoot ('.local\L00C\initialization-refusal-selftest\' + [Guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $temporaryRoot -Force)
+$writer = $null
 try {
-    $databasePath = Join-Path $temporaryRoot 'refusal.vcdbs'
-    New-EmptyRefusalDatabase $databasePath
-    $databaseResult = Test-L00CInitializationRefusalDatabase -DatabasePath $databasePath -GamePath $GamePath
-    if ($databaseResult.MapChunkRows -ne 0 -or $databaseResult.ChunkRows -ne 0 -or
-        $databaseResult.MapRegionRows -ne 0 -or $databaseResult.MarkerEnvelopeOccurrences -ne 0) {
-        throw 'Empty refusal database was not classified as zero-geography and zero-envelope.'
+    $sourceDatabasePath = Join-Path $temporaryRoot 'source-wal-backed.vcdbs'
+    $snapshotDatabasePath = Join-Path $temporaryRoot 'refusal-autonomous.vcdbs'
+    $incompleteDatabasePath = Join-Path $temporaryRoot 'main-file-without-wal.vcdbs'
+    $stoppedLogPath = Join-Path $temporaryRoot 'missing-handler.log'
+    [IO.File]::WriteAllText($stoppedLogPath, $validLog, [Text.UTF8Encoding]::new($false))
+    $writer = Open-WalBackedRefusalDatabase $sourceDatabasePath
+    if (-not (Test-Path -LiteralPath ($sourceDatabasePath + '-wal') -PathType Leaf) -or
+        (Get-Item -LiteralPath ($sourceDatabasePath + '-wal')).Length -le 0) {
+        throw 'The self-test source is not genuinely WAL-backed.'
+    }
+    [IO.File]::Copy($sourceDatabasePath, $incompleteDatabasePath, $false)
+    $incompleteHash = (Get-FileHash -LiteralPath $incompleteDatabasePath -Algorithm SHA256).Hash
+    $incompleteLength = (Get-Item -LiteralPath $incompleteDatabasePath).Length
+    Assert-Rejected {
+        Test-L00CInitializationRefusalDatabase -DatabasePath $incompleteDatabasePath -ExpectedSha256 $incompleteHash -ExpectedLength $incompleteLength -GamePath $GamePath
+    } 'Main database file whose state still requires a WAL'
+
+    $snapshot = New-L00CInitializationRefusalDatabaseSnapshot -SourceDatabasePath $sourceDatabasePath `
+        -DestinationDatabasePath $snapshotDatabasePath -StoppedLogPath $stoppedLogPath `
+        -InstanceId $instance -GamePath $GamePath
+    if (-not $snapshot.SourceWalPresent -or $snapshot.SourceWalLength -le 0 -or -not $snapshot.CreateNew -or -not $snapshot.Autonomous) {
+        throw 'The refusal snapshot did not record its WAL-backed source and autonomous CreateNew destination.'
+    }
+    $writer.Close()
+    $writer.Dispose()
+    $writer = $null
+
+    $archiveRoot = Join-Path $temporaryRoot 'source-archive'
+    [void](New-Item -ItemType Directory -Path $archiveRoot)
+    foreach ($sourcePath in @($sourceDatabasePath, $sourceDatabasePath + '-wal', $sourceDatabasePath + '-shm')) {
+        if (Test-Path -LiteralPath $sourcePath) {
+            Move-Item -LiteralPath $sourcePath -Destination $archiveRoot
+        }
     }
 
+    $databaseResult = Test-L00CInitializationRefusalDatabase -DatabasePath $snapshotDatabasePath `
+        -ExpectedSha256 $snapshot.Sha256 -ExpectedLength $snapshot.Length -GamePath $GamePath
+    if ($databaseResult.MapChunkRows -ne 0 -or $databaseResult.ChunkRows -ne 0 -or
+        $databaseResult.MapRegionRows -ne 0 -or $databaseResult.MarkerEnvelopeOccurrences -ne 0 -or
+        $databaseResult.IntegrityCheck -ne 'ok' -or -not $databaseResult.Autonomous) {
+        throw 'Autonomous refusal database was not classified as intact, zero-geography, and zero-envelope.'
+    }
+    Assert-Rejected {
+        Test-L00CInitializationRefusalDatabase -DatabasePath $snapshotDatabasePath -ExpectedSha256 ('0' * 64) -ExpectedLength $snapshot.Length -GamePath $GamePath
+    } 'Incoherent snapshot hash'
+
     foreach ($tableName in @('mapchunk', 'chunk', 'mapregion')) {
-        $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$databasePath;Mode=ReadWrite;Pooling=False")
+        $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$snapshotDatabasePath;Mode=ReadWrite;Pooling=False")
         try {
             $connection.Open()
             $command = $connection.CreateCommand()
@@ -113,9 +149,13 @@ try {
             $connection.Close()
             $connection.Dispose()
         }
-        Assert-Rejected { Test-L00CInitializationRefusalDatabase -DatabasePath $databasePath -GamePath $GamePath } "$tableName geography"
+        $mutatedHash = (Get-FileHash -LiteralPath $snapshotDatabasePath -Algorithm SHA256).Hash
+        $mutatedLength = (Get-Item -LiteralPath $snapshotDatabasePath).Length
+        Assert-Rejected {
+            Test-L00CInitializationRefusalDatabase -DatabasePath $snapshotDatabasePath -ExpectedSha256 $mutatedHash -ExpectedLength $mutatedLength -GamePath $GamePath
+        } "$tableName geography"
 
-        $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$databasePath;Mode=ReadWrite;Pooling=False")
+        $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$snapshotDatabasePath;Mode=ReadWrite;Pooling=False")
         try {
             $connection.Open()
             $command = $connection.CreateCommand()
@@ -134,7 +174,7 @@ try {
     }
 
     $markerBytes = [Text.Encoding]::UTF8.GetBytes('prefix-isrworldgen:l00c:marker:v1-suffix')
-    $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$databasePath;Mode=ReadWrite;Pooling=False")
+    $connection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$snapshotDatabasePath;Mode=ReadWrite;Pooling=False")
     try {
         $connection.Open()
         $command = $connection.CreateCommand()
@@ -151,9 +191,17 @@ try {
         $connection.Close()
         $connection.Dispose()
     }
-    Assert-Rejected { Test-L00CInitializationRefusalDatabase -DatabasePath $databasePath -GamePath $GamePath } 'Persisted marker envelope'
+    $mutatedHash = (Get-FileHash -LiteralPath $snapshotDatabasePath -Algorithm SHA256).Hash
+    $mutatedLength = (Get-Item -LiteralPath $snapshotDatabasePath).Length
+    Assert-Rejected {
+        Test-L00CInitializationRefusalDatabase -DatabasePath $snapshotDatabasePath -ExpectedSha256 $mutatedHash -ExpectedLength $mutatedLength -GamePath $GamePath
+    } 'Persisted marker envelope'
 }
 finally {
+    if ($null -ne $writer) {
+        $writer.Close()
+        $writer.Dispose()
+    }
     [Microsoft.Data.Sqlite.SqliteConnection]::ClearAllPools()
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
@@ -169,5 +217,7 @@ finally {
     ZeroProbeMutationRequired = $true
     ZeroGeographyRequired = $true
     ZeroEnvelopeRequired = $true
-    NegativeCases = 10
+    WalBackedSourceRequired = $true
+    AutonomousSnapshotRequired = $true
+    NegativeCases = 12
 } | ConvertTo-Json -Depth 4

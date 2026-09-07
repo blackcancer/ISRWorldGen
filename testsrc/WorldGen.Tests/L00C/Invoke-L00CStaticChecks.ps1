@@ -275,7 +275,9 @@ if ($Configuration -eq 'Debug') {
     if ($initializationRefusalEvidenceOracle.Status -ne 'PASS' -or
         -not $initializationRefusalEvidenceOracle.ImmediateShutdownWithoutWorldSave -or
         -not $initializationRefusalEvidenceOracle.ZeroGeographyRequired -or
-        -not $initializationRefusalEvidenceOracle.ZeroEnvelopeRequired) {
+        -not $initializationRefusalEvidenceOracle.ZeroEnvelopeRequired -or
+        -not $initializationRefusalEvidenceOracle.WalBackedSourceRequired -or
+        -not $initializationRefusalEvidenceOracle.AutonomousSnapshotRequired) {
         throw 'The role-specific initialization-refusal evidence oracle did not pass.'
     }
     $initializationRefusalEvidenceOracleStatus = $initializationRefusalEvidenceOracle.Status
