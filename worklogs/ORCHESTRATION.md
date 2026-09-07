@@ -71,3 +71,21 @@ reprendre T00-06 client par F5 avant L11-A.
 
 Prochaine action : valider et pousser ce checkpoint, puis déléguer L03-B sur
 le hash publié exact. Reprendre T00-06 par F5 dès confirmation de connexion.
+
+## Reprise au 2026-09-07 — provenance L03-A renforcée
+
+- La première revue de L03-B a exposé une collision de parenté : un Atlas B
+  pouvait être associé à l'identité et aux plaques A sans modifier le checksum.
+  Le candidat L03-B concerné n'a pas été intégré.
+- Trois correctifs L03-A scellent maintenant le contenu Atlas, l'identité
+  complète et le profil dans un checksum binaire V3 invariant à la culture ; la
+  chaîne de profil de déterminisme est bornée à 128 octets UTF-8 avant allocation.
+- Le candidat final agent `cfaa29f27d70a19d1e905a7bab532fa6fad2fc6e`
+  est `ACCEPT` indépendant, P1=0/P2=0/P3=0. L'intégration racine aboutit à
+  `16254dafc745867fe508bad01b5d6d75423bf919` avec format et builds verts,
+  L03-A 13/13 en Debug et Release, puis 208/208 tests globaux Release.
+- L03-A reste `DONE`. L03-B doit repartir de ce hash publié, refuser les parents
+  mélangés et soumettre une nouvelle campagne aveugle distincte de V01–V06.
+
+Prochaine action : valider le registre et publier ce checkpoint, puis reprendre
+le correctif L03-B avec un agent d'implémentation GPT-5.6 Terra Medium.

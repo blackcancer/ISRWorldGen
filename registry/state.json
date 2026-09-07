@@ -146,10 +146,16 @@
         "commit:0ab66176b2d26197c304e33fd7d24dc5320ccf80",
         "commit:3209e0564c94c239d06c8adecaca7eca612ecb68",
         "commit:f6330f834dda1683eebe697ac775eedab9456764",
+        "commit:29dffe29e23375082717f73b7f6ec2a4316f1a3d",
+        "commit:a4152fc3d1bba0beedaf64fbcdd10b4482ebc921",
+        "commit:16254dafc745867fe508bad01b5d6d75423bf919",
         "local:.local/L03A/evidence/T03-01-02.json",
         "local:.local/L03A-integrated/tests/debug/L03A-integrated-debug.trx",
         "local:.local/L03A-integrated/tests/release/L03A-integrated-release-full-commit.trx",
-        "local:.local/L03A-integrated/tests/global-release/ISRWorldGen-integrated-release-full-commit.trx"
+        "local:.local/L03A-integrated/tests/global-release/ISRWorldGen-integrated-release-full-commit.trx",
+        "local:.local/L03A-integrated/tests/provenance-debug/L03A-provenance-integrated-debug.trx",
+        "local:.local/L03A-integrated/tests/provenance-release/L03A-provenance-integrated-release.trx",
+        "local:.local/L03A-integrated/tests/provenance-global-release/ISRWorldGen-provenance-integrated-release.trx"
       ],
       "blocker": null
     },
