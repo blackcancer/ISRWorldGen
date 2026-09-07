@@ -61,7 +61,7 @@ public static class LandscapeSignatureSampler
     public static double Sample(LandscapeFamilyProfile p, double x, double z, int seed, ulong streamOrdinal, long anchorX, long anchorZ)
     {
         ArgumentNullException.ThrowIfNull(p);
-        if (!double.IsFinite(x) || !double.IsFinite(z) || Math.Abs(x) > MaximumAbsoluteCoordinateBlocks || Math.Abs(z) > MaximumAbsoluteCoordinateBlocks) throw new ArgumentOutOfRangeException(nameof(x), "Landscape coordinates must be finite and within the qualified long-world bound.");
+        if (!double.IsFinite(x) || !double.IsFinite(z) || Math.Abs(x) > MaximumAbsoluteCoordinateBlocks || Math.Abs(z) > MaximumAbsoluteCoordinateBlocks || Math.Abs((double)anchorX) > MaximumAbsoluteCoordinateBlocks || Math.Abs((double)anchorZ) > MaximumAbsoluteCoordinateBlocks) throw new ArgumentOutOfRangeException(nameof(x), "Landscape coordinates and anchors must be within the qualified long-world bound.");
         x -= anchorX; z -= anchorZ;
         StableId s = StableId.Derive(RandomDomain.Geology, StableId.Zero, streamOrdinal);
         return p.Family switch

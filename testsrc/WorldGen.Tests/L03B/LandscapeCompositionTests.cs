@@ -238,8 +238,9 @@ public sealed class LandscapeCompositionTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => LandscapeSignatureSampler.Sample(LandscapeFamilyCatalog.Get(LandscapeFamily.Plains), double.MaxValue, 0, 1, 1));
         foreach (LandscapeFamilyProfile family in LandscapeFamilyCatalog.Profiles)
         {
-            double value = LandscapeSignatureSampler.Sample(family, LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, -LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, 1, 1);
+            double value = LandscapeSignatureSampler.Sample(family, LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, -LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, 1, 1, (long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks, -(long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks);
             Assert.IsTrue(double.IsFinite(value) && value is >= -1 and <= 1);
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => LandscapeSignatureSampler.Sample(family, 0, 0, 1, 1, long.MinValue, long.MaxValue));
         }
     }
 
