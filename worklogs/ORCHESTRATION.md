@@ -114,3 +114,23 @@ le correctif L03-B avec un agent d'implémentation GPT-5.6 Terra Medium.
 Prochaine action : analyser les cinq confusions morphologiques sur les cartes
 S scellées et le code L03-B, corriger le catalogue sans affaiblir T03-06, puis
 faire une nouvelle campagne aveugle avec une permutation et un worktree neufs.
+
+## Reprise au 2026-09-07 — seconde campagne S L03-B rejetée
+
+- Le candidat morphologique `420d4109f818d3d7cb0578280339a085fac74ec8` a reçu
+  deux revues indépendantes : les bornes analytiques, les transects anti-Voronoï
+  et les probes automatisées sur huit seeds ont été `ACCEPT` avant préflight.
+  Aucun changement du runner ou du scellement Evidence n'a été admis.
+- Un préflight détaché propre, puis une campagne S neuve et terminale, ont été
+  exécutés sous `.local/L03B/` depuis ce commit. La phase aveugle a confirmé
+  l'intégrité des huit artefacts et a distingué six familles sans seam, motif
+  Voronoï apparent ni saturation.
+- La levée de clé a néanmoins donné **1/6** : seule la plaine a été reconnue.
+  Les bassins, volcans, plateaux, chaînes et vieux massifs ont été confondus.
+  Le verdict T03-06 est donc à nouveau `REJECT`; L03-B demeure `BACKLOG` et
+  aucun code candidat n'est intégré dans `main`.
+
+Prochaine action : requalifier la conception morphologique, et non les seuls
+tests, avant une éventuelle troisième campagne. La prochaine proposition doit
+expliquer comment les primitives restent visuellement distinctes après le
+mélange inter-cellules, avec revue experte préalable.
