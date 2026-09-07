@@ -63,7 +63,9 @@ public readonly record struct LandscapeSample(
     double AltitudeBlocks,
     double BathymetryBlocks,
     double PrimaryResidualWeight,
-    bool IsTransition);
+    bool IsTransition,
+    int ActiveResidualContributorCount,
+    double ForeignResidualWeight);
 
 /// <summary>
 /// Immutable regional frame.  The extents describe the owning Voronoi cell in a
@@ -152,6 +154,7 @@ public sealed class LandscapeModel
         double primaryResidual = SampleResidual(dominant, x, z);
         double primaryDatum = LandscapeAltitudeBounds.GeologicalDatum(dominant.Cell);
         double neighbourWeight = 0d;
+        int activeContributors = 1;
         double weightedResidual = primaryResidual;
         double weightedDatum = primaryDatum;
         foreach (SiteEntry candidate in sites)
@@ -172,6 +175,7 @@ public sealed class LandscapeModel
             // Every eligible neighbour is evaluated.  Thus B/C rank exchanges are
             // C1 changes in weights, never a strict-second-neighbour switch.
             neighbourWeight += weight;
+            activeContributors++;
             weightedResidual += weight * SampleResidual(candidate, x, z);
             weightedDatum += weight * LandscapeAltitudeBounds.GeologicalDatum(candidate.Cell);
         }
@@ -199,7 +203,9 @@ public sealed class LandscapeModel
             altitudeBlocks,
             bathymetryBlocks,
             1d / totalWeight,
-            neighbourWeight > 0d);
+            neighbourWeight > 0d,
+            activeContributors,
+            neighbourWeight / totalWeight);
     }
 
     private double SampleResidual(SiteEntry entry, long x, long z)

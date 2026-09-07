@@ -215,17 +215,21 @@ public sealed class MorphologyRecognitionTests
     public void TransectsCrossActualOwnershipOrContributorChangesWithoutVoronoiSteps()
     {
         LandscapeModel model = Model("laboratory", 73, out _, out _);
-        MethodInfo contributors = typeof(LandscapeModel).GetMethod("ContributorIds", BindingFlags.NonPublic | BindingFlags.Instance)!;
         int crossings = 0;
+        int twoContributorSamples = 0;
+        int threeContributorSamples = 0;
         foreach (long z in new[] { 512L, 1024L, 1536L, 2048L, 3072L })
         {
             for (long x = 1; x < 4095; x++)
             {
                 LandscapeSample left = model.Sample(x, z);
                 LandscapeSample right = model.Sample(x + 1, z);
-                StableId[] leftContributors = (StableId[])contributors.Invoke(model, [x, z])!;
-                StableId[] rightContributors = (StableId[])contributors.Invoke(model, [x + 1, z])!;
-                if (left.DominantCellId == right.DominantCellId && leftContributors.SequenceEqual(rightContributors))
+                twoContributorSamples += left.ActiveResidualContributorCount == 2 ? 1 : 0;
+                threeContributorSamples += left.ActiveResidualContributorCount >= 3 ? 1 : 0;
+                Assert.AreEqual(left.IsTransition, left.ForeignResidualWeight > 0d,
+                    "Sample diagnostics must report no foreign residual outside its explicit transition.");
+                if (left.DominantCellId == right.DominantCellId &&
+                    left.ActiveResidualContributorCount == right.ActiveResidualContributorCount)
                 {
                     continue;
                 }
@@ -236,6 +240,8 @@ public sealed class MorphologyRecognitionTests
         }
 
         Assert.IsGreaterThan(4, crossings, "Transects must exercise actual ownership or support-membership changes.");
+        Assert.IsGreaterThan(0, twoContributorSamples, "Actual Sample weights must exercise a two-contributor transition.");
+        Assert.IsGreaterThan(0, threeContributorSamples, "Actual Sample weights must exercise a three-contributor transition.");
     }
 
     private static MorphologyProbe[] Probes(LandscapeFamily family)
