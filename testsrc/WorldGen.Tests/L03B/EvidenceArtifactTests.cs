@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ISRWorldGen.Core.Atlas.Geometry;
@@ -5,6 +8,7 @@ using ISRWorldGen.Core.Atlas.Profiles;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Geology.Landscapes;
 using ISRWorldGen.Core.Geology.Plates;
+using ISRWorldGen.Core.Foundation;
 
 namespace ISRWorldGen.Tests.L03B;
 
@@ -23,37 +27,30 @@ public sealed class EvidenceArtifactTests
         WriteIndented = true,
     };
 
-    private static readonly (string Code, LandscapeFamily Family)[] BlindOrder =
-    [
-        ("S01", LandscapeFamily.Plains),
-        ("S02", LandscapeFamily.VolcanicDomains),
-        ("S03", LandscapeFamily.OldMassifs),
-        ("S04", LandscapeFamily.SedimentaryBasins),
-        ("S05", LandscapeFamily.RuggedRanges),
-        ("S06", LandscapeFamily.Plateaus),
-    ];
-
     [TestMethod]
     [DoNotParallelize]
     public void T0305AndT0306PublishAtomicBlindReviewEvidence()
     {
-        string runName = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_RUN") ?? "evidence-s-validation";
+        string commit = RequireEnvironment("ISR_L03B_EVIDENCE_COMMIT", "^[0-9a-f]{40}$");
+        string nonce = RequireEnvironment("ISR_L03B_EVIDENCE_NONCE", "^[0-9a-f]{64}$");
+        string configuration = RequireEnvironment("ISR_L03B_EVIDENCE_CONFIGURATION", "^Release$");
+        string runName = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_RUN") ?? $"evidence-s-terminal-{commit}";
+        string repository = L03BTestSupport.FindRepositoryRoot();
         if (runName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || runName.Contains("..", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Evidence run name must be a single safe directory name.");
         }
-        string output = Path.Combine(L03BTestSupport.FindRepositoryRoot(), ".local", "L03B", runName);
-        string reportPath = Path.Combine(output, "T03-05-06-S.json");
-        string commit = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_COMMIT")
-            ?? throw new InvalidOperationException("Evidence requires ISR_L03B_EVIDENCE_COMMIT as an exact 40-character lowercase hexadecimal commit.");
-        string configuration = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_CONFIGURATION")
-            ?? throw new InvalidOperationException("Evidence requires ISR_L03B_EVIDENCE_CONFIGURATION=Release.");
-        if (!System.Text.RegularExpressions.Regex.IsMatch(commit, "^[0-9a-f]{40}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant) ||
-            !string.Equals(configuration, "Release", StringComparison.Ordinal))
+        if (!string.Equals(runName, $"evidence-s-terminal-{commit}", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("Evidence requires an exact lowercase 40-hex commit and Release configuration.");
+            throw new InvalidOperationException("Evidence run name must exactly seal the requested commit.");
         }
-        Directory.CreateDirectory(output);
+        ValidateProvenanceBeforeWriting(repository, commit, configuration);
+        string output = Path.Combine(repository, ".local", "L03B", runName);
+        if (Directory.Exists(output)) throw new InvalidOperationException("Evidence terminal directory must be absent before an atomic campaign starts.");
+        (string Code, LandscapeFamily Family)[] blindOrder = DeriveBlindOrder(nonce);
+        Directory.CreateDirectory(Path.Combine(output, "blind"));
+        Directory.CreateDirectory(Path.Combine(output, "sealed"));
+        string reportPath = Path.Combine(output, "sealed", "T03-05-06-S.json");
         WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
@@ -67,7 +64,7 @@ public sealed class EvidenceArtifactTests
 
         try
         {
-            RunCampaign(output, reportPath, commit, configuration);
+            RunCampaign(output, reportPath, commit, configuration, nonce, blindOrder);
         }
         catch (Exception exception)
         {
@@ -86,7 +83,13 @@ public sealed class EvidenceArtifactTests
         }
     }
 
-    private static void RunCampaign(string output, string reportPath, string commit, string configuration)
+    private static void RunCampaign(
+        string output,
+        string reportPath,
+        string commit,
+        string configuration,
+        string nonce,
+        IReadOnlyList<(string Code, LandscapeFamily Family)> blindOrder)
     {
         VerticalMetric[] verticalMetrics = new[] { "laboratory", "balanced", "vast-expeditions" }
             .Select(VerticalMetricFor)
@@ -111,19 +114,28 @@ public sealed class EvidenceArtifactTests
 
         var fixtureMetrics = new List<BlindFixtureMetric>();
         var mapRecords = new List<object>();
-        var profileRows = new StringBuilder("view,profile,index,normalized-height\n");
+        var sealedFixtures = new List<object>();
+        var profileRows = new StringBuilder("code,direction,index,normalized-height\n");
         var sampledByCode = new Dictionary<string, double[,]>(StringComparer.Ordinal);
-        foreach ((string code, LandscapeFamily family) in BlindOrder)
+        foreach ((string code, LandscapeFamily family) in blindOrder)
         {
             LandscapeFamilyProfile profile = LandscapeFamilyCatalog.Get(family);
-            double[,] samples = SampleFixture(family, profile, 96, 96);
+            FixtureSample fixture = SampleFixture(family, profile, 192, 192);
+            double[,] samples = fixture.Samples;
             sampledByCode.Add(code, samples);
-            BlindFixtureMetric metric = Measure(code, profile, samples);
+            BlindFixtureMetric metric = Measure(code, samples);
             fixtureMetrics.Add(metric);
             Assert.IsGreaterThan(MinimumTargetVariance, metric.Variance, code);
+            Assert.IsTrue(double.IsFinite(metric.Mean) && double.IsFinite(metric.Variance) &&
+                double.IsFinite(metric.MeanAbsoluteSlope) && double.IsFinite(metric.RugosityLag1) &&
+                double.IsFinite(metric.RugosityLag4) && double.IsFinite(metric.RugosityLag12) &&
+                double.IsFinite(metric.ResidualPlanEnergy) && metric.Jumps.IsFinite &&
+                double.IsFinite(metric.Anisotropy) && metric.Anisotropy is >= 0 and <= 1 &&
+                metric.SignificantExtrema >= 0 && metric.SaturatedPixelCount >= 0,
+                $"Blind metrics must be finite and bounded where defined for {code}.");
 
             byte[] bitmap = RenderBitmap(samples);
-            string mapPath = Path.Combine(output, $"T03-06-{code}.bmp");
+            string mapPath = Path.Combine(output, "blind", $"T03-06-{code}.bmp");
             WriteAtomic(mapPath, bitmap);
             mapRecords.Add(new
             {
@@ -131,42 +143,50 @@ public sealed class EvidenceArtifactTests
                 file = Path.GetFileName(mapPath),
                 sha256 = L03BTestSupport.Sha256(bitmap),
             });
+            sealedFixtures.Add(new { code, family = family.ToString(), fixture.Seed, site = fixture.SiteId.ToString() });
 
             AppendProfiles(profileRows, code, samples);
         }
 
-        for (int left = 0; left < BlindOrder.Length; left++)
+        for (int left = 0; left < blindOrder.Count; left++)
         {
-            for (int right = left + 1; right < BlindOrder.Length; right++)
+            for (int right = left + 1; right < blindOrder.Count; right++)
             {
                 Assert.IsGreaterThan(
                     MinimumPairwiseMeanAbsoluteDifference,
                     MeanAbsoluteDifference(
-                        sampledByCode[BlindOrder[left].Code],
-                        sampledByCode[BlindOrder[right].Code]),
-                    $"{BlindOrder[left].Code}/{BlindOrder[right].Code}");
+                        sampledByCode[blindOrder[left].Code],
+                        sampledByCode[blindOrder[right].Code]),
+                    $"{blindOrder[left].Code}/{blindOrder[right].Code}");
             }
         }
 
         byte[] profileBytes = Encoding.UTF8.GetBytes(profileRows.ToString());
-        string profilesPath = Path.Combine(output, "T03-06-S-blind-profiles.csv");
+        string profilesPath = Path.Combine(output, "blind", "T03-06-S-blind-profiles.csv");
         WriteAtomic(profilesPath, profileBytes);
+        string metricsPath = Path.Combine(output, "blind", "T03-06-S-blind-metrics.json");
+        byte[] metricsBytes = JsonSerializer.SerializeToUtf8Bytes(fixtureMetrics, JsonOptions);
+        WriteAtomic(metricsPath, metricsBytes);
         byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
             instruction = "Inspect S01..S06 maps and profiles before opening this separate key.",
-            entries = BlindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
+            nonce,
+            entries = blindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
         }, JsonOptions);
-        string keyPath = Path.Combine(output, "T03-06-S-review-key.json");
+        string keyPath = Path.Combine(output, "sealed", "T03-06-S-review-key.json");
         WriteAtomic(keyPath, keyBytes);
 
         IReadOnlyList<int> calibrationSeeds = L03BTestSupport.SeedCorpus("calibration_seeds");
         IReadOnlyList<int> holdoutSeeds = L03BTestSupport.SeedCorpus("holdout_seeds");
         Assert.HasCount(192, calibrationSeeds);
         Assert.HasCount(64, holdoutSeeds);
+        Assert.AreEqual(192, calibrationSeeds.Distinct().Count());
+        Assert.AreEqual(64, holdoutSeeds.Distinct().Count());
+        CollectionAssert.AreEquivalent(Array.Empty<int>(), calibrationSeeds.Intersect(holdoutSeeds).ToArray());
         FrozenScaleProfile balanced = L03BTestSupport.FrozenProfile("balanced");
         FrozenScaleProfile vast = L03BTestSupport.FrozenProfile("vast-expeditions");
-        string progressPath = Path.Combine(output, "T03-06-S-progress.json");
+        string progressPath = Path.Combine(output, "sealed", "T03-06-S-progress.json");
         var corpusEntries = new List<CorpusMetric>(256);
         foreach ((string corpusName, IReadOnlyList<int> seeds, FrozenScaleProfile corpusProfile) in
                  new[] { ("balanced", calibrationSeeds, balanced), ("vast", holdoutSeeds, vast) })
@@ -182,6 +202,7 @@ public sealed class EvidenceArtifactTests
         }
         CorpusMetric[] corpus = corpusEntries.ToArray();
         Assert.HasCount(256, corpus);
+        Assert.AreEqual(256, corpus.Select(item => (item.Corpus, item.Seed)).Distinct().Count());
         int corpusFamilyCount = corpus.SelectMany(item => item.CellFamilyCounts.Keys).Distinct().Count();
         Assert.IsGreaterThanOrEqualTo(MinimumCorpusFamilies, corpusFamilyCount);
         Assert.IsTrue(corpus.All(item => item.MinimumModelAltitude is >= -1 and <= 1));
@@ -238,6 +259,7 @@ public sealed class EvidenceArtifactTests
                         file = Path.GetFileName(profilesPath),
                         sha256 = L03BTestSupport.Sha256(profileBytes),
                     },
+                    blindMetrics = new { file = Path.GetFileName(metricsPath), sha256 = L03BTestSupport.Sha256(metricsBytes) },
                     separateKey = new
                     {
                         file = Path.GetFileName(keyPath),
@@ -256,6 +278,7 @@ public sealed class EvidenceArtifactTests
                 grayscale = new { minimum = -1d, maximum = 1d, mapping = "common linear grayscale shared by every S view" },
                 unfilteredCorpus = corpus,
                 corpusFamilyCount,
+                sealedFixtures,
             },
         };
 
@@ -354,7 +377,7 @@ public sealed class EvidenceArtifactTests
     private static void WriteCampaignProgress(string path, string corpus, int seed, string stage) =>
         WriteAtomic(path, JsonSerializer.SerializeToUtf8Bytes(new { corpus, seed, stage }, JsonOptions));
 
-    private static double[,] SampleFixture(LandscapeFamily family, LandscapeFamilyProfile profile, int width, int height)
+    private static FixtureSample SampleFixture(LandscapeFamily family, LandscapeFamilyProfile profile, int width, int height)
     {
         // Targeted fixtures may choose their owning cell, but maps always traverse the published composition
         // (site blending, family amplitude and vertical-budget input), never a raw signature sampler.
@@ -366,40 +389,42 @@ public sealed class EvidenceArtifactTests
             (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(seed, frozen);
             LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, frozen,
                 new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), frozen.SiteQuota, 1.25)));
-            LandscapeCellProfile? cell = model.Cells.FirstOrDefault(item => item.Family == family);
-            if (cell is null || cell.Value.CellId == default)
-            {
-                continue;
-            }
-            AtlasSite site = atlas.Sites.Single(item => item.Id == cell.Value.CellId);
-            var samples = new double[height, width];
             double span = profile.MacroWavelengthBlocks * 1.7;
-            for (int z = 0; z < height; z++)
+            foreach (LandscapeCellProfile cell in model.Cells.Where(item => item.Family == family))
             {
-                for (int x = 0; x < width; x++)
+                AtlasSite site = atlas.Sites.Single(item => item.Id == cell.CellId);
+                double half = span / 2d;
+                if (site.X - half < atlas.Bounds.MinX || site.X + half > atlas.Bounds.MaxXExclusive - 1 ||
+                    site.Z - half < atlas.Bounds.MinZ || site.Z + half > atlas.Bounds.MaxZExclusive - 1)
                 {
-                    long sampleX = Math.Clamp((long)Math.Round(site.X + (((x / (double)(width - 1)) - .5) * span)), atlas.Bounds.MinX, atlas.Bounds.MaxXExclusive - 1);
-                    long sampleZ = Math.Clamp((long)Math.Round(site.Z + (((z / (double)(height - 1)) - .5) * span)), atlas.Bounds.MinZ, atlas.Bounds.MaxZExclusive - 1);
-                    samples[z, x] = model.Sample(sampleX, sampleZ).ModelAltitudeNormalized;
+                    continue;
                 }
+
+                var samples = new double[height, width];
+                for (int z = 0; z < height; z++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        long sampleX = checked((long)Math.Round(site.X + (((x / (double)(width - 1)) - .5) * span)));
+                        long sampleZ = checked((long)Math.Round(site.Z + (((z / (double)(height - 1)) - .5) * span)));
+                        samples[z, x] = model.Sample(sampleX, sampleZ).ModelAltitudeNormalized;
+                    }
+                }
+                return new FixtureSample(samples, seed, site.Id);
             }
-            return samples;
         }
         throw new AssertFailedException(
             $"No declared targeted fixture contains family {family}.");
     }
 
-    private static BlindFixtureMetric Measure(
-        string code,
-        LandscapeFamilyProfile profile,
-        double[,] samples)
+    private static BlindFixtureMetric Measure(string code, double[,] samples)
     {
         double[] values = samples.Cast<double>().ToArray();
         double mean = values.Average();
         double variance = values.Select(value => (value - mean) * (value - mean)).Average();
+        DirectionalJumpStatistics jumps = AdjacentJumpStatistics(samples);
         return new BlindFixtureMetric(
             code,
-            profile.ParameterChecksum.ToString(),
             mean,
             variance,
             MeanAbsoluteSlope(samples),
@@ -408,8 +433,7 @@ public sealed class EvidenceArtifactTests
             Roughness(samples, 12),
             ResidualPlanEnergy(samples),
             SignificantExtrema(samples),
-            AdjacentJumpStatistics(samples).Maximum,
-            AdjacentJumpStatistics(samples).P95,
+            jumps,
             Anisotropy(samples),
             samples.Cast<double>().Count(value => Math.Abs(value) >= .999));
     }
@@ -465,33 +489,46 @@ public sealed class EvidenceArtifactTests
     private static int SignificantExtrema(double[,] samples)
     {
         int count = 0;
+        double prominence = (samples.Cast<double>().Max() - samples.Cast<double>().Min()) * .01;
         for (int z = 1; z < samples.GetLength(0) - 1; z++) for (int x = 1; x < samples.GetLength(1) - 1; x++)
         {
             double value = samples[z, x];
             bool greater = true;
             bool less = true;
+            double highestNeighbor = double.NegativeInfinity;
+            double lowestNeighbor = double.PositiveInfinity;
             for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) if (dx != 0 || dz != 0)
             {
-                greater &= value > samples[z + dz, x + dx];
-                less &= value < samples[z + dz, x + dx];
+                double neighbor = samples[z + dz, x + dx];
+                greater &= value > neighbor;
+                less &= value < neighbor;
+                highestNeighbor = Math.Max(highestNeighbor, neighbor);
+                lowestNeighbor = Math.Min(lowestNeighbor, neighbor);
             }
-            if (greater || less) count++;
+            if ((greater && value - highestNeighbor >= prominence) || (less && lowestNeighbor - value >= prominence)) count++;
         }
         return count;
     }
 
-    private static (double Maximum, double P95) AdjacentJumpStatistics(double[,] samples)
+    private static DirectionalJumpStatistics AdjacentJumpStatistics(double[,] samples)
     {
-        var jumps = new List<double>();
+        var horizontal = new List<double>(); var vertical = new List<double>(); var main = new List<double>(); var anti = new List<double>();
         for (int z = 0; z < samples.GetLength(0); z++) for (int x = 0; x < samples.GetLength(1); x++)
         {
-            if (x + 1 < samples.GetLength(1)) jumps.Add(Math.Abs(samples[z, x] - samples[z, x + 1]));
-            if (z + 1 < samples.GetLength(0)) jumps.Add(Math.Abs(samples[z, x] - samples[z + 1, x]));
-            if (x + 1 < samples.GetLength(1) && z + 1 < samples.GetLength(0)) jumps.Add(Math.Abs(samples[z, x] - samples[z + 1, x + 1]));
-            if (x > 0 && z + 1 < samples.GetLength(0)) jumps.Add(Math.Abs(samples[z, x] - samples[z + 1, x - 1]));
+            if (x + 1 < samples.GetLength(1)) horizontal.Add(Math.Abs(samples[z, x] - samples[z, x + 1]));
+            if (z + 1 < samples.GetLength(0)) vertical.Add(Math.Abs(samples[z, x] - samples[z + 1, x]));
+            if (x + 1 < samples.GetLength(1) && z + 1 < samples.GetLength(0)) main.Add(Math.Abs(samples[z, x] - samples[z + 1, x + 1]));
+            if (x > 0 && z + 1 < samples.GetLength(0)) anti.Add(Math.Abs(samples[z, x] - samples[z + 1, x - 1]));
         }
-        jumps.Sort();
-        return (jumps[^1], jumps[(int)Math.Floor(.95 * (jumps.Count - 1))]);
+        return new DirectionalJumpStatistics(Jump(horizontal), Jump(vertical), Jump(main), Jump(anti));
+    }
+
+    private static JumpStatistics Jump(List<double> values)
+    {
+        values.Sort();
+        double maximum = values[^1];
+        double p95 = values[(int)Math.Floor(.95 * (values.Count - 1))];
+        return new JumpStatistics(maximum, p95, maximum == 0 ? 0 : p95 / maximum);
     }
 
     private static double Anisotropy(double[,] samples)
@@ -502,7 +539,11 @@ public sealed class EvidenceArtifactTests
         int verticalCount = 0;
         for (int z = 0; z < samples.GetLength(0); z++) for (int x = 1; x < samples.GetLength(1); x++) { horizontal += Math.Abs(samples[z, x] - samples[z, x - 1]); horizontalCount++; }
         for (int z = 1; z < samples.GetLength(0); z++) for (int x = 0; x < samples.GetLength(1); x++) { vertical += Math.Abs(samples[z, x] - samples[z - 1, x]); verticalCount++; }
-        return horizontalCount == 0 || verticalCount == 0 ? 0 : (horizontal / horizontalCount) / (vertical / verticalCount);
+        if (horizontalCount == 0 || verticalCount == 0) return 0;
+        double horizontalMean = horizontal / horizontalCount;
+        double verticalMean = vertical / verticalCount;
+        double maximum = Math.Max(horizontalMean, verticalMean);
+        return maximum == 0 ? 0 : Math.Min(horizontalMean, verticalMean) / maximum;
     }
 
     private static double Roughness(double[,] samples, int lag)
@@ -543,6 +584,71 @@ public sealed class EvidenceArtifactTests
         }
 
         return total / count;
+    }
+
+    private static string RequireEnvironment(string name, string expression)
+    {
+        string value = Environment.GetEnvironmentVariable(name)
+            ?? throw new InvalidOperationException($"Evidence requires {name}.");
+        if (!System.Text.RegularExpressions.Regex.IsMatch(value, expression, System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+        {
+            throw new InvalidOperationException($"Evidence value {name} has an invalid format.");
+        }
+        return value;
+    }
+
+    private static (string Code, LandscapeFamily Family)[] DeriveBlindOrder(string nonce)
+    {
+        return Enum.GetValues<LandscapeFamily>()
+            .Select(family => new
+            {
+                Family = family,
+                Key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"ISRW-L03B-S|{nonce}|{(int)family}"))),
+            })
+            .OrderBy(item => item.Key, StringComparer.Ordinal)
+            .Select((item, index) => ($"S{index + 1:00}", item.Family))
+            .ToArray();
+    }
+
+    private static void ValidateProvenanceBeforeWriting(string repository, string commit, string configuration)
+    {
+        if (!string.Equals(Git(repository, "rev-parse", "HEAD"), commit, StringComparison.Ordinal) ||
+            !string.IsNullOrEmpty(Git(repository, "status", "--porcelain", "--untracked-files=no")))
+        {
+            throw new InvalidOperationException("Evidence requires the requested commit at a clean tracked working tree.");
+        }
+
+        Assembly assembly = typeof(EvidenceArtifactTests).Assembly;
+        string? assemblyConfiguration = assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration;
+        string? informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.Equals(configuration, "Release", StringComparison.Ordinal) ||
+            !string.Equals(assemblyConfiguration, "Release", StringComparison.Ordinal) ||
+            informational is null || !informational.EndsWith($"+{commit}", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Evidence requires a Release assembly with informational version suffix +commit.");
+        }
+    }
+
+    private static string Git(string repository, params string[] arguments)
+    {
+        using var process = new Process();
+        process.StartInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = repository,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add($"safe.directory={repository.Replace('\\', '/')}");
+        foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
+        process.Start();
+        string stdout = process.StandardOutput.ReadToEnd();
+        string stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0) throw new InvalidOperationException($"Git provenance check failed: {stderr.Trim()}");
+        return stdout.Trim();
     }
 
     private static byte[] RenderBitmap(double[,] samples)
@@ -620,9 +726,10 @@ public sealed class EvidenceArtifactTests
         bool StrictlyMonotone,
         bool QuantizedNonDecreasing);
 
+    private sealed record FixtureSample(double[,] Samples, int Seed, StableId SiteId);
+
     private sealed record BlindFixtureMetric(
         string Code,
-        string ParameterChecksum,
         double Mean,
         double Variance,
         double MeanAbsoluteSlope,
@@ -631,10 +738,17 @@ public sealed class EvidenceArtifactTests
         double RugosityLag12,
         double ResidualPlanEnergy,
         int SignificantExtrema,
-        double MaximumAdjacentJump,
-        double P95AdjacentJump,
+        DirectionalJumpStatistics Jumps,
         double Anisotropy,
         int SaturatedPixelCount);
+
+    private sealed record JumpStatistics(double Maximum, double P95, double P95ToMaximumRatio);
+
+    private sealed record DirectionalJumpStatistics(JumpStatistics Horizontal, JumpStatistics Vertical, JumpStatistics MainDiagonal, JumpStatistics AntiDiagonal)
+    {
+        public bool IsFinite => new[] { Horizontal, Vertical, MainDiagonal, AntiDiagonal }
+            .All(item => double.IsFinite(item.Maximum) && double.IsFinite(item.P95) && double.IsFinite(item.P95ToMaximumRatio) && item.P95ToMaximumRatio is >= 0 and <= 1);
+    }
 
     private sealed record CorpusMetric(
         string Corpus,
