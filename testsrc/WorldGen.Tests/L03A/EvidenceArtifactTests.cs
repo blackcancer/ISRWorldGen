@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text;
+using ISRWorldGen.Core.Atlas.Geometry;
 using ISRWorldGen.Core.Foundation;
 using ISRWorldGen.Core.Geology.Plates;
 
@@ -24,15 +25,57 @@ public sealed class EvidenceArtifactTests
             new ContinentalSamplingGrid(4_608, 3_072, 16, 16, 192, 128)));
         ContinentalTopologyReport continentTopology = ContinentalTopologyAnalyzer.Analyze(continent);
         ContinentalTopologyReport regionTopology = ContinentalTopologyAnalyzer.Analyze(region);
+        const int marineWitnessSeed = -413555959;
+        ContinentalFieldModel marineModel = L03ATestSupport.Success(ContinentalFieldModel.Create(
+            L03ATestSupport.Identity(marineWitnessSeed),
+            L03ATestSupport.VastBounds(),
+            settings));
+        ContinentalRaster marineRaster = L03ATestSupport.Success(marineModel.Rasterize(
+            new ContinentalSamplingGrid(64, 64, 128, 128, 96, 64)));
+        ContinentalTopologyReport marineTopology = ContinentalTopologyAnalyzer.Analyze(marineRaster);
+        GeneratedSiteSet atlasSites = L03ATestSupport.Success(AtlasSiteGenerator.Generate(
+            L03ATestSupport.Identity(seed),
+            L03ATestSupport.VastBounds(),
+            new AtlasSiteGenerationSettings(64)));
+        AtlasMesh atlas = L03ATestSupport.Success(AtlasGeometryBuilder.Build(
+            L03ATestSupport.Identity(seed),
+            L03ATestSupport.VastBounds(),
+            atlasSites.Sites,
+            new AtlasGeometryBuildOptions(4, GeometryCacheMode.Precomputed)));
+        PlateAtlasSnapshot plateSnapshot = L03ATestSupport.Success(PlateAtlasBuilder.Build(
+            L03ATestSupport.Identity(seed),
+            atlas,
+            new PlateGenerationSettings(7, settings, maximumCells: 1_000, maximumBoundaryEdges: 4_000)));
+        (int coastSegments, int atlasAligned, int tileAligned) =
+            L03ATestSupport.CoastlineAlignment(atlas, continent, tileSizeSamples: 32);
         byte[] continentBitmap = L03ATestSupport.RenderTopologyBitmap(continent);
         byte[] regionBitmap = L03ATestSupport.RenderTopologyBitmap(region);
+        byte[] marineBitmap = L03ATestSupport.RenderMarineBitmap(marineRaster, marineTopology);
+        byte[] platesBitmap = L03ATestSupport.RenderPlateLayerBitmap(
+            atlas, plateSnapshot, continent, PlateReviewLayer.Plate);
+        byte[] crustBitmap = L03ATestSupport.RenderPlateLayerBitmap(
+            atlas, plateSnapshot, continent, PlateReviewLayer.Crust);
+        byte[] boundaryFieldBitmap = L03ATestSupport.RenderPlateLayerBitmap(
+            atlas, plateSnapshot, continent, PlateReviewLayer.BoundaryField);
+        byte[] atlasOverlayBitmap = L03ATestSupport.RenderPlateLayerBitmap(
+            atlas, plateSnapshot, continent, PlateReviewLayer.ContinentalAtlasOverlay);
         string output = Path.Combine(L03ATestSupport.FindRepositoryRoot(), ".local", "L03A", "evidence");
         Directory.CreateDirectory(output);
         string continentPath = Path.Combine(output, "T03-02-continent.bmp");
         string regionPath = Path.Combine(output, "T03-02-region.bmp");
+        string marinePath = Path.Combine(output, "T03-02-marine-domains.bmp");
+        string platesPath = Path.Combine(output, "T03-02-plates.bmp");
+        string crustPath = Path.Combine(output, "T03-02-crust.bmp");
+        string boundaryFieldPath = Path.Combine(output, "T03-02-uplift-subsidence.bmp");
+        string atlasOverlayPath = Path.Combine(output, "T03-02-atlas-overlay.bmp");
         string contourPath = Path.Combine(output, "T03-02-contours.csv");
         File.WriteAllBytes(continentPath, continentBitmap);
         File.WriteAllBytes(regionPath, regionBitmap);
+        File.WriteAllBytes(marinePath, marineBitmap);
+        File.WriteAllBytes(platesPath, platesBitmap);
+        File.WriteAllBytes(crustPath, crustBitmap);
+        File.WriteAllBytes(boundaryFieldPath, boundaryFieldBitmap);
+        File.WriteAllBytes(atlasOverlayPath, atlasOverlayBitmap);
         byte[] contourBytes = Encoding.UTF8.GetBytes(RenderContours(continentTopology, regionTopology));
         File.WriteAllBytes(contourPath, contourBytes);
         string commit = Environment.GetEnvironmentVariable("ISR_L03A_EVIDENCE_COMMIT") ?? "WORKING_TREE";
@@ -76,6 +119,7 @@ public sealed class EvidenceArtifactTests
             model = new
             {
                 contentChecksum = model.ContentChecksum.ToString(),
+                plateSnapshotChecksum = plateSnapshot.ContentChecksum.ToString(),
                 algorithmVersion = StatelessRandomV1.AlgorithmVersion,
                 settings.MacroFeatureCount,
                 settings.RegionalFeatureCount,
@@ -98,6 +142,8 @@ public sealed class EvidenceArtifactTests
                 {
                     minimumCorpusWithCornerRatioFivePercent = "75%",
                     maximumSingleStraightRunShare = "20%",
+                    maximumAtlasEdgeAlignmentShare = "20%",
+                    maximumStorageTileAlignmentShare = "20%",
                     componentAreaSmallMaximumSamples = 299,
                     componentAreaLargeMinimumSamples = 751,
                     tileModuloDiversityMinimum = 8,
@@ -113,6 +159,31 @@ public sealed class EvidenceArtifactTests
                     regionCount = regionTopology.CoastlineSegments.Count,
                     coordinates = "exact global model coordinates as reduced rationals",
                 },
+                coastlineAlignment = new
+                {
+                    coastSegments,
+                    atlasAligned,
+                    tileAligned,
+                    atlasAlignedPpm = (atlasAligned * 1_000_000L) / coastSegments,
+                    tileAlignedPpm = (tileAligned * 1_000_000L) / coastSegments,
+                },
+                reviewMaps = new[]
+                {
+                    Map("marine-domains", marinePath, marineBitmap),
+                    Map("plates", platesPath, platesBitmap),
+                    Map("crust", crustPath, crustBitmap),
+                    Map("uplift-subsidence", boundaryFieldPath, boundaryFieldBitmap),
+                    Map("continent-atlas-overlay", atlasOverlayPath, atlasOverlayBitmap),
+                },
+                marineWitness = new
+                {
+                    seed = marineWitnessSeed,
+                    rasterChecksum = marineRaster.ContentChecksum.ToString(),
+                    marineTopology.OpenOceanSampleCount,
+                    marineTopology.InlandBasinSampleCount,
+                    marineTopology.OpenOceanComponentCount,
+                    inlandBasinComponentAreas = marineTopology.InlandBasinComponentAreas,
+                },
                 balancedCases,
                 vastExpeditions,
             },
@@ -121,8 +192,18 @@ public sealed class EvidenceArtifactTests
         Assert.IsTrue(File.Exists(continentPath));
         Assert.IsTrue(File.Exists(regionPath));
         Assert.IsTrue(File.Exists(contourPath));
+        Assert.IsTrue(File.Exists(marinePath));
+        Assert.IsTrue(File.Exists(platesPath));
+        Assert.IsTrue(File.Exists(crustPath));
+        Assert.IsTrue(File.Exists(boundaryFieldPath));
+        Assert.IsTrue(File.Exists(atlasOverlayPath));
         CollectionAssert.AreEqual(new byte[] { (byte)'B', (byte)'M' }, continentBitmap[..2]);
         CollectionAssert.AreNotEqual(continentBitmap, regionBitmap);
+        Assert.IsGreaterThan(0, marineTopology.InlandBasinSampleCount);
+        Assert.IsLessThanOrEqualTo(coastSegments, atlasAligned * 5,
+            "More than 20% of coastline transitions align with atlas/Voronoi ownership edges.");
+        Assert.IsLessThanOrEqualTo(coastSegments, tileAligned * 5,
+            "More than 20% of coastline transitions align with 32-sample storage boundaries.");
         Assert.HasCount(continentTopology.CoastlineSegmentCount, continentTopology.CoastlineSegments);
         Assert.HasCount(regionTopology.CoastlineSegmentCount, regionTopology.CoastlineSegments);
 
@@ -188,6 +269,13 @@ public sealed class EvidenceArtifactTests
             effect.SubsidenceNormalized,
             effect.ShearNormalized,
             contentChecksum = effect.ContentChecksum.ToString(),
+        };
+
+        static object Map(string layer, string path, byte[] content) => new
+        {
+            layer,
+            file = Path.GetFileName(path),
+            sha256 = L03ATestSupport.Sha256(content),
         };
 
         static string RenderContours(params ContinentalTopologyReport[] reports)

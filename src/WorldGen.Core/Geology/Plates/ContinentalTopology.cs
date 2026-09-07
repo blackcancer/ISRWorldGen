@@ -6,6 +6,13 @@ namespace ISRWorldGen.Core.Geology.Plates;
 
 public readonly record struct ContinentalContourSegment(ExactPoint Start, ExactPoint End);
 
+public enum ContinentalSurfaceDomain
+{
+    Land = 0,
+    OpenOcean = 1,
+    InlandBasin = 2,
+}
+
 public sealed class ContinentalTopologyReport
 {
     internal ContinentalTopologyReport(
@@ -19,7 +26,8 @@ public sealed class ContinentalTopologyReport
         int coastlineBoundaryCellCount,
         int coastlineCornerCount,
         int longestStraightCoastRun,
-        IEnumerable<ContinentalContourSegment> coastlineSegments)
+        IEnumerable<ContinentalContourSegment> coastlineSegments,
+        IEnumerable<ContinentalSurfaceDomain> surfaceDomains)
     {
         LandSampleCount = landSampleCount;
         OpenOceanSampleCount = openOceanSampleCount;
@@ -32,6 +40,7 @@ public sealed class ContinentalTopologyReport
         CoastlineCornerCount = coastlineCornerCount;
         LongestStraightCoastRun = longestStraightCoastRun;
         CoastlineSegments = Array.AsReadOnly(coastlineSegments.ToArray());
+        SurfaceDomains = Array.AsReadOnly(surfaceDomains.ToArray());
     }
 
     public int LandSampleCount { get; }
@@ -55,6 +64,8 @@ public sealed class ContinentalTopologyReport
     public int LongestStraightCoastRun { get; }
 
     public ReadOnlyCollection<ContinentalContourSegment> CoastlineSegments { get; }
+
+    public ReadOnlyCollection<ContinentalSurfaceDomain> SurfaceDomains { get; }
 }
 
 public static class ContinentalTopologyAnalyzer
@@ -68,6 +79,7 @@ public static class ContinentalTopologyAnalyzer
         int openOceanCount = 0;
         int inlandBasinCount = 0;
         int openOceanComponents = 0;
+        var surfaceDomains = new ContinentalSurfaceDomain[raster.HeightPpm.Count];
 
         for (int z = 0; z < raster.Height; z++)
         {
@@ -80,20 +92,31 @@ public static class ContinentalTopologyAnalyzer
                 }
 
                 bool land = raster.IsLand(x, z);
-                (int area, bool touchesBoundary) = Flood(raster, x, z, land, visited);
+                (int area, bool touchesBoundary, int[] samples) = Flood(raster, x, z, land, visited);
                 if (land)
                 {
                     landAreas.Add(area);
+                    SetDomain(samples, ContinentalSurfaceDomain.Land);
                 }
                 else if (touchesBoundary)
                 {
                     openOceanCount += area;
                     openOceanComponents++;
+                    SetDomain(samples, ContinentalSurfaceDomain.OpenOcean);
                 }
                 else
                 {
                     inlandBasinCount += area;
                     basinAreas.Add(area);
+                    SetDomain(samples, ContinentalSurfaceDomain.InlandBasin);
+                }
+
+                void SetDomain(IEnumerable<int> indices, ContinentalSurfaceDomain domain)
+                {
+                    foreach (int sample in indices)
+                    {
+                        surfaceDomains[sample] = domain;
+                    }
                 }
             }
         }
@@ -176,10 +199,11 @@ public static class ContinentalTopologyAnalyzer
             boundaryLandCells.Count,
             corners,
             longestRun,
-            contourSegments);
+            contourSegments,
+            surfaceDomains);
     }
 
-    private static (int Area, bool TouchesBoundary) Flood(
+    private static (int Area, bool TouchesBoundary, int[] Samples) Flood(
         ContinentalRaster raster,
         int startX,
         int startZ,
@@ -192,9 +216,11 @@ public static class ContinentalTopologyAnalyzer
         visited[start] = true;
         int area = 0;
         bool touchesBoundary = false;
+        var samples = new List<int>();
         while (queue.Count > 0)
         {
             int index = queue.Dequeue();
+            samples.Add(index);
             int x = index % raster.Width;
             int z = index / raster.Width;
             area++;
@@ -205,7 +231,7 @@ public static class ContinentalTopologyAnalyzer
             Visit(x, z + 1);
         }
 
-        return (area, touchesBoundary);
+        return (area, touchesBoundary, samples.ToArray());
 
         void Visit(int x, int z)
         {

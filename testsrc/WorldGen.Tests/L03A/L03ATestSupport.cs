@@ -7,6 +7,14 @@ using System.Text.Json;
 
 namespace ISRWorldGen.Tests.L03A;
 
+internal enum PlateReviewLayer
+{
+    Plate = 0,
+    Crust = 1,
+    BoundaryField = 2,
+    ContinentalAtlasOverlay = 3,
+}
+
 internal static class L03ATestSupport
 {
     internal const string ConfigHash = "9329c442b47a7f215e2273287d14324ffb14047f3a126c0ace815a0aa6f602f4";
@@ -125,8 +133,182 @@ internal static class L03ATestSupport
         return bitmap;
     }
 
+    internal static byte[] RenderMarineBitmap(ContinentalRaster raster, ContinentalTopologyReport report) =>
+        RenderBitmap(raster.Width, raster.Height, (x, z) =>
+        {
+            ContinentalSurfaceDomain domain = report.SurfaceDomains[(z * raster.Width) + x];
+            return domain switch
+            {
+                ContinentalSurfaceDomain.Land => (B: (byte)55, G: (byte)165, R: (byte)75),
+                ContinentalSurfaceDomain.OpenOcean => (B: (byte)220, G: (byte)95, R: (byte)25),
+                ContinentalSurfaceDomain.InlandBasin => (B: (byte)210, G: (byte)210, R: (byte)35),
+                _ => throw new InvalidOperationException("Unknown surface domain."),
+            };
+        });
+
+    internal static byte[] RenderPlateLayerBitmap(
+        AtlasMesh atlas,
+        PlateAtlasSnapshot snapshot,
+        ContinentalRaster raster,
+        PlateReviewLayer layer)
+    {
+        int[] owners = RasterOwners(atlas, raster.Grid);
+        var cells = snapshot.Cells.ToDictionary(cell => cell.CellId);
+        return RenderBitmap(raster.Width, raster.Height, (x, z) =>
+        {
+            int index = (z * raster.Width) + x;
+            AtlasSite owner = atlas.Sites[owners[index]];
+            PlateCellState cell = cells[owner.Id];
+            bool atlasEdge =
+                (x > 0 && owners[index - 1] != owners[index]) ||
+                (z > 0 && owners[index - raster.Width] != owners[index]);
+            if (atlasEdge)
+            {
+                return layer == PlateReviewLayer.ContinentalAtlasOverlay
+                    ? (B: (byte)210, G: (byte)35, R: (byte)235)
+                    : (B: (byte)240, G: (byte)240, R: (byte)240);
+            }
+
+            return layer switch
+            {
+                PlateReviewLayer.Plate => StableColor(cell.PlateId),
+                PlateReviewLayer.Crust => cell.CrustKind switch
+                {
+                    CrustKind.Oceanic => (B: (byte)190, G: (byte)75, R: (byte)25),
+                    CrustKind.Transitional => (B: (byte)75, G: (byte)165, R: (byte)195),
+                    CrustKind.Continental => (B: (byte)45, G: (byte)145, R: (byte)75),
+                    _ => throw new InvalidOperationException("Unknown crust kind."),
+                },
+                PlateReviewLayer.BoundaryField =>
+                    (B: checked((byte)(25 + (cell.SubsidenceNormalized * 220))),
+                     G: (byte)25,
+                     R: checked((byte)(25 + (cell.UpliftNormalized * 220)))),
+                PlateReviewLayer.ContinentalAtlasOverlay => raster.IsLand(x, z)
+                    ? (B: (byte)50, G: (byte)155, R: (byte)65)
+                    : (B: (byte)205, G: (byte)85, R: (byte)25),
+                _ => throw new InvalidOperationException("Unknown review layer."),
+            };
+        });
+    }
+
+    internal static (int CoastSegments, int AtlasAligned, int TileAligned) CoastlineAlignment(
+        AtlasMesh atlas,
+        ContinentalRaster raster,
+        int tileSizeSamples)
+    {
+        int[] owners = RasterOwners(atlas, raster.Grid);
+        int coast = 0;
+        int atlasAligned = 0;
+        int tileAligned = 0;
+        for (int z = 0; z < raster.Height; z++)
+        {
+            for (int x = 0; x < raster.Width - 1; x++)
+            {
+                int index = (z * raster.Width) + x;
+                if (raster.IsLand(x, z) == raster.IsLand(x + 1, z))
+                {
+                    continue;
+                }
+
+                coast++;
+                atlasAligned += owners[index] != owners[index + 1] ? 1 : 0;
+                tileAligned += (x + 1) % tileSizeSamples == 0 ? 1 : 0;
+            }
+        }
+
+        for (int z = 0; z < raster.Height - 1; z++)
+        {
+            for (int x = 0; x < raster.Width; x++)
+            {
+                int index = (z * raster.Width) + x;
+                if (raster.IsLand(x, z) == raster.IsLand(x, z + 1))
+                {
+                    continue;
+                }
+
+                coast++;
+                atlasAligned += owners[index] != owners[index + raster.Width] ? 1 : 0;
+                tileAligned += (z + 1) % tileSizeSamples == 0 ? 1 : 0;
+            }
+        }
+
+        return (coast, atlasAligned, tileAligned);
+    }
+
     internal static string Sha256(byte[] content) =>
         Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+
+    private static byte[] RenderBitmap(
+        int width,
+        int height,
+        Func<int, int, (byte B, byte G, byte R)> pixel)
+    {
+        int stride = checked(((width * 3) + 3) & ~3);
+        int imageBytes = checked(stride * height);
+        byte[] bitmap = new byte[checked(54 + imageBytes)];
+        bitmap[0] = (byte)'B';
+        bitmap[1] = (byte)'M';
+        WriteInt32(bitmap, 2, bitmap.Length);
+        WriteInt32(bitmap, 10, 54);
+        WriteInt32(bitmap, 14, 40);
+        WriteInt32(bitmap, 18, width);
+        WriteInt32(bitmap, 22, height);
+        bitmap[26] = 1;
+        bitmap[28] = 24;
+        WriteInt32(bitmap, 34, imageBytes);
+        for (int z = 0; z < height; z++)
+        {
+            int row = 54 + ((height - 1 - z) * stride);
+            for (int x = 0; x < width; x++)
+            {
+                (byte b, byte g, byte r) = pixel(x, z);
+                int offset = row + (x * 3);
+                bitmap[offset] = b;
+                bitmap[offset + 1] = g;
+                bitmap[offset + 2] = r;
+            }
+        }
+
+        return bitmap;
+    }
+
+    private static int[] RasterOwners(AtlasMesh atlas, ContinentalSamplingGrid grid)
+    {
+        var owners = new int[checked(grid.Width * grid.Height)];
+        for (int z = 0; z < grid.Height; z++)
+        {
+            long worldZ = checked(grid.OriginZ + ((long)z * grid.StepZ));
+            for (int x = 0; x < grid.Width; x++)
+            {
+                long worldX = checked(grid.OriginX + ((long)x * grid.StepX));
+                int best = 0;
+                decimal dx = worldX - atlas.Sites[0].X;
+                decimal dz = worldZ - atlas.Sites[0].Z;
+                decimal bestDistance = (dx * dx) + (dz * dz);
+                for (int site = 1; site < atlas.Sites.Count; site++)
+                {
+                    dx = worldX - atlas.Sites[site].X;
+                    dz = worldZ - atlas.Sites[site].Z;
+                    decimal distance = (dx * dx) + (dz * dz);
+                    if (distance < bestDistance)
+                    {
+                        best = site;
+                        bestDistance = distance;
+                    }
+                }
+
+                owners[(z * grid.Width) + x] = best;
+            }
+        }
+
+        return owners;
+    }
+
+    private static (byte B, byte G, byte R) StableColor(StableId id) =>
+        (
+            checked((byte)(55 + (id.Low % 170))),
+            checked((byte)(55 + ((id.Low >> 16) % 170))),
+            checked((byte)(55 + ((id.High >> 32) % 170))));
 
     private static void WriteInt32(byte[] destination, int offset, int value)
     {

@@ -37,12 +37,20 @@ public sealed class PlateAtlasBuilderTests
         CollectionAssert.AreEqual(first.Cells.ToArray(), reversed.Cells.ToArray());
         Assert.IsTrue(first.Cells.All(cell => double.IsFinite(cell.UpliftNormalized)));
         Assert.IsTrue(first.Cells.All(cell => double.IsFinite(cell.SubsidenceNormalized)));
+        Assert.IsTrue(first.Cells.All(cell => cell.RelativeAgePpm is >= 0 and <= 1_000_000));
+        Assert.IsTrue(first.Cells.All(cell => cell.ContinentalHeightPpm is >= -1_000_000 and <= 1_000_000));
         var boundaryCells = first.Boundaries.SelectMany(boundary => new[] { boundary.CellA, boundary.CellB }).ToHashSet();
         Assert.IsTrue(first.Cells.Any(cell =>
             !boundaryCells.Contains(cell.CellId) && (cell.UpliftNormalized > 0 || cell.SubsidenceNormalized > 0)),
             "Boundary fields did not reach their regional envelope.");
         Assert.IsTrue(first.Cells.Any(cell => cell.UpliftNormalized == 0 && cell.SubsidenceNormalized == 0),
             "No calm plate interior remains outside the bounded regional envelope.");
+        Assert.IsGreaterThanOrEqualTo(3, first.Cells
+            .Select(cell => Math.Max(cell.UpliftNormalized, cell.SubsidenceNormalized))
+            .Where(value => value > 0)
+            .Distinct()
+            .Count(),
+            "Local and regional boundary envelopes did not produce multiple field amplitudes.");
         Assert.IsTrue(first.Plates.Any(plate => plate.CrustKinds.Count > 1),
             "At least one generated plate must demonstrate mixed crust domains on this frozen fixture.");
     }

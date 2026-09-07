@@ -40,6 +40,14 @@ public sealed class ContinentalFieldTests
                 $"surface accounting seed {seed}");
             Assert.IsGreaterThan(0, report.OpenOceanComponentCount, $"edge-connected ocean seed {seed}");
             Assert.IsGreaterThan(0, report.CoastlineSegmentCount, $"coast seed {seed}");
+            Assert.HasCount(report.CoastlineSegmentCount, report.CoastlineSegments);
+            Assert.HasCount(raster.HeightPpm.Count, report.SurfaceDomains);
+            Assert.AreEqual(report.LandSampleCount,
+                report.SurfaceDomains.Count(domain => domain == ContinentalSurfaceDomain.Land));
+            Assert.AreEqual(report.OpenOceanSampleCount,
+                report.SurfaceDomains.Count(domain => domain == ContinentalSurfaceDomain.OpenOcean));
+            Assert.AreEqual(report.InlandBasinSampleCount,
+                report.SurfaceDomains.Count(domain => domain == ContinentalSurfaceDomain.InlandBasin));
             Assert.IsLessThanOrEqualTo(report.CoastlineSegmentCount, report.LongestStraightCoastRun * 5,
                 $"A single straight/polygonal run dominates seed {seed}.");
             if (report.CoastlineCornerCount * 20 >= report.CoastlineBoundaryCellCount)
