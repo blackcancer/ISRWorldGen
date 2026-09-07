@@ -38,19 +38,16 @@ public sealed class EvidenceArtifactTests
         string tree = RequireEnvironment("ISR_L03B_EVIDENCE_TREE", "^[0-9a-f]{40}$");
         string testAssemblyHash = RequireEnvironment("ISR_L03B_EVIDENCE_TEST_ASSEMBLY_SHA256", "^[0-9a-f]{64}$");
         string coreAssemblyHash = RequireEnvironment("ISR_L03B_EVIDENCE_CORE_ASSEMBLY_SHA256", "^[0-9a-f]{64}$");
+        string fixturesBlob = RequireEnvironment("ISR_L03B_EVIDENCE_FIXTURES_BLOB", "^[0-9a-f]{40}$");
         string nonce = RequireEnvironment("ISR_L03B_EVIDENCE_NONCE", "^[0-9a-f]{64}$");
         string configuration = RequireEnvironment("ISR_L03B_EVIDENCE_CONFIGURATION", "^Release$");
-        string runName = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_RUN") ?? $"evidence-s-terminal-{commit}";
+        string runName = RequireEnvironment("ISR_L03B_EVIDENCE_RUN", $"^evidence-s-staging-{commit}-[0-9a-f]{{32}}$");
         string repository = L03BTestSupport.FindRepositoryRoot();
         if (runName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || runName.Contains("..", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Evidence run name must be a single safe directory name.");
         }
-        if (!string.Equals(runName, $"evidence-s-terminal-{commit}", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Evidence run name must exactly seal the requested commit.");
-        }
-        ValidateProvenanceBeforeWriting(repository, commit, tree, configuration, testAssemblyHash, coreAssemblyHash);
+        ValidateProvenanceBeforeWriting(repository, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash);
         string output = Path.Combine(repository, ".local", "L03B", runName);
         if (Directory.Exists(output)) throw new InvalidOperationException("Evidence terminal directory must be absent before an atomic campaign starts.");
         using FileStream runLock = new(output + ".lock", FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
@@ -75,7 +72,7 @@ public sealed class EvidenceArtifactTests
 
         try
         {
-            RunCampaign(output, reportPath, manifestPath, commit, tree, configuration, nonce, blindOrder, testAssemblyHash, coreAssemblyHash);
+            RunCampaign(output, reportPath, manifestPath, commit, tree, configuration, nonce, blindOrder, testAssemblyHash, coreAssemblyHash, fixturesBlob);
         }
         catch (Exception exception)
         {
@@ -107,7 +104,8 @@ public sealed class EvidenceArtifactTests
         string nonce,
         IReadOnlyList<(string Code, LandscapeFamily Family)> blindOrder,
         string testAssemblyHash,
-        string coreAssemblyHash)
+        string coreAssemblyHash,
+        string fixturesBlob)
     {
         VerticalMetric[] verticalMetrics = new[] { "laboratory", "balanced", "vast-expeditions" }
             .Select(VerticalMetricFor)
@@ -192,8 +190,11 @@ public sealed class EvidenceArtifactTests
         string keyPath = Path.Combine(output, "sealed", "T03-06-S-review-key.json");
         WriteAtomic(keyPath, keyBytes);
 
-        IReadOnlyList<int> calibrationSeeds = L03BTestSupport.SeedCorpus("calibration_seeds");
-        IReadOnlyList<int> holdoutSeeds = L03BTestSupport.SeedCorpus("holdout_seeds");
+        string fixturesPath = Path.Combine(L03BTestSupport.FindRepositoryRoot(), "registry", "fixtures.json");
+        byte[] fixturesBytes = File.ReadAllBytes(fixturesPath);
+        FixtureCorpus fixtureCorpus = FixtureCorpus.Load(fixturesBytes);
+        IReadOnlyList<int> calibrationSeeds = fixtureCorpus.CalibrationSeeds;
+        IReadOnlyList<int> holdoutSeeds = fixtureCorpus.HoldoutSeeds;
         Assert.HasCount(192, calibrationSeeds);
         Assert.HasCount(64, holdoutSeeds);
         Assert.AreEqual(192, calibrationSeeds.Distinct().Count());
@@ -226,7 +227,6 @@ public sealed class EvidenceArtifactTests
         Assert.IsTrue(corpus.All(item => item.MaximumAltitudeBlocks <= item.HighestReliefBlocks));
         Assert.IsTrue(corpus.Any(item => item.MaximumBathymetryBlocks > 0));
 
-        string fixturesPath = Path.Combine(L03BTestSupport.FindRepositoryRoot(), "registry", "fixtures.json");
         object report = new
         {
             schemaVersion = 1,
@@ -244,7 +244,8 @@ public sealed class EvidenceArtifactTests
             {
                 calibrationSeeds,
                 holdoutSeeds,
-                fixturesSha256 = L03BTestSupport.Sha256(File.ReadAllBytes(fixturesPath)),
+                fixturesBlob,
+                fixturesSha256 = L03BTestSupport.Sha256(fixturesBytes),
             },
             provisionalMetricPolicy = new
             {
@@ -629,10 +630,11 @@ public sealed class EvidenceArtifactTests
             .ToArray();
     }
 
-    private static void ValidateProvenanceBeforeWriting(string repository, string commit, string tree, string configuration, string testAssemblyHash, string coreAssemblyHash)
+    private static void ValidateProvenanceBeforeWriting(string repository, string commit, string tree, string fixturesBlob, string configuration, string testAssemblyHash, string coreAssemblyHash)
     {
         if (!string.Equals(Git(repository, "rev-parse", "HEAD"), commit, StringComparison.Ordinal) ||
             !string.Equals(Git(repository, "rev-parse", "HEAD^{tree}"), tree, StringComparison.Ordinal) ||
+            !string.Equals(Git(repository, "rev-parse", "HEAD:registry/fixtures.json"), fixturesBlob, StringComparison.Ordinal) ||
             !string.IsNullOrEmpty(Git(repository, "status", "--porcelain", "--untracked-files=all")) ||
             GitExitCode(repository, "symbolic-ref", "-q", "HEAD") == 0)
         {
@@ -657,43 +659,37 @@ public sealed class EvidenceArtifactTests
 
     private static string Git(string repository, params string[] arguments)
     {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo("git")
-        {
-            WorkingDirectory = repository,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        process.StartInfo.ArgumentList.Add("-c");
-        process.StartInfo.ArgumentList.Add($"safe.directory={repository.Replace('\\', '/')}");
-        foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-        process.Start();
-        string stdout = process.StandardOutput.ReadToEnd();
-        string stderr = process.StandardError.ReadToEnd();
-        if (!process.WaitForExit(10_000))
-        {
-            process.Kill(entireProcessTree: true);
-            throw new TimeoutException("Git provenance check timed out.");
-        }
-        if (process.ExitCode != 0) throw new InvalidOperationException($"Git provenance check failed: {stderr.Trim()}");
-        return stdout.Trim();
+        GitResult result = RunGit(repository, arguments);
+        if (result.ExitCode != 0) throw new InvalidOperationException($"Git provenance check failed: {result.StandardError.Trim()}");
+        return result.StandardOutput.Trim();
     }
 
     private static int GitExitCode(string repository, params string[] arguments)
     {
-        using var process = new Process { StartInfo = new ProcessStartInfo("git") { WorkingDirectory = repository, UseShellExecute = false, CreateNoWindow = true } };
+        return RunGit(repository, arguments).ExitCode;
+    }
+
+    private static GitResult RunGit(string repository, IReadOnlyList<string> arguments)
+    {
+        using var process = new Process { StartInfo = new ProcessStartInfo("git") { WorkingDirectory = repository, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true } };
         process.StartInfo.ArgumentList.Add("-c");
         process.StartInfo.ArgumentList.Add($"safe.directory={repository.Replace('\\', '/')}");
         foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         process.Start();
-        if (!process.WaitForExit(10_000))
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            Task.WaitAll([process.WaitForExitAsync(timeout.Token), stdout, stderr]);
+        }
+        catch (OperationCanceledException)
         {
             process.Kill(entireProcessTree: true);
+            process.WaitForExit();
             throw new TimeoutException("Git provenance check timed out.");
         }
-        return process.ExitCode;
+        return new GitResult(process.ExitCode, stdout.Result, stderr.Result);
     }
 
     private static byte[] RenderBitmap(double[,] samples)
@@ -831,6 +827,19 @@ public sealed class EvidenceArtifactTests
         int SaturatedPixelCount);
 
     private sealed record BlindArtifact(string Path, string Sha256);
+
+    private sealed record GitResult(int ExitCode, string StandardOutput, string StandardError);
+
+    private sealed record FixtureCorpus(IReadOnlyList<int> CalibrationSeeds, IReadOnlyList<int> HoldoutSeeds)
+    {
+        public static FixtureCorpus Load(byte[] bytes)
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes);
+            return new FixtureCorpus(
+                document.RootElement.GetProperty("calibration_seeds").EnumerateArray().Select(item => item.GetInt32()).ToArray(),
+                document.RootElement.GetProperty("holdout_seeds").EnumerateArray().Select(item => item.GetInt32()).ToArray());
+        }
+    }
 
     private sealed record JumpStatistics(double Maximum, double P95, double P95ToMaximumRatio);
 
