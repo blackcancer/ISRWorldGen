@@ -16,7 +16,7 @@ public sealed record LandscapeGenerationSettings
     public LandscapeGenerationSettings(
         ReliefBudgetRequest verticalBudget,
         int maximumCells,
-        int blendSiteCount)
+        double falloffExponent)
     {
         ArgumentNullException.ThrowIfNull(verticalBudget);
         if (maximumCells <= 0)
@@ -24,21 +24,25 @@ public sealed record LandscapeGenerationSettings
             throw new ArgumentOutOfRangeException(nameof(maximumCells), "Cell budget must be positive.");
         }
 
-        if (blendSiteCount is < 1 or > 8)
+        if (!double.IsFinite(falloffExponent) || falloffExponent is < 2 or > 16)
         {
-            throw new ArgumentOutOfRangeException(nameof(blendSiteCount), "Blend site count must be in [1,8].");
+            throw new ArgumentOutOfRangeException(nameof(falloffExponent), "Continuous falloff exponent must be finite and in [2,16].");
         }
 
         VerticalBudget = verticalBudget;
         MaximumCells = maximumCells;
-        BlendSiteCount = blendSiteCount;
+        FalloffExponent = falloffExponent;
     }
 
     public ReliefBudgetRequest VerticalBudget { get; }
 
     public int MaximumCells { get; }
 
-    public int BlendSiteCount { get; }
+    /// <summary>
+    /// Exponent of the continuous inverse-distance blend. Every site remains in the
+    /// partition; larger values make the contribution more local without a top-k cut.
+    /// </summary>
+    public double FalloffExponent { get; }
 }
 
 public readonly record struct LandscapeCellProfile(
@@ -64,14 +68,14 @@ public sealed class LandscapeModel
     private readonly int nativeSeed;
     private readonly WorldBounds bounds;
     private readonly SiteEntry[] sites;
-    private readonly int blendSiteCount;
+    private readonly double falloffExponent;
 
     internal LandscapeModel(
         int nativeSeed,
         WorldBounds bounds,
         IEnumerable<SiteEntry> sites,
         IEnumerable<LandscapeCellProfile> cells,
-        int blendSiteCount,
+        double falloffExponent,
         ReliefVerticalPlan verticalPlan,
         Hash256 plateSnapshotChecksum,
         Hash256 atlasContentChecksum,
@@ -81,7 +85,7 @@ public sealed class LandscapeModel
         this.nativeSeed = nativeSeed;
         this.bounds = bounds;
         this.sites = sites.OrderBy(item => item.Cell.CellId, LandscapeStableIdComparer.Instance).ToArray();
-        this.blendSiteCount = blendSiteCount;
+        this.falloffExponent = falloffExponent;
         Cells = Array.AsReadOnly(cells.OrderBy(item => item.CellId, LandscapeStableIdComparer.Instance).ToArray());
         VerticalPlan = verticalPlan;
         PlateSnapshotChecksum = plateSnapshotChecksum;
@@ -113,46 +117,25 @@ public sealed class LandscapeModel
             throw new ArgumentOutOfRangeException(nameof(x), "Landscape coordinates must lie inside the finite world.");
         }
 
-        Span<int> selectedIndices = stackalloc int[8];
-        Span<double> selectedDistances = stackalloc double[8];
-        int selectedCount = 0;
+        SiteEntry dominant = sites[0];
+        double dominantDistance = double.PositiveInfinity;
+        double weighted = 0;
+        double totalWeight = 0;
         for (int index = 0; index < sites.Length; index++)
         {
             double dx = (double)x - sites[index].X;
             double dz = (double)z - sites[index].Z;
             double distanceSquared = (dx * dx) + (dz * dz);
-            int insertion = selectedCount;
-            while (insertion > 0 && distanceSquared < selectedDistances[insertion - 1])
+            if (distanceSquared < dominantDistance)
             {
-                insertion--;
+                dominantDistance = distanceSquared;
+                dominant = sites[index];
             }
-
-            if (insertion >= blendSiteCount)
-            {
-                continue;
-            }
-
-            int upper = Math.Min(selectedCount, blendSiteCount - 1);
-            for (int move = upper; move > insertion; move--)
-            {
-                selectedIndices[move] = selectedIndices[move - 1];
-                selectedDistances[move] = selectedDistances[move - 1];
-            }
-
-            selectedIndices[insertion] = index;
-            selectedDistances[insertion] = distanceSquared;
-            selectedCount = Math.Min(selectedCount + 1, blendSiteCount);
-        }
-
-        SiteEntry dominant = sites[selectedIndices[0]];
-        double weighted = 0;
-        double totalWeight = 0;
-        for (int selected = 0; selected < selectedCount; selected++)
-        {
-            double distance = Math.Sqrt(selectedDistances[selected]);
-            double normalizedDistance = distance / sites[selectedIndices[selected]].BlendScaleBlocks;
-            double weight = 1 / ((1 + normalizedDistance) * (1 + normalizedDistance));
-            weighted += SampleCell(sites[selectedIndices[selected]], x, z) * weight;
+            double distance = Math.Sqrt(distanceSquared);
+            double normalizedDistance = distance / sites[index].BlendScaleBlocks;
+            // Every site contributes; this is a smooth partition with no membership cutoff.
+            double weight = ContinuousWeight(normalizedDistance, falloffExponent);
+            weighted += SampleCell(sites[index], x, z) * weight;
             totalWeight += weight;
         }
         double modelAltitude = weighted / totalWeight;
@@ -211,11 +194,11 @@ public sealed class LandscapeModel
     private static Hash256 ComputeChecksum(LandscapeModel model, GenerationIdentity identity)
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        AppendString(hash, "ISRW-LANDSCAPE-MODEL-V2");
+        AppendString(hash, "ISRW-LANDSCAPE-MODEL-V4-CONTINUOUS-FALLOFF");
         AppendInt32(hash, identity.NativeSeed); AppendUInt32(hash, identity.AlgorithmVersion); AppendUInt32(hash, identity.SchemaVersion);
         AppendHash(hash, identity.GeographyConfigHash); AppendHash(hash, identity.GenerationAssetHash); AppendString(hash, identity.DeterminismProfileId);
         AppendHash(hash, model.PlateSnapshotChecksum); AppendHash(hash, model.AtlasContentChecksum);
-        AppendString(hash, model.ScaleProfileId); AppendUInt32(hash, model.ScaleProfileVersion); AppendInt32(hash, model.blendSiteCount);
+        AppendString(hash, model.ScaleProfileId); AppendUInt32(hash, model.ScaleProfileVersion); AppendDouble(hash, model.falloffExponent);
         AppendInt64(hash, model.VerticalPlan.RockFloorTopBlocks); AppendInt64(hash, model.VerticalPlan.DeepestOceanFloorBlocks);
         AppendInt64(hash, model.VerticalPlan.MaximumCavernCeilingBlocks); AppendInt64(hash, model.VerticalPlan.HighestReliefBlocks);
         AppendInt64(hash, model.VerticalPlan.MaximumOceanDepthBlocks); AppendInt64(hash, model.VerticalPlan.MinimumCavernInteriorHeightBlocks);
@@ -240,6 +223,18 @@ public sealed class LandscapeModel
         int bytes = Encoding.UTF8.GetByteCount(value);
         if (bytes > LandscapeChecksumEncoding.MaximumStringUtf8Bytes) throw new InvalidOperationException("Landscape canonical text exceeds its bounded encoding.");
         AppendInt32(hash, bytes); hash.AppendData(Encoding.UTF8.GetBytes(value));
+    }
+
+    private static double ContinuousWeight(double normalizedDistance, double exponent)
+    {
+        if (!double.IsFinite(normalizedDistance) || normalizedDistance < 0)
+        {
+            throw new InvalidOperationException("Landscape site distance must be finite and nonnegative.");
+        }
+
+        // Exponent >= 2 gives a local, summable-style decay over the finite atlas while
+        // preserving a nonzero, continuous contribution for every finite site.
+        return 1d / Math.Pow(1d + normalizedDistance, exponent);
     }
 
     internal readonly record struct SiteEntry(long X, long Z, double BlendScaleBlocks, LandscapeCellProfile Cell);
@@ -308,12 +303,6 @@ public static class LandscapeModelBuilder
                 $"Atlas has {atlas.Sites.Count} sites for frozen profile quota {profile.SiteQuota}.");
         }
 
-        if (settings.BlendSiteCount > atlas.Sites.Count)
-        {
-            return Failure(identity, GenerationFailureCode.InvalidInput, "geology.landscapes.blend-count",
-                "Blend site count cannot exceed the atlas site count.");
-        }
-
         // All count/quota checks above are intentionally non-allocating; provenance canonicalization may sort.
         if (!PlateAtlasProvenance.Matches(plates, identity, profile, atlas))
         {
@@ -373,7 +362,7 @@ public static class LandscapeModelBuilder
             atlas.Bounds,
             entries,
             cells,
-            settings.BlendSiteCount,
+            settings.FalloffExponent,
             plan,
             plates.ContentChecksum,
             plates.AtlasContentChecksum,

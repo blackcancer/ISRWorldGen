@@ -56,7 +56,7 @@ public sealed class LandscapeCompositionTests
         LandscapeGenerationSettings settings = new(
             new ReliefBudgetRequest(64, 48, 128),
             maximumCells: profile.SiteQuota,
-            blendSiteCount: 4);
+            falloffExponent: 4);
 
         LandscapeModel first = L03BTestSupport.Success(
             LandscapeModelBuilder.Build(identity, atlas, plates, profile, settings));
@@ -244,6 +244,28 @@ public sealed class LandscapeCompositionTests
             Assert.AreEqual(value, repeated);
             Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => LandscapeSignatureSampler.Sample(family, 0, 0, 1, 1, long.MinValue, long.MaxValue));
         }
+
+        foreach (LandscapeFamily family in Enum.GetValues<LandscapeFamily>())
+        {
+            foreach ((double macroWeight, double mesoWeight, double detailWeight) weights in new[]
+            {
+                (1d, 0d, 0d),
+                (0d, 1d, 0d),
+                (0d, 0d, 1d),
+            })
+            {
+                LandscapeFamilyProfile extreme = new(family, 1_000_000, 2, 1, .2, weights.macroWeight, weights.mesoWeight, weights.detailWeight);
+                double value = LandscapeSignatureSampler.Sample(
+                    extreme,
+                    LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks,
+                    -LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks,
+                    1,
+                    1,
+                    -(long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks,
+                    (long)LandscapeSignatureSampler.MaximumAbsoluteCoordinateBlocks);
+                Assert.IsTrue(double.IsFinite(value) && value is > -1 and < 1, $"{family} extreme ratio {weights}");
+            }
+        }
     }
 
     [TestMethod]
@@ -259,6 +281,112 @@ public sealed class LandscapeCompositionTests
         Assert.AreNotEqual(a, b);
         Assert.IsTrue(double.IsFinite(a) && double.IsFinite(b) && a is >= -1 and <= 1 && b is >= -1 and <= 1);
     }
+
+    [TestMethod]
+    public void AnalyticPrimitiveBoundsAvoidUniformClippingForPublishedExtremeProfiles()
+    {
+        foreach (LandscapeFamily family in Enum.GetValues<LandscapeFamily>())
+        {
+            foreach ((double macroWeight, double mesoWeight, double detailWeight) weights in new[]
+            {
+                (1d, 0d, 0d),
+                (0d, 1d, 0d),
+                (0d, 0d, 1d),
+            })
+            {
+                LandscapeFamilyProfile profile = new(family, 3, 2, 1, .2, weights.macroWeight, weights.mesoWeight, weights.detailWeight);
+                foreach ((double x, double z) point in new[] { (0d, 0d), (-4_000_000_000_000d, 0d), (31d, -17d) })
+                {
+                    double value = LandscapeSignatureSampler.Sample(profile, point.x, point.z, 73, 11, (long)point.x, (long)point.z);
+                    Assert.IsTrue(value is > -1 and < 1, $"{family} {weights} at {point} must be analytically bounded, not clipped.");
+                }
+            }
+        }
+
+        LandscapeFamilyProfile basin = LandscapeFamilyCatalog.Get(LandscapeFamily.SedimentaryBasins);
+        double center = LandscapeSignatureSampler.Sample(basin, 0, 0, 73, 11, 0, 0);
+        double neighbor = LandscapeSignatureSampler.Sample(basin, 1, 0, 73, 11, 0, 0);
+        Assert.AreNotEqual(-1d, center, "Basin center must retain its analytic depth rather than be flattened by a clamp.");
+        Assert.AreNotEqual(-1d, neighbor, "Basin neighbor must retain its analytic depth rather than be flattened by a clamp.");
+    }
+
+    [TestMethod]
+    public void ContinuousFalloffRemovesMembershipJumpsAtFormerRankExchangeCoordinates()
+    {
+        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("laboratory");
+        GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
+        (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
+        LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(
+            identity,
+            atlas,
+            plates,
+            profile,
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), profile.SiteQuota, 4)));
+
+        // These are local regressions for the two prior rank-exchange reports, not a campaign acceptance threshold.
+        Assert.IsLessThan(.2, AdjacentDelta(model, 896, 1020, 896, 1021));
+        Assert.IsLessThan(.75, AdjacentDelta(model, 2104, 1024, 2105, 1024));
+
+        foreach (IEnumerable<(long X, long Z)> line in new[]
+        {
+            Enumerable.Range(768, 257).Select(x => ((long)x, 1024L)),
+            Enumerable.Range(768, 257).Select(z => (896L, (long)z)),
+            Enumerable.Range(768, 257).Select(offset => ((long)offset, (long)offset)),
+        })
+        {
+            double[] samples = line.Select(point => model.Sample(point.X, point.Z).ModelAltitudeNormalized).ToArray();
+            Assert.IsTrue(samples.All(value => double.IsFinite(value) && value is >= -1 and <= 1));
+            Assert.IsLessThan(1d, samples.Zip(samples.Skip(1), (left, right) => Math.Abs(left - right)).Max(),
+                "A one-block scan must stay inside the normalized composition envelope.");
+        }
+    }
+
+    [TestMethod]
+    public void ContinuousFalloffIsLocalNonzeroAndChangesThePublishedModel()
+    {
+        MethodInfo weight = typeof(LandscapeModel).GetMethod("ContinuousWeight", BindingFlags.NonPublic | BindingFlags.Static)!;
+        double atSite = (double)weight.Invoke(null, [0d, 4d])!;
+        double near = (double)weight.Invoke(null, [1d, 4d])!;
+        double far = (double)weight.Invoke(null, [10d, 4d])!;
+        double sharperFar = (double)weight.Invoke(null, [10d, 8d])!;
+        Assert.IsTrue(atSite > near && near > far && far > 0d);
+        Assert.IsLessThan(near / 16d, far, "Exponent four keeps distant sites continuous but materially local.");
+        Assert.IsLessThan(far, sharperFar);
+
+        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
+        GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
+        (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
+        LandscapeModel broad = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 2)));
+        LandscapeModel local = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 8)));
+        Assert.AreNotEqual(broad.ContentChecksum, local.ContentChecksum);
+        Assert.IsTrue(SampleCoordinates(profile).Any(point =>
+            broad.Sample(point.X, point.Z).ModelAltitudeNormalized != local.Sample(point.X, point.Z).ModelAltitudeNormalized));
+    }
+
+    [TestMethod]
+    public void SixFamilyAnalyticRangesAndVariancesAreMeasuredAfterBoundedReformulation()
+    {
+        foreach (LandscapeFamilyProfile family in LandscapeFamilyCatalog.Profiles)
+        {
+            double[] samples = Enumerable.Range(0, 257).Select(index => LandscapeSignatureSampler.Sample(
+                family,
+                ((index * 487) % 31_337) - 15_000d,
+                ((index * index * 71) % 29_719) - 14_000d,
+                20260907,
+                17)).ToArray();
+            double minimum = samples.Min();
+            double maximum = samples.Max();
+            double variance = Variance(samples);
+            Console.WriteLine($"{family.Family}: range=[{minimum:R};{maximum:R}], variance={variance:R}");
+            Assert.IsTrue(samples.All(value => double.IsFinite(value) && value is > -1 and < 1));
+            Assert.IsGreaterThan(0d, variance, $"{family.Family} must retain morphology after analytic bounding.");
+        }
+    }
+
+    private static double AdjacentDelta(LandscapeModel model, long leftX, long leftZ, long rightX, long rightZ)
+        => Math.Abs(model.Sample(leftX, leftZ).ModelAltitudeNormalized - model.Sample(rightX, rightZ).ModelAltitudeNormalized);
 
     private static IEnumerable<(long X, long Z)> SampleCoordinates(FrozenScaleProfile profile)
     {
