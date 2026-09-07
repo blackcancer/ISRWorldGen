@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Numerics;
 using System.Text;
 using ISRWorldGen.Core.Atlas.Geometry;
@@ -141,7 +142,8 @@ public sealed class PlateAtlasSnapshot
         IEnumerable<PlateBoundaryRecord> boundaries,
         Hash256 continentalModelChecksum,
         GenerationIdentity identity,
-        FrozenScaleProfile profile)
+        FrozenScaleProfile profile,
+        Hash256 atlasContentChecksum)
     {
         Plates = Array.AsReadOnly(plates.OrderBy(plate => plate.PlateId, PlateStableIdComparer.Instance).ToArray());
         Cells = Array.AsReadOnly(cells.OrderBy(cell => cell.CellId, PlateStableIdComparer.Instance).ToArray());
@@ -150,11 +152,13 @@ public sealed class PlateAtlasSnapshot
             .ThenBy(boundary => boundary.CellB, PlateStableIdComparer.Instance)
             .ToArray());
         ContinentalModelChecksum = continentalModelChecksum;
+        Identity = identity;
+        AtlasContentChecksum = atlasContentChecksum;
         ScaleProfileId = profile.Id;
         ScaleProfileVersion = profile.ProfileVersion;
         AtlasResolutionBlocks = profile.AtlasResolutionBlocks;
         AtlasTileSizeBlocks = profile.AtlasTileSizeBlocks;
-        ContentChecksum = ComputeChecksum(this, identity);
+        ContentChecksum = ComputeChecksum(this);
     }
 
     public ReadOnlyCollection<PlateDomain> Plates { get; }
@@ -164,6 +168,12 @@ public sealed class PlateAtlasSnapshot
     public ReadOnlyCollection<PlateBoundaryRecord> Boundaries { get; }
 
     public Hash256 ContinentalModelChecksum { get; }
+
+    /// <summary>Complete immutable generation identity used to create this snapshot.</summary>
+    public GenerationIdentity Identity { get; }
+
+    /// <summary>Canonical checksum of the exact atlas geometry consumed by plate generation.</summary>
+    public Hash256 AtlasContentChecksum { get; }
 
     public string ScaleProfileId { get; }
 
@@ -175,11 +185,14 @@ public sealed class PlateAtlasSnapshot
 
     public Hash256 ContentChecksum { get; }
 
-    private static Hash256 ComputeChecksum(PlateAtlasSnapshot snapshot, GenerationIdentity identity)
+    private static Hash256 ComputeChecksum(PlateAtlasSnapshot snapshot)
     {
         var builder = new StringBuilder();
-        builder.Append("ISRW-PLATE-ATLAS-V1\n").Append(identity.NativeSeed).Append('|')
-            .Append(identity.GeographyConfigHash).Append('|').Append(snapshot.ContinentalModelChecksum).Append('|')
+        builder.Append("ISRW-PLATE-ATLAS-V2\n").Append(snapshot.Identity.NativeSeed).Append('|')
+            .Append(snapshot.Identity.AlgorithmVersion).Append('|').Append(snapshot.Identity.SchemaVersion).Append('|')
+            .Append(snapshot.Identity.GeographyConfigHash).Append('|').Append(snapshot.Identity.GenerationAssetHash).Append('|')
+            .Append(snapshot.Identity.DeterminismProfileId).Append('|').Append(snapshot.AtlasContentChecksum).Append('|')
+            .Append(snapshot.ContinentalModelChecksum).Append('|')
             .Append(snapshot.ScaleProfileId).Append('|').Append(snapshot.ScaleProfileVersion).Append('|')
             .Append(snapshot.AtlasResolutionBlocks).Append('|').Append(snapshot.AtlasTileSizeBlocks).Append('\n');
         foreach (PlateDomain plate in snapshot.Plates)
@@ -210,6 +223,125 @@ public sealed class PlateAtlasSnapshot
 
         return Hash256.Compute(Encoding.UTF8.GetBytes(builder.ToString()));
     }
+}
+
+/// <summary>
+/// Canonical, immutable provenance for the atlas consumed by L03-A.  Consumers can use this API before
+/// accepting a plate snapshot instead of relying on object identity or enumeration order.
+/// </summary>
+public static class PlateAtlasProvenance
+{
+    public static Hash256 ComputeAtlasContentChecksum(AtlasMesh atlas)
+    {
+        ArgumentNullException.ThrowIfNull(atlas);
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Append(hash, "ISRW-ATLAS-PROVENANCE-V1\\n");
+        Append(hash, (int)atlas.TopologyDimension);
+        Append(hash, atlas.Bounds.MinX);
+        Append(hash, atlas.Bounds.MinZ);
+        Append(hash, atlas.Bounds.MaxXExclusive);
+        Append(hash, atlas.Bounds.MaxZExclusive);
+
+        foreach (AtlasSite site in atlas.Sites.OrderBy(site => site.Id, PlateStableIdComparer.Instance))
+        {
+            Append(hash, "S"); Append(hash, site.Id); Append(hash, site.X); Append(hash, site.Z);
+        }
+
+        foreach (AtlasEdge edge in atlas.Edges.OrderBy(edge => edge.A, PlateStableIdComparer.Instance).ThenBy(edge => edge.B, PlateStableIdComparer.Instance))
+        {
+            Append(hash, "E"); Append(hash, edge.A); Append(hash, edge.B);
+        }
+
+        foreach (DelaunayTriangle triangle in atlas.Triangles.Select(CanonicalTriangle)
+                     .OrderBy(triangle => triangle.A, PlateStableIdComparer.Instance)
+                     .ThenBy(triangle => triangle.B, PlateStableIdComparer.Instance)
+                     .ThenBy(triangle => triangle.C, PlateStableIdComparer.Instance))
+        {
+            Append(hash, "T"); Append(hash, triangle.A); Append(hash, triangle.B); Append(hash, triangle.C);
+        }
+
+        foreach (VoronoiCell cell in atlas.Cells.OrderBy(cell => cell.SiteId, PlateStableIdComparer.Instance))
+        {
+            Append(hash, "C"); Append(hash, cell.SiteId); Append(hash, cell.Area); Append(hash, (int)cell.BoundaryMask);
+            foreach (ExactPoint vertex in CanonicalVertices(cell.Vertices))
+            {
+                Append(hash, "V"); Append(hash, vertex.X); Append(hash, vertex.Z);
+            }
+            foreach (StableId neighbor in cell.NeighborIds.OrderBy(id => id, PlateStableIdComparer.Instance))
+            {
+                Append(hash, "N"); Append(hash, neighbor);
+            }
+        }
+
+        foreach (CollapsedDuplicate duplicate in atlas.CollapsedDuplicates
+                     .OrderBy(item => item.DuplicateId, PlateStableIdComparer.Instance)
+                     .ThenBy(item => item.CanonicalId, PlateStableIdComparer.Instance))
+        {
+            Append(hash, "D"); Append(hash, duplicate.DuplicateId); Append(hash, duplicate.CanonicalId);
+        }
+
+        return Hash256.FromCanonicalBytes(hash.GetHashAndReset());
+    }
+
+    public static bool Matches(PlateAtlasSnapshot snapshot, GenerationIdentity identity, FrozenScaleProfile profile, AtlasMesh atlas)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(atlas);
+        return snapshot.Identity == identity &&
+            snapshot.Identity.GeographyConfigHash == profile.GeographyConfigHash &&
+            snapshot.ScaleProfileId == profile.Id &&
+            snapshot.ScaleProfileVersion == profile.ProfileVersion &&
+            snapshot.AtlasResolutionBlocks == profile.AtlasResolutionBlocks &&
+            snapshot.AtlasTileSizeBlocks == profile.AtlasTileSizeBlocks &&
+            snapshot.AtlasContentChecksum == ComputeAtlasContentChecksum(atlas);
+    }
+
+    private static DelaunayTriangle CanonicalTriangle(DelaunayTriangle triangle)
+    {
+        StableId[] ids = [triangle.A, triangle.B, triangle.C];
+        Array.Sort(ids, PlateStableIdComparer.Instance);
+        return new DelaunayTriangle(ids[0], ids[1], ids[2]);
+    }
+
+    private static IReadOnlyList<ExactPoint> CanonicalVertices(IReadOnlyList<ExactPoint> vertices)
+    {
+        if (vertices.Count <= 1) return vertices;
+        ExactPoint[] best = vertices.ToArray();
+        NormalizeRotation(best);
+        ExactPoint[] reversed = vertices.Reverse().ToArray();
+        NormalizeRotation(reversed);
+        return CompareVertexSequences(best, reversed) <= 0 ? best : reversed;
+    }
+
+    private static void NormalizeRotation(ExactPoint[] vertices)
+    {
+        int first = 0;
+        for (int index = 1; index < vertices.Length; index++)
+            if (vertices[index].CompareTo(vertices[first]) < 0) first = index;
+        if (first == 0) return;
+        ExactPoint[] copy = vertices.ToArray();
+        for (int index = 0; index < vertices.Length; index++) vertices[index] = copy[(first + index) % copy.Length];
+    }
+
+    private static int CompareVertexSequences(IReadOnlyList<ExactPoint> left, IReadOnlyList<ExactPoint> right)
+    {
+        for (int index = 0; index < left.Count; index++)
+        {
+            int comparison = left[index].CompareTo(right[index]);
+            if (comparison != 0) return comparison;
+        }
+        return 0;
+    }
+
+    private static void Append(IncrementalHash hash, string value) =>
+        hash.AppendData(Encoding.UTF8.GetBytes(value));
+
+    private static void Append(IncrementalHash hash, int value) => Append(hash, value.ToString(CultureInfo.InvariantCulture) + '|');
+    private static void Append(IncrementalHash hash, long value) => Append(hash, value.ToString(CultureInfo.InvariantCulture) + '|');
+    private static void Append(IncrementalHash hash, StableId value) => Append(hash, value.ToString() + '|');
+    private static void Append(IncrementalHash hash, ExactRational value) => Append(hash, value.ToString() + '|');
 }
 
 public static class PlateAtlasBuilder
@@ -270,6 +402,7 @@ public static class PlateAtlasBuilder
                 $"{settings.MaximumBoundaryInfluenceEvaluations}.");
         }
 
+        Hash256 atlasContentChecksum = PlateAtlasProvenance.ComputeAtlasContentChecksum(atlas);
         GenerationResult<ContinentalFieldModel> continentalResult = ContinentalFieldModel.Create(
             identity,
             profile,
@@ -356,7 +489,7 @@ public static class PlateAtlasBuilder
             cells.Where(cell => cell.PlateId == plate.PlateId)
                 .Select(cell => new PlateCrustPatch(cell.CellId, cell.CrustKind, cell.RelativeAgePpm)))).ToArray();
         return GenerationResult<PlateAtlasSnapshot>.Success(
-            new PlateAtlasSnapshot(plates, cells, boundaries, continental.ContentChecksum, identity, profile));
+            new PlateAtlasSnapshot(plates, cells, boundaries, continental.ContentChecksum, identity, profile, atlasContentChecksum));
     }
 
     private static PlateKinematics CreateKinematics(int seed, ulong index)

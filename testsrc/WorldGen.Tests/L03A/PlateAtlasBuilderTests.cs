@@ -99,4 +99,67 @@ public sealed class PlateAtlasBuilderTests
         Assert.IsLessThan(64 * 1024L, influencePreflightAllocation,
             "The coupled work-budget refusal must occur before continental construction or spread allocation.");
     }
+
+    [TestMethod]
+    public void PlateSnapshotSealsCompleteIdentityAndCanonicalAtlasProvenance()
+    {
+        FrozenScaleProfile profile = L03ATestSupport.FrozenProfile("balanced");
+        WorldBounds bounds = L03ATestSupport.Bounds(profile);
+        GenerationIdentity identityA = L03ATestSupport.Identity(20260906, profile);
+        GenerationIdentity identityB = L03ATestSupport.Identity(20260907, profile);
+        AtlasMesh atlasA = BuildAtlas(identityA, bounds);
+        AtlasMesh atlasB = BuildAtlas(identityB, bounds);
+        PlateGenerationSettings settings = new(
+            plateCount: 7,
+            L03ATestSupport.ContinentalSettings(),
+            maximumCells: 1_000,
+            maximumBoundaryEdges: 4_000,
+            maximumBoundaryInfluenceEvaluations: 4_000_000);
+
+        PlateAtlasSnapshot snapshotA = L03ATestSupport.Success(
+            PlateAtlasBuilder.Build(identityA, atlasA, profile, settings));
+        PlateAtlasSnapshot snapshotB = L03ATestSupport.Success(
+            PlateAtlasBuilder.Build(identityB, atlasB, profile, settings));
+
+        Assert.AreEqual(identityA, snapshotA.Identity);
+        Assert.AreEqual(PlateAtlasProvenance.ComputeAtlasContentChecksum(atlasA), snapshotA.AtlasContentChecksum);
+        Assert.IsTrue(PlateAtlasProvenance.Matches(snapshotA, identityA, profile, atlasA));
+        Assert.IsFalse(PlateAtlasProvenance.Matches(snapshotA, identityA, profile, atlasB),
+            "A snapshot must reject a geometrically different Atlas even when the profile remains valid.");
+        Assert.IsFalse(PlateAtlasProvenance.Matches(snapshotA, identityB, profile, atlasA),
+            "A snapshot must reject an Atlas paired with a different complete generation identity.");
+        Assert.AreNotEqual(snapshotA.ContentChecksum, snapshotB.ContentChecksum);
+
+        GenerationIdentity changedAssetAndProfile = new(
+            identityA.NativeSeed,
+            identityA.AlgorithmVersion,
+            identityA.SchemaVersion,
+            identityA.GeographyConfigHash,
+            Hash256.Zero,
+            "l03a-provenance-regression-v2");
+        PlateAtlasSnapshot changedIdentity = L03ATestSupport.Success(
+            PlateAtlasBuilder.Build(changedAssetAndProfile, atlasA, profile, settings));
+        Assert.AreNotEqual(snapshotA.ContentChecksum, changedIdentity.ContentChecksum,
+            "Asset hash and determinism profile are persistent parents of the plate snapshot.");
+
+        AtlasMesh rebuiltWithReversedInput = BuildAtlas(identityA, bounds, reverseInput: true);
+        Assert.AreEqual(
+            PlateAtlasProvenance.ComputeAtlasContentChecksum(atlasA),
+            PlateAtlasProvenance.ComputeAtlasContentChecksum(rebuiltWithReversedInput),
+            "Canonical atlas provenance must not depend on source site enumeration order.");
+    }
+
+    private static AtlasMesh BuildAtlas(GenerationIdentity identity, WorldBounds bounds, bool reverseInput = false)
+    {
+        GeneratedSiteSet generated = L03ATestSupport.Success(AtlasSiteGenerator.Generate(
+            identity,
+            bounds,
+            new AtlasSiteGenerationSettings(64)));
+        IEnumerable<AtlasSite> sites = reverseInput ? generated.Sites.Reverse() : generated.Sites;
+        return L03ATestSupport.Success(AtlasGeometryBuilder.Build(
+            identity,
+            bounds,
+            sites,
+            new AtlasGeometryBuildOptions(4, GeometryCacheMode.Precomputed)));
+    }
 }
