@@ -37,7 +37,12 @@ public sealed class EvidenceArtifactTests
     [DoNotParallelize]
     public void T0305AndT0306PublishAtomicBlindReviewEvidence()
     {
-        string output = Path.Combine(L03BTestSupport.FindRepositoryRoot(), ".local", "L03B", "evidence-q");
+        string runName = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_RUN") ?? "evidence-q";
+        if (runName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || runName.Contains("..", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Evidence run name must be a single safe directory name.");
+        }
+        string output = Path.Combine(L03BTestSupport.FindRepositoryRoot(), ".local", "L03B", runName);
         Directory.CreateDirectory(output);
         string reportPath = Path.Combine(output, "T03-05-06-Q.json");
         string commit = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_COMMIT") ?? "WORKING_TREE";
