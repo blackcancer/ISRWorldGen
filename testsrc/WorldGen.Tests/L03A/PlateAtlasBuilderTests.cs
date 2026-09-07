@@ -186,6 +186,32 @@ public sealed class PlateAtlasBuilderTests
         }
     }
 
+    [TestMethod]
+    public void PlateBuilderBoundsDeterminismProfileUtf8BeforeSnapshotAllocation()
+    {
+        FrozenScaleProfile profile = L03ATestSupport.FrozenProfile("balanced");
+        GenerationIdentity baseIdentity = L03ATestSupport.Identity(73, profile);
+        AtlasMesh atlas = BuildAtlas(baseIdentity, L03ATestSupport.Bounds(profile));
+        PlateGenerationSettings settings = new(
+            plateCount: 7,
+            L03ATestSupport.ContinentalSettings(),
+            maximumCells: 1_000,
+            maximumBoundaryEdges: 4_000,
+            maximumBoundaryInfluenceEvaluations: 4_000_000);
+
+        GenerationIdentity maximumLength = WithProfileId(baseIdentity, new string('a', 128));
+        Assert.IsTrue(PlateAtlasBuilder.Build(maximumLength, atlas, profile, settings).IsSuccess);
+
+        GenerationIdentity maximumUtf8Length = WithProfileId(baseIdentity, new string('é', 64));
+        Assert.IsTrue(PlateAtlasBuilder.Build(maximumUtf8Length, atlas, profile, settings).IsSuccess,
+            "64 occurrences of é occupy exactly 128 UTF-8 bytes.");
+
+        GenerationIdentity tooLong = WithProfileId(baseIdentity, new string('a', 129));
+        AssertProfileTooLong(tooLong, atlas, profile, settings);
+        GenerationIdentity tooLongUtf8 = WithProfileId(baseIdentity, new string('é', 65));
+        AssertProfileTooLong(tooLongUtf8, atlas, profile, settings);
+    }
+
     private static AtlasMesh BuildAtlas(GenerationIdentity identity, WorldBounds bounds, bool reverseInput = false)
     {
         GeneratedSiteSet generated = L03ATestSupport.Success(AtlasSiteGenerator.Generate(
@@ -198,5 +224,26 @@ public sealed class PlateAtlasBuilderTests
             bounds,
             sites,
             new AtlasGeometryBuildOptions(4, GeometryCacheMode.Precomputed)));
+    }
+
+    private static GenerationIdentity WithProfileId(GenerationIdentity identity, string profileId) => new(
+        identity.NativeSeed,
+        identity.AlgorithmVersion,
+        identity.SchemaVersion,
+        identity.GeographyConfigHash,
+        identity.GenerationAssetHash,
+        profileId);
+
+    private static void AssertProfileTooLong(
+        GenerationIdentity identity,
+        AtlasMesh atlas,
+        FrozenScaleProfile profile,
+        PlateGenerationSettings settings)
+    {
+        GenerationResult<PlateAtlasSnapshot> result = PlateAtlasBuilder.Build(identity, atlas, profile, settings);
+        Assert.IsInstanceOfType<GenerationFailure<PlateAtlasSnapshot>>(result);
+        GenerationError error = ((GenerationFailure<PlateAtlasSnapshot>)result).Error;
+        Assert.AreEqual(GenerationFailureCode.InvalidInput, error.Code);
+        Assert.AreEqual("geology.plates.determinism-profile", error.Stage);
     }
 }

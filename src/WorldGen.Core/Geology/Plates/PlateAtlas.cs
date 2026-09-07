@@ -282,10 +282,23 @@ public sealed class PlateAtlasSnapshot
 
     private static void AppendString(IncrementalHash hash, string value)
     {
+        int byteCount = Encoding.UTF8.GetByteCount(value);
+        if (byteCount > PlateAtlasChecksumEncoding.MaximumCanonicalStringUtf8Bytes)
+        {
+            throw new InvalidOperationException(
+                $"Canonical plate snapshot text exceeds {PlateAtlasChecksumEncoding.MaximumCanonicalStringUtf8Bytes} UTF-8 bytes.");
+        }
+
         byte[] bytes = Encoding.UTF8.GetBytes(value);
         AppendInt32(hash, bytes.Length);
         hash.AppendData(bytes);
     }
+}
+
+internal static class PlateAtlasChecksumEncoding
+{
+    // Aligné sur ProfileCanonicalEncoding : les identifiants persistants restent bornés à 128 octets UTF-8.
+    internal const int MaximumCanonicalStringUtf8Bytes = 128;
 }
 
 /// <summary>
@@ -423,6 +436,12 @@ public static class PlateAtlasBuilder
         {
             return Failure(identity, GenerationFailureCode.InvalidInput, "geology.plates.profile-hash",
                 "Generation identity and frozen scale profile have different geography configuration hashes.");
+        }
+
+        if (Encoding.UTF8.GetByteCount(identity.DeterminismProfileId) > PlateAtlasChecksumEncoding.MaximumCanonicalStringUtf8Bytes)
+        {
+            return Failure(identity, GenerationFailureCode.InvalidInput, "geology.plates.determinism-profile",
+                $"Determinism profile ID exceeds {PlateAtlasChecksumEncoding.MaximumCanonicalStringUtf8Bytes} UTF-8 bytes.");
         }
 
         WorldDomain domain = profile.AtlasIndexProfile.Domain;
