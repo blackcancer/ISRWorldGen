@@ -311,7 +311,7 @@ public sealed class EvidenceArtifactTests
             atlas,
             plates,
             profile,
-            new LandscapeGenerationSettings(budget, profile.SiteQuota, 4)));
+            new LandscapeGenerationSettings(budget, profile.SiteQuota, 1.25)));
         var samples = new List<LandscapeSample>();
         progress?.Invoke("samples");
         for (int z = 1; z <= 8; z++)
@@ -356,7 +356,7 @@ public sealed class EvidenceArtifactTests
             GenerationIdentity identity = L03BTestSupport.Identity(seed, frozen);
             (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(seed, frozen);
             LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, frozen,
-                new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), frozen.SiteQuota, 4)));
+                new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), frozen.SiteQuota, 1.25)));
             LandscapeCellProfile? cell = model.Cells.FirstOrDefault(item => item.Family == family);
             if (cell is null || cell.Value.CellId == default)
             {

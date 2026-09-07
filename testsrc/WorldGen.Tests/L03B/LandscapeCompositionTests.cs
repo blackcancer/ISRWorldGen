@@ -56,7 +56,7 @@ public sealed class LandscapeCompositionTests
         LandscapeGenerationSettings settings = new(
             new ReliefBudgetRequest(64, 48, 128),
             maximumCells: profile.SiteQuota,
-            falloffExponent: 4);
+            supportOverlapFactor: 1.25);
 
         LandscapeModel first = L03BTestSupport.Success(
             LandscapeModelBuilder.Build(identity, atlas, plates, profile, settings));
@@ -97,7 +97,7 @@ public sealed class LandscapeCompositionTests
             atlas,
             plates,
             profile,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), 32, 4)));
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), 32, 1.25)));
         (long X, long Z)[] coordinates = SampleCoordinates(profile).ToArray();
         LandscapeSample[] forward = coordinates.Select(item => model.Sample(item.X, item.Z)).ToArray();
         LandscapeSample[] reverse = coordinates.Reverse().Select(item => model.Sample(item.X, item.Z)).Reverse().ToArray();
@@ -121,19 +121,19 @@ public sealed class LandscapeCompositionTests
             atlas,
             plates,
             balanced,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), 1, 4));
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), 1, 1.25));
         GenerationResult<LandscapeModel> mismatch = LandscapeModelBuilder.Build(
             identity,
             atlas,
             plates,
             laboratory,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), 128, 4));
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), 128, 1.25));
         GenerationResult<LandscapeModel> budgetBeforeProvenance = LandscapeModelBuilder.Build(
             identity,
             wrongAtlas,
             plates,
             balanced,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), 1, 4));
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), 1, 1.25));
 
         AssertFailure(budget, GenerationFailureCode.BudgetExceeded, "geology.landscapes.cell-budget");
         AssertFailure(mismatch, GenerationFailureCode.InvalidInput, "geology.landscapes.profile-hash");
@@ -148,7 +148,7 @@ public sealed class LandscapeCompositionTests
         GenerationIdentity identityB = L03BTestSupport.Identity(7302, profile);
         (AtlasMesh atlasA, PlateAtlasSnapshot platesA) = L03BTestSupport.PlateFixture(identityA.NativeSeed, profile);
         (AtlasMesh atlasB, PlateAtlasSnapshot platesB) = L03BTestSupport.PlateFixture(identityB.NativeSeed, profile);
-        var settings = new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4);
+        var settings = new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.25);
 
         GenerationResult<LandscapeModel> rejected = LandscapeModelBuilder.Build(identityA, atlasB, platesA, profile, settings);
         AssertFailure(rejected, GenerationFailureCode.InvalidInput, "geology.landscapes.plate-provenance");
@@ -167,7 +167,7 @@ public sealed class LandscapeCompositionTests
         FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
         GenerationIdentity identity = L03BTestSupport.Identity(-437287116, profile);
         (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
-        var settings = new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4);
+        var settings = new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.25);
         Hash256 invariant = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile, settings)).ContentChecksum;
         CultureInfo old = CultureInfo.CurrentCulture;
         try
@@ -191,7 +191,7 @@ public sealed class LandscapeCompositionTests
         GenerationIdentity identity = L03BTestSupport.Identity(90210, profile);
         (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
         LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4)));
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.25)));
         double[] samples = Enumerable.Range(1, 64).Select(index => model.Sample(
             (profile.WidthBlocks * index) / 65,
             (profile.LengthBlocks * ((index * 23) % 64 + 1)) / 65).ModelAltitudeNormalized).ToArray();
@@ -219,7 +219,7 @@ public sealed class LandscapeCompositionTests
         FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
         GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
         (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
-        LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile, new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 4)));
+        LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile, new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.25)));
         AtlasSite site = atlas.Sites.First(item => item.X > atlas.Bounds.MinX && item.X < atlas.Bounds.MaxXExclusive - 1);
         double center = model.Sample(site.X, site.Z).ModelAltitudeNormalized;
         double left = model.Sample(site.X - 1, site.Z).ModelAltitudeNormalized;
@@ -311,7 +311,7 @@ public sealed class LandscapeCompositionTests
     }
 
     [TestMethod]
-    public void ContinuousFalloffRemovesMembershipJumpsAtFormerRankExchangeCoordinates()
+    public void CompactSupportRemovesMembershipJumpsAtFormerRankExchangeCoordinates()
     {
         FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("laboratory");
         GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
@@ -321,7 +321,7 @@ public sealed class LandscapeCompositionTests
             atlas,
             plates,
             profile,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), profile.SiteQuota, 4)));
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), profile.SiteQuota, 1.25)));
 
         // These are local regressions for the two prior rank-exchange reports, not a campaign acceptance threshold.
         Assert.IsLessThan(.2, AdjacentDelta(model, 896, 1020, 896, 1021));
@@ -342,24 +342,24 @@ public sealed class LandscapeCompositionTests
     }
 
     [TestMethod]
-    public void ContinuousFalloffIsLocalNonzeroAndChangesThePublishedModel()
+    public void CompactVoronoiSupportIsLocalContinuousAndChangesThePublishedModel()
     {
-        MethodInfo weight = typeof(LandscapeModel).GetMethod("ContinuousWeight", BindingFlags.NonPublic | BindingFlags.Static)!;
-        double atSite = (double)weight.Invoke(null, [0d, 4d])!;
-        double near = (double)weight.Invoke(null, [1d, 4d])!;
-        double far = (double)weight.Invoke(null, [10d, 4d])!;
-        double sharperFar = (double)weight.Invoke(null, [10d, 8d])!;
-        Assert.IsTrue(atSite > near && near > far && far > 0d);
-        Assert.IsLessThan(near / 16d, far, "Exponent four keeps distant sites continuous but materially local.");
-        Assert.IsLessThan(far, sharperFar);
+        MethodInfo weight = typeof(LandscapeModel).GetMethod("CompactSupportWeight", BindingFlags.NonPublic | BindingFlags.Static)!;
+        double atSite = (double)weight.Invoke(null, [0d])!;
+        double nearBoundary = (double)weight.Invoke(null, [.99d])!;
+        double atBoundary = (double)weight.Invoke(null, [1d])!;
+        double outside = (double)weight.Invoke(null, [1.01d])!;
+        Assert.IsTrue(atSite > nearBoundary && nearBoundary > 0d);
+        Assert.AreEqual(0d, atBoundary);
+        Assert.AreEqual(0d, outside);
 
         FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("balanced");
         GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
         (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
         LandscapeModel broad = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 2)));
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.05)));
         LandscapeModel local = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
-            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 8)));
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.5)));
         Assert.AreNotEqual(broad.ContentChecksum, local.ContentChecksum);
         Assert.IsTrue(SampleCoordinates(profile).Any(point =>
             broad.Sample(point.X, point.Z).ModelAltitudeNormalized != local.Sample(point.X, point.Z).ModelAltitudeNormalized));
@@ -384,6 +384,73 @@ public sealed class LandscapeCompositionTests
             Assert.IsGreaterThan(0d, variance, $"{family.Family} must retain morphology after analytic bounding.");
         }
     }
+
+    [TestMethod]
+    public void CompactSupportsCoverWorldBoundariesAndEvaluateOnlyLocalMorphologies()
+    {
+        MethodInfo contributors = typeof(LandscapeModel).GetMethod("CountContributors", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        foreach (string profileId in new[] { "laboratory", "balanced", "vast-expeditions" })
+        {
+            FrozenScaleProfile profile = L03BTestSupport.FrozenProfile(profileId);
+            GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
+            (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
+            LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+                new LandscapeGenerationSettings(
+                    profileId == "laboratory" ? new ReliefBudgetRequest(28, 40, 96) : new ReliefBudgetRequest(64, 48, 128),
+                    profile.SiteQuota,
+                    1.25)));
+            (long X, long Z)[] points =
+            [
+                (atlas.Bounds.MinX, atlas.Bounds.MinZ),
+                (atlas.Bounds.MaxXExclusive - 1, atlas.Bounds.MinZ),
+                (atlas.Bounds.MinX, atlas.Bounds.MaxZExclusive - 1),
+                (atlas.Bounds.MaxXExclusive - 1, atlas.Bounds.MaxZExclusive - 1),
+                .. SampleCoordinates(profile),
+            ];
+            int[] counts = points.Select(point => (int)contributors.Invoke(model, [point.X, point.Z])!).ToArray();
+            Console.WriteLine($"{profileId}: sites={atlas.Sites.Count}, contributors min={counts.Min()}, max={counts.Max()}, mean={counts.Average():R}");
+            Assert.IsGreaterThan(0, counts.Min(), "Voronoi supports must cover bounds and corners.");
+            Assert.IsLessThan(atlas.Sites.Count, counts.Max(), "SampleCell work must be local rather than all-site linear.");
+            Assert.IsTrue(points.All(point => double.IsFinite(model.Sample(point.X, point.Z).ModelAltitudeNormalized)));
+        }
+    }
+
+    [TestMethod]
+    public void CompactSupportGeometryCoversPointLinearAndPlanarAtlases()
+    {
+        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("laboratory");
+        GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
+        MethodInfo supports = typeof(LandscapeModelBuilder).GetMethod("BuildSupportRadii", BindingFlags.NonPublic | BindingFlags.Static)!;
+        MethodInfo weight = typeof(LandscapeModel).GetMethod("CompactSupportWeight", BindingFlags.NonPublic | BindingFlags.Static)!;
+        foreach ((AtlasTopologyDimension topology, AtlasSite[] sites) scenario in new[]
+        {
+            (AtlasTopologyDimension.Point, new[] { Site(1, 50, 50) }),
+            (AtlasTopologyDimension.Linear, new[] { Site(2, 0, 50), Site(3, 50, 50), Site(4, 100, 50) }),
+            (AtlasTopologyDimension.Planar, new[] { Site(5, 10, 10), Site(6, 90, 10), Site(7, 50, 90) }),
+        })
+        {
+            WorldBounds bounds = new(0, 0, 101, 101);
+            AtlasMesh atlas = L03BTestSupport.Success(AtlasGeometryBuilder.Build(identity, bounds, scenario.sites));
+            Assert.AreEqual(scenario.topology, atlas.TopologyDimension);
+            var radii = (IReadOnlyDictionary<StableId, double>)supports.Invoke(null, [atlas, 1.25d])!;
+            for (long x = bounds.MinX; x < bounds.MaxXExclusive; x += 10)
+            {
+                for (long z = bounds.MinZ; z < bounds.MaxZExclusive; z += 10)
+                {
+                    double total = atlas.Sites.Sum(site =>
+                    {
+                        double dx = x - site.X;
+                        double dz = z - site.Z;
+                        return (double)weight.Invoke(null, [Math.Sqrt((dx * dx) + (dz * dz)) / radii[site.Id]])!;
+                    });
+                    Assert.IsGreaterThan(0d, total, $"{scenario.topology} ({x},{z})");
+                }
+            }
+        }
+    }
+
+    private static AtlasSite Site(int index, long x, long z) =>
+        new(StableId.Derive(RandomDomain.Sites, StableId.Zero, (ulong)index), x, z);
 
     private static double AdjacentDelta(LandscapeModel model, long leftX, long leftZ, long rightX, long rightZ)
         => Math.Abs(model.Sample(leftX, leftZ).ModelAltitudeNormalized - model.Sample(rightX, rightZ).ModelAltitudeNormalized);
