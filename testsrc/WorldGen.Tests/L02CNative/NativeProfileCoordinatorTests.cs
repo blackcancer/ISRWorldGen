@@ -31,6 +31,29 @@ public sealed class NativeProfileCoordinatorTests
     }
 
     [TestMethod]
+    public void NewWorld_EvidenceComesFromCommittedEnvelopeWritesAndRegisteredGate()
+    {
+        NativeWorldSnapshot world = NativeProfileTestSupport.NewLaboratoryWorld();
+        var store = new MemoryFrozenProfileStore();
+        var coordinator = new NativeProfileCoordinator();
+        int registrationCount = 0;
+
+        NativeProfilePreparation preparation = coordinator.Prepare(
+            world,
+            NativeProfileTestSupport.LaboratorySelection(),
+            store,
+            beforeCommit: () => registrationCount++);
+        byte[] committed = store.GetStoredCopy();
+
+        Assert.AreEqual(1, registrationCount);
+        Assert.AreEqual(NativeProfilePreparationSource.New, preparation.Evidence.Source);
+        Assert.AreEqual(2, preparation.Evidence.PersistenceWrites);
+        Assert.AreEqual(committed.Length, preparation.Evidence.EnvelopeBytes);
+        Assert.AreEqual(Hash256.Compute(committed), preparation.Evidence.EnvelopeSha256);
+        Assert.IsTrue(preparation.Evidence.GateCallbackRegistered);
+    }
+
+    [TestMethod]
     public void ExistingWorld_ReloadsIdenticalFrozenProfileWithoutRewriting()
     {
         NativeWorldSnapshot newWorld = NativeProfileTestSupport.NewLaboratoryWorld();
@@ -52,6 +75,11 @@ public sealed class NativeProfileCoordinatorTests
         Assert.AreEqual(first.Profile, reopened.Profile);
         Assert.AreEqual(2, store.WriteCount);
         CollectionAssert.AreEqual(persisted, store.GetStoredCopy());
+        Assert.AreEqual(NativeProfilePreparationSource.Reload, reopened.Evidence.Source);
+        Assert.AreEqual(0, reopened.Evidence.PersistenceWrites);
+        Assert.AreEqual(persisted.Length, reopened.Evidence.EnvelopeBytes);
+        Assert.AreEqual(Hash256.Compute(persisted), reopened.Evidence.EnvelopeSha256);
+        Assert.IsFalse(reopened.Evidence.GateCallbackRegistered);
     }
 
     [TestMethod]
@@ -161,6 +189,10 @@ public sealed class NativeProfileCoordinatorTests
         AssertRejected(preparation, coordinator, "atlas.profile.native-height");
         Assert.AreEqual(GenerationFailureCode.InvalidInput, preparation.Error!.Code);
         Assert.AreEqual(0, store.WriteCount);
+        Assert.AreEqual(NativeProfilePreparationSource.New, preparation.Evidence.Source);
+        Assert.AreEqual(0, preparation.Evidence.PersistenceWrites);
+        Assert.AreEqual(0, preparation.Evidence.EnvelopeBytes);
+        Assert.AreEqual(Hash256.Zero, preparation.Evidence.EnvelopeSha256);
     }
 
     [TestMethod]
@@ -210,6 +242,9 @@ public sealed class NativeProfileCoordinatorTests
 
         AssertRejected(preparation, coordinator, "native-profile.store-reread");
         Assert.AreEqual(2, store.WriteCount, "The second write is the rejected tombstone.");
+        Assert.AreEqual(2, preparation.Evidence.PersistenceWrites);
+        Assert.AreEqual(0, preparation.Evidence.EnvelopeBytes);
+        Assert.AreEqual(Hash256.Zero, preparation.Evidence.EnvelopeSha256);
         Assert.IsNull(coordinator.PublishedProfile);
 
         store.ReturnDifferentBytesAfterWrite = false;
@@ -242,6 +277,9 @@ public sealed class NativeProfileCoordinatorTests
             store);
 
         AssertRejected(preparation, coordinator, "native-profile.store-reread");
+        Assert.AreEqual(2, preparation.Evidence.PersistenceWrites);
+        Assert.AreEqual(0, preparation.Evidence.EnvelopeBytes);
+        Assert.AreEqual(Hash256.Zero, preparation.Evidence.EnvelopeSha256);
         store.ReturnDifferentBytesAfterWrite = false;
         NativeProfileResult<NativeFrozenProfileEnvelope> persisted =
             NativeFrozenProfileEnvelopeCodec.Decode(store.GetStoredCopy());
@@ -254,6 +292,89 @@ public sealed class NativeProfileCoordinatorTests
             store);
         Assert.AreEqual(NativeProfileState.Rejected, reopened.State);
         Assert.AreEqual("native-profile.envelope-pending", reopened.Error!.Stage);
+    }
+
+    [TestMethod]
+    public void FailedCommitAndSuccessfulTombstone_ReportAllWriteAttemptsAndVerifiedTombstone()
+    {
+        var store = new MemoryFrozenProfileStore { ThrowOnWriteNumber = 2 };
+        var coordinator = new NativeProfileCoordinator();
+
+        NativeProfilePreparation preparation = coordinator.Prepare(
+            NativeProfileTestSupport.NewLaboratoryWorld(),
+            NativeProfileTestSupport.LaboratorySelection(),
+            store,
+            beforeCommit: () => { });
+        byte[] tombstone = store.GetStoredCopy();
+
+        AssertRejected(preparation, coordinator, "native-profile.store-commit");
+        Assert.AreEqual(3, preparation.Evidence.PersistenceWrites);
+        Assert.AreEqual(tombstone.Length, preparation.Evidence.EnvelopeBytes);
+        Assert.AreEqual(Hash256.Compute(tombstone), preparation.Evidence.EnvelopeSha256);
+        Assert.IsTrue(preparation.Evidence.GateCallbackRegistered);
+        Assert.AreEqual(
+            NativeProfilePersistenceState.Rejected,
+            NativeFrozenProfileEnvelopeCodec.Decode(tombstone).Value!.PersistenceState);
+    }
+
+    [TestMethod]
+    public void FailedPendingWriteAndSuccessfulTombstone_ReportBothWriteAttempts()
+    {
+        var store = new MemoryFrozenProfileStore { ThrowOnWriteNumber = 1 };
+        var coordinator = new NativeProfileCoordinator();
+
+        NativeProfilePreparation preparation = coordinator.Prepare(
+            NativeProfileTestSupport.NewLaboratoryWorld(),
+            NativeProfileTestSupport.LaboratorySelection(),
+            store,
+            beforeCommit: () => Assert.Fail("Gate registration must not be reached."));
+        byte[] tombstone = store.GetStoredCopy();
+
+        AssertRejected(preparation, coordinator, "native-profile.store-write");
+        Assert.AreEqual(2, preparation.Evidence.PersistenceWrites);
+        Assert.AreEqual(tombstone.Length, preparation.Evidence.EnvelopeBytes);
+        Assert.AreEqual(Hash256.Compute(tombstone), preparation.Evidence.EnvelopeSha256);
+        Assert.IsFalse(preparation.Evidence.GateCallbackRegistered);
+        Assert.AreEqual(
+            NativeProfilePersistenceState.Rejected,
+            NativeFrozenProfileEnvelopeCodec.Decode(tombstone).Value!.PersistenceState);
+    }
+
+    [TestMethod]
+    public void EvidenceHashIsImmutableWhenCallerMutatesStoreCopies()
+    {
+        var store = new MemoryFrozenProfileStore();
+        NativeProfilePreparation preparation = new NativeProfileCoordinator().Prepare(
+            NativeProfileTestSupport.NewLaboratoryWorld(),
+            NativeProfileTestSupport.LaboratorySelection(),
+            store);
+        Hash256 recorded = preparation.Evidence.EnvelopeSha256;
+        byte[] copy = store.Read()!;
+
+        copy[0] ^= 0xff;
+
+        Assert.AreEqual(recorded, preparation.Evidence.EnvelopeSha256);
+        Assert.AreEqual(Hash256.Compute(store.GetStoredCopy()), preparation.Evidence.EnvelopeSha256);
+        Assert.IsLessThanOrEqualTo(
+            NativeFrozenProfileEnvelopeCodec.MaximumEnvelopeBytes,
+            preparation.Evidence.EnvelopeBytes);
+    }
+
+    [TestMethod]
+    public void EvidenceRejectsNonCanonicalLengthHashPairs()
+    {
+        Assert.ThrowsExactly<ArgumentException>(() => new NativeProfilePersistenceEvidence(
+            NativeProfilePreparationSource.New,
+            persistenceWrites: 0,
+            envelopeBytes: 0,
+            envelopeSha256: Hash256.Compute([1]),
+            gateCallbackRegistered: false));
+        Assert.ThrowsExactly<ArgumentException>(() => new NativeProfilePersistenceEvidence(
+            NativeProfilePreparationSource.Reload,
+            persistenceWrites: 0,
+            envelopeBytes: NativeFrozenProfileEnvelopeCodec.MaximumEnvelopeBytes + 1,
+            envelopeSha256: Hash256.Compute([1]),
+            gateCallbackRegistered: false));
     }
 
     [TestMethod]

@@ -18,11 +18,19 @@ internal interface INativeProfileHost
 
     IFrozenProfileStore CreateStore();
 
-    void LogFrozen(NativeWorldSnapshot world, string profileId);
+    void LogFrozen(
+        NativeWorldSnapshot world,
+        NativeProfilePreparation preparation,
+        NativeWorldgenGateObservation gate,
+        bool publishedProfile);
 
     void LogInactive();
 
-    void LogRejected(NativeProfileError error, NativeWorldSnapshot? world);
+    void LogRejected(
+        NativeProfileError error,
+        NativeWorldSnapshot? world,
+        NativeProfilePreparation preparation,
+        NativeWorldgenGateObservation gate);
 
     void LogFrozenGate(string profileId);
 
@@ -68,7 +76,7 @@ internal sealed class VintageStoryNativeProfileBridge
             LastPreparation = preparation;
             if (preparation.State == NativeProfileState.Frozen)
             {
-                TryLogFrozen(world, preparation.Profile!.Id);
+                TryLogFrozen(world, preparation);
                 return;
             }
 
@@ -78,16 +86,16 @@ internal sealed class VintageStoryNativeProfileBridge
                 return;
             }
 
-            RejectAndStop(preparation.Error!);
+            RejectAndStop(preparation);
         }
         catch (Exception exception)
         {
             var error = new NativeProfileError(
                 GenerationFailureCode.InvalidInput,
                 "native-profile.game-ready",
-                $"Native profile GameReady preparation failed: {exception.Message}");
+                $"Native profile GameReady preparation failed ({exception.GetType().Name}).");
             LastPreparation = coordinator.FailClosed(error);
-            RejectAndStop(error);
+            RejectAndStop(LastPreparation);
         }
     }
 
@@ -109,17 +117,23 @@ internal sealed class VintageStoryNativeProfileBridge
             return;
         }
 
-        RejectAndStop(new NativeProfileError(
+        NativeProfilePreparation rejection = coordinator.FailClosed(new NativeProfileError(
             GenerationFailureCode.InvalidInput,
             "native-profile.worldgen-gate",
             $"World generation gate observed state {gate.State} instead of Frozen."));
+        LastPreparation = rejection;
+        RejectAndStop(rejection);
     }
 
-    private void RejectAndStop(NativeProfileError error)
+    private void RejectAndStop(NativeProfilePreparation preparation)
     {
         try
         {
-            host.LogRejected(error, capturedWorld);
+            host.LogRejected(
+                preparation.Error!,
+                capturedWorld,
+                preparation,
+                coordinator.ObserveWorldgenGate());
         }
         finally
         {
@@ -127,11 +141,15 @@ internal sealed class VintageStoryNativeProfileBridge
         }
     }
 
-    private void TryLogFrozen(NativeWorldSnapshot world, string profileId)
+    private void TryLogFrozen(NativeWorldSnapshot world, NativeProfilePreparation preparation)
     {
         try
         {
-            host.LogFrozen(world, profileId);
+            host.LogFrozen(
+                world,
+                preparation,
+                coordinator.ObserveWorldgenGate(),
+                coordinator.PublishedProfile is not null);
         }
         catch (Exception)
         {
@@ -217,28 +235,24 @@ internal sealed class VintageStoryNativeProfileHost : INativeProfileHost
 
     public IFrozenProfileStore CreateStore() => new VintageStoryFrozenProfileStore(api.WorldManager.SaveGame);
 
-    public void LogFrozen(NativeWorldSnapshot world, string profileId) => logger.Notification(
-        "L02C_NATIVE_PROFILE_FROZEN save={0} profile={1} x={2} y={3} z={4} chunk={5} rules={6}:{7}",
-        world.SavegameIdentifier,
-        profileId,
-        world.MapSizeX,
-        world.MapSizeY,
-        world.MapSizeZ,
-        world.ChunkSize,
-        world.NativeRuleSetId,
-        world.NativeRuleSetVersion);
+    public void LogFrozen(
+        NativeWorldSnapshot world,
+        NativeProfilePreparation preparation,
+        NativeWorldgenGateObservation gate,
+        bool publishedProfile) => logger.Notification(
+            "{0}",
+            CreateFrozenDiagnostic(world, preparation, gate, publishedProfile));
 
     public void LogInactive() => logger.Notification(
         "L02C_NATIVE_PROFILE_INACTIVE reason=no-explicit-selection-and-no-envelope");
 
-    public void LogRejected(NativeProfileError error, NativeWorldSnapshot? world) => logger.Error(
-        "L02C_NATIVE_PROFILE_REJECTED code={0} stage={1} details={2} dimensions={3} chunk={4} rules={5}",
-        error.Code,
-        error.Stage,
-        SanitizeDiagnosticDetail(error.Details),
-        world is null ? "unavailable" : $"{world.MapSizeX}x{world.MapSizeY}x{world.MapSizeZ}",
-        world?.ChunkSize.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unavailable",
-        world is null ? "unavailable" : $"{world.NativeRuleSetId}:{world.NativeRuleSetVersion}");
+    public void LogRejected(
+        NativeProfileError error,
+        NativeWorldSnapshot? world,
+        NativeProfilePreparation preparation,
+        NativeWorldgenGateObservation gate) => logger.Error(
+            "{0}",
+            CreateRejectedDiagnostic(error, world, preparation, gate));
 
     public void LogFrozenGate(string profileId) => logger.Notification(
         "L02C_NATIVE_GATE_FROZEN profile={0}",
@@ -246,9 +260,100 @@ internal sealed class VintageStoryNativeProfileHost : INativeProfileHost
 
     public void ShutDown() => api.Server.ShutDown();
 
+    internal static string CreateFrozenDiagnostic(
+        NativeWorldSnapshot world,
+        NativeProfilePreparation preparation,
+        NativeWorldgenGateObservation gate,
+        bool publishedProfile)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        ArgumentNullException.ThrowIfNull(preparation);
+        ArgumentNullException.ThrowIfNull(gate);
+        if (preparation.State != NativeProfileState.Frozen ||
+            preparation.Profile is null ||
+            preparation.Error is not null ||
+            preparation.Evidence.EnvelopeBytes == 0 ||
+            gate.State != NativeProfileState.Frozen ||
+            !gate.CanGenerate ||
+            !publishedProfile)
+        {
+            throw new ArgumentException("Frozen diagnostic requires a published Frozen profile and generating gate.");
+        }
+
+        string profileId = preparation.Profile.Id;
+        NativeProfilePersistenceEvidence evidence = preparation.Evidence;
+        return string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "L02C_NATIVE_PROFILE_FROZEN profile={0} source={1} persistencewrites={2} envelopebytes={3} envelopesha256={4} gatestate={5} gatecangenerate={6} gatecallbackregistered={7} publishedprofile={8} dimensions={9}x{10}x{11} chunk={12} rules={13}:{14}",
+            profileId,
+            evidence.SourceToken,
+            evidence.PersistenceWrites,
+            evidence.EnvelopeBytes,
+            evidence.EnvelopeSha256Token,
+            gate.State,
+            BooleanToken(gate.CanGenerate),
+            BooleanToken(evidence.GateCallbackRegistered),
+            BooleanToken(publishedProfile),
+            world.MapSizeX,
+            world.MapSizeY,
+            world.MapSizeZ,
+            world.ChunkSize,
+            world.NativeRuleSetId,
+            world.NativeRuleSetVersion);
+    }
+
+    internal static string CreateRejectedDiagnostic(
+        NativeProfileError error,
+        NativeWorldSnapshot? world,
+        NativeProfilePreparation preparation,
+        NativeWorldgenGateObservation gate)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        ArgumentNullException.ThrowIfNull(preparation);
+        ArgumentNullException.ThrowIfNull(gate);
+        if (preparation.State != NativeProfileState.Rejected ||
+            preparation.Profile is not null ||
+            preparation.Error is null ||
+            preparation.Error != error ||
+            gate.State != NativeProfileState.Rejected ||
+            gate.CanGenerate)
+        {
+            throw new ArgumentException("Rejected diagnostic requires a rejected preparation and closed gate.");
+        }
+
+        NativeProfilePersistenceEvidence evidence = preparation.Evidence;
+        return string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "L02C_NATIVE_PROFILE_REJECTED code={0} stage={1} source={2} persistencewrites={3} envelopebytes={4} envelopesha256={5} gatestate={6} gatecangenerate={7} gatecallbackregistered={8} details={9} dimensions={10} chunk={11} rules={12}",
+            error.Code,
+            error.Stage,
+            evidence.SourceToken,
+            evidence.PersistenceWrites,
+            evidence.EnvelopeBytes,
+            evidence.EnvelopeSha256Token,
+            gate.State,
+            BooleanToken(gate.CanGenerate),
+            BooleanToken(evidence.GateCallbackRegistered),
+            SanitizeDiagnosticDetail(error.Details),
+            world is null ? "unavailable" : $"{world.MapSizeX}x{world.MapSizeY}x{world.MapSizeZ}",
+            world?.ChunkSize.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unavailable",
+            world is null ? "unavailable" : $"{world.NativeRuleSetId}:{world.NativeRuleSetVersion}");
+    }
+
     internal static string SanitizeDiagnosticDetail(string details)
     {
         const int maximumLength = 256;
+        if (details.Contains('\\') ||
+            details.Contains('/') ||
+            details.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+            details.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+            details.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+            details.Contains("bearer", StringComparison.OrdinalIgnoreCase) ||
+            (details.Length >= 2 && char.IsLetter(details[0]) && details[1] == ':'))
+        {
+            return "redacted-noncanonical-detail";
+        }
+
         int length = Math.Min(details.Length, maximumLength);
         char[] sanitized = new char[length];
         for (int index = 0; index < length; index++)
@@ -262,6 +367,8 @@ internal sealed class VintageStoryNativeProfileHost : INativeProfileHost
 
         return new string(sanitized);
     }
+
+    private static string BooleanToken(bool value) => value ? "true" : "false";
 }
 
 internal sealed class VintageStoryFrozenProfileStore : IFrozenProfileStore

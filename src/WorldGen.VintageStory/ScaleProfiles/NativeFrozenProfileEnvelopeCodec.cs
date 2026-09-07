@@ -74,7 +74,7 @@ internal static class NativeFrozenProfileEnvelopeCodec
     internal const string FrozenProfileCodecId = "isrworldgen.core.frozen-scale-profile";
     internal const uint FrozenProfileCodecVersion = 1;
     private const uint EnvelopeVersion = 1;
-    private const int MaximumEnvelopeBytes = 8_192;
+    internal const int MaximumEnvelopeBytes = 8_192;
     private const int MaximumIdentifierBytes = 128;
     private const int MaximumProfileBytes = 4_096;
     private static readonly byte[] Magic = "ISRNPF01"u8.ToArray();
@@ -272,7 +272,7 @@ internal static class NativeFrozenProfileEnvelopeCodec
         }
         catch (Exception exception) when (exception is InvalidDataException or DecoderFallbackException or OverflowException)
         {
-            return FormatFailure($"Native profile envelope cannot be decoded: {exception.Message}");
+            return FormatFailure($"Native profile envelope cannot be decoded ({exception.GetType().Name}).");
         }
     }
 

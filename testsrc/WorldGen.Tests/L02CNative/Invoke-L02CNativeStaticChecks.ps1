@@ -221,15 +221,50 @@ $requiredSourceFragments = @(
     'NativeProfilePersistenceState.Pending',
     'NativeProfilePersistenceState.Committed',
     'NativeProfilePersistenceState.Rejected',
-    'store.Write(pending.AsSpan())',
+    'WriteEnvelope(store, pending)',
     'reread = store.Read()?.ToArray()',
     'return Publish(strictReload.Value!)',
-    'details={2} dimensions={3} chunk={4} rules={5}'
+    'NativeProfilePreparationSource.Reload',
+    'persistenceWrites = checked(persistenceWrites + 1)',
+    'RecordEnvelope(committed)',
+    'RecordEnvelope(persisted)',
+    'L02C_NATIVE_PROFILE_FROZEN profile={0} source={1} persistencewrites={2}',
+    'L02C_NATIVE_PROFILE_REJECTED code={0} stage={1} source={2} persistencewrites={3}',
+    'coordinator.PublishedProfile is not null',
+    'Native profile GameReady preparation failed ({exception.GetType().Name}).'
 )
 $allSources = $bridgeSource + $coordinatorSource + $envelopeSource
 foreach ($fragment in $requiredSourceFragments) {
     if (-not $allSources.Contains($fragment)) {
         throw "Required native probe fragment is missing: $fragment"
+    }
+}
+
+$runtimeOraclePath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L02CNative\Invoke-L02CNativeRuntimeEvidence.ps1'
+$runtimeOracleTestPath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L02CNative\Test-L02CNativeRuntimeEvidence.ps1'
+foreach ($scriptPath in @($runtimeOraclePath, $runtimeOracleTestPath)) {
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        throw "T02-05 runtime evidence script is missing: $scriptPath"
+    }
+}
+
+$runtimeOracleSource = Get-Content -LiteralPath $runtimeOraclePath -Raw
+$requiredRuntimeOracleFragments = @(
+    '[IO.FileMode]::CreateNew',
+    "'ISRWorldGen.dll'",
+    "'ISRWorldGen.Core.dll'",
+    "'ISRWorldGen.pdb'",
+    "'ISRWorldGen.Core.pdb'",
+    "'3AD6294240B9B55D3E0DB3CD323D90C31EC8474EAE6E4E16B58FE76507CB9D0D'",
+    "'campaign-supplied-unverified-by-oracle'",
+    "Assert-ExactToken `$reloadTokens 'persistencewrites' '0' 'reload'",
+    "Assert-ExactToken `$reloadTokens 'gatecallbackregistered' 'false' 'reload'",
+    "Assert-ExactToken `$reloadTokens 'envelopesha256' `$newTokens.envelopesha256 'reload'",
+    "Assert-Omits `$logs.reload.Content 'L02C_NATIVE_GATE_FROZEN' 'reload'"
+)
+foreach ($fragment in $requiredRuntimeOracleFragments) {
+    if (-not $runtimeOracleSource.Contains($fragment)) {
+        throw "Required T02-05 runtime evidence oracle fragment is missing: $fragment"
     }
 }
 

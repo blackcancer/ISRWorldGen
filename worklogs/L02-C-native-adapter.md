@@ -1,6 +1,8 @@
 # Passation — L02-C / T02-05 adaptateur natif
 **Statut proposé : REVIEW / BLOCKED pour la recette moteur.** Ne pas déclarer DONE avant T02-05 dans Vintage Story réel.
 
+> Historique préservé : la recette ci-dessous décrit le candidat initial. L'addendum final la complète et remplace explicitement son ancien oracle reload, sans réécrire les constats antérieurs.
+
 ## Identité
 - Tâche : intégration statique du probe natif L02-C / T02-05.
 - Propriétaire : sous-agent `audit_l02c_native` ; branche `agent/l02c-native` ; worktree `E:\Développement\Vintage Story\ISRWorldGen-worktrees\l02c-native`.
@@ -105,3 +107,62 @@
 - Les commits d'implémentation et de correction reviewer sont propres et sans push ; le SHA correctif est communiqué séparément pour éviter une référence auto-récursive dans ce fichier.
 - Aucun processus jeu/Visual Studio lancé, aucun verrou MCP acquis par ce sous-agent, aucune sauvegarde personnelle utilisée.
 - Intégration : relire/cherry-pick les deux commits, corriger l'oracle packaging L00-A, relancer restore/format/build/tests, puis seulement avec le verrou moteur exécuter T02-05 sur des mondes uniques dans le data path isolé. Cas minimaux : laboratoire 4096×256×4096 explicitement sélectionné puis reload identique ; laboratoire demandé sur hauteur 320 ; dimensions 4096×256×8192 ; mutation/corruption sur une sauvegarde de laboratoire jetable. Exiger les logs `L02C_NATIVE_PROFILE_FROZEN` avant `L02C_NATIVE_GATE_FROZEN`, ou `L02C_NATIVE_PROFILE_REJECTED ...` suivi de l'arrêt sans gate.
+
+## Addendum — instrumentation de preuve runtime (base 71ab379)
+
+### Identité et portée
+
+- Correctif préparé par `audit_l02c_native` sur `agent/l02c-runtime-evidence`, worktree `E:\Développement\Vintage Story\ISRWorldGen-worktrees\l02c-runtime-evidence`, base exacte `71ab379534da18f1e2c6903f899fe3527a26e092`.
+- C00/C01 et L10-A restent inchangés ; aucun registre/state, csproj ou lock modifié. Aucun Visual Studio, jeu ou sauvegarde n'a été ouvert pendant ce correctif.
+- La campagne antérieure sur `71ab379` a motivé l'instrumentation, mais ne qualifie pas les nouveaux binaires. Le runtime du candidat instrumenté reste `NOT_RUN` jusqu'à revue, intégration puis nouvelle campagne.
+
+### Preuve produite par le chemin réel
+
+- `NativeProfileCoordinator` attache à chaque préparation une preuve immuable : `source=new|reload`, `persistencewrites`, `envelopebytes`, `envelopesha256` et `gatecallbackregistered`. Les longueur/hash viennent des octets réellement encodés ou lus ; aucune constante de test ne les alimente.
+- `persistencewrites` compte les appels `IFrozenProfileStore.Write` émis, incrémentés avant l'appel. Une tentative qui lève est donc comptée. Un tombstone relu fournit son vrai hash ; si son readback est inconnu, la preuve reste `envelopebytes=0 envelopesha256=none`.
+- Le bridge ajoute l'observation mémoire réelle `gatestate`, `gatecangenerate` et `publishedprofile`. Sur new valide : deux écritures Pending+Committed et callback gate inscrit. Sur reload : octets Committed lus, zéro écriture et aucun nouveau callback gate.
+- Les logs Frozen/Rejected n'exposent plus `SavegameIdentifier`, chemin ou token. Les messages d'exception ne sont pas recopiés ; les détails path-like/sensibles sont remplacés et bornés.
+
+### Correction normative de l'oracle reload
+
+La ligne reload historique ci-dessus qui exigeait un `L02C_NATIVE_GATE_FROZEN` est obsolète. Au reload, T02-05 exige à `GameReady`, avant `WorldReady` :
+
+- `source=reload persistencewrites=0 gatestate=Frozen gatecangenerate=true gatecallbackregistered=false publishedprofile=true` ;
+- mêmes `envelopebytes` et `envelopesha256` que new ;
+- profil publié identique, aucune réécriture/mutation et aucun rejet.
+
+`PrepareExistingWorld` ne reçoit pas le callback `beforeCommit` réservé au nouveau monde ; l'absence de `L02C_NATIVE_GATE_FROZEN` au reload est donc attendue. New doit toujours inscrire ce callback et son marqueur doit précéder le premier `L00B_COLUMN_CALLBACK`.
+
+### Oracle reproductible avant/après F5
+
+Le script `testsrc/WorldGen.Tests/L02CNative/Invoke-L02CNativeRuntimeEvidence.ps1` ne lance ni Visual Studio ni le jeu.
+
+1. `-Phase Snapshot`, après build intégré mais avant F5, vérifie HEAD et le serveur 1.22.7 (ProductVersion `1.22.7`, SHA-256 `3AD6294240B9B55D3E0DB3CD323D90C31EC8474EAE6E4E16B58FE76507CB9D0D`). Il copie avec `FileMode.CreateNew` exactement `ISRWorldGen.dll`, `ISRWorldGen.Core.dll` et leurs deux PDB, puis crée le manifeste sans remplacement.
+2. `-Phase Validate` revalide commit/serveur/package/snapshot, parse les quatre logs, compare new↔reload, vérifie l'ordre `GameReady < Frozen < WorldReady`, gate/colonne pour new, refus/Shutdown, puis crée `runtime-evidence.json` avec `FileMode.CreateNew`.
+3. Le JSON de campagne fournit PID, breakpoint et callstack. Le script corrèle le PID avec `L00B_DEBUG_PROBE_READY`, mais restitue toujours `Provenance=campaign-supplied-unverified-by-oracle` : il n'invente aucune provenance Visual Studio.
+
+Avant la prochaine campagne :
+
+```powershell
+$oracle = '<repo>\testsrc\WorldGen.Tests\L02CNative\Invoke-L02CNativeRuntimeEvidence.ps1'
+& $oracle -Phase Snapshot -EvidenceRoot '<repo>\.local\T02-05\<RUN_ID>\evidence' `
+  -RepositoryRoot '<repo>' -VintageStoryPath 'D:\Jeux\Vintagestory' -Configuration Debug `
+  -ExpectedCommit '<SHA40-intégré>'
+```
+
+La validation reçoit ensuite quatre `server-main.log` distincts et un JSON `cases.new|reload|height|rectangle`, chaque cas portant `pid`, `breakpoint`, `callstack[]` et éventuellement `debuggerClaim`. L'opérateur reste responsable de la provenance Visual Studio.
+
+### État des preuves de l'addendum
+
+| Preuve | Statut | Résultat |
+|---|---|---|
+| Témoin tests-first | PASS comme témoin | Les tests ne compilaient pas avant l'ajout de la preuve structurée et des signatures host. |
+| L02CNative Debug/Release | PASS | 38/38 dans chaque configuration : new/reload/refus, post-write/tombstone, bornes, hash, copies et diagnostics non sensibles. |
+| Auto-test oracle Debug/Release | PASS | Snapshot CreateNew, hash new/reload, mutation rejetée, remplacement rejeté, provenance non inventée. |
+| API/IL/package Debug/Release | PASS statique | API 1.22.7, injection GameReady, deux DLL runtime, profils L00 non activés, moteur `NOT_RUN`. |
+| Build Debug/Release | PASS | 0 avertissement, 0 erreur dans chaque configuration. |
+| Régression .NET Debug/Release | PASS | 195/195 dans chaque configuration après construction préalable des deux variantes de `WorldGen.Tools` exigée par le harnais L01-C. |
+| Format solution | PASS | `dotnet format ISRWorldGen.sln --no-restore --verify-no-changes --verbosity minimal`, exit 0. |
+| T02-05 candidat instrumenté | NOT_RUN | Revue du commit requise avant reprise du verrou Visual Studio/MCP/jeu. |
+
+`ISaveGame.StoreData` n'expose toujours ni flush, suppression, transaction ni CAS. Le compteur prouve les appels émis par le coordinateur, pas leur durabilité disque ; la campagne doit encore confirmer arrêt/sauvegarde close et enveloppe SQLite avant reload.

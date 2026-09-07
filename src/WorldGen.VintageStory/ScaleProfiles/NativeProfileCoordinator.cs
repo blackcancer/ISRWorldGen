@@ -10,6 +10,11 @@ internal sealed class NativeProfileCoordinator
     private readonly object synchronization = new();
     private FrozenScaleProfile? publishedProfile;
     private volatile NativeProfileState state = NativeProfileState.Uninitialized;
+    private NativeProfilePreparationSource preparationSource = NativeProfilePreparationSource.Unspecified;
+    private int persistenceWrites;
+    private int envelopeBytes;
+    private Hash256 envelopeSha256 = Hash256.Zero;
+    private bool gateCallbackRegistered;
 
     internal FrozenScaleProfile? PublishedProfile => Volatile.Read(ref publishedProfile);
 
@@ -33,6 +38,9 @@ internal sealed class NativeProfileCoordinator
             }
 
             state = NativeProfileState.Validating;
+            preparationSource = world.IsNew
+                ? NativeProfilePreparationSource.New
+                : NativeProfilePreparationSource.Reload;
             NativeProfileError? worldError = ValidateWorld(world);
             if (worldError is not null)
             {
@@ -71,7 +79,7 @@ internal sealed class NativeProfileCoordinator
             }
 
             state = NativeProfileState.Inactive;
-            return new NativeProfilePreparation(state, null, null);
+            return CreatePreparation(null, null);
         }
     }
 
@@ -113,7 +121,7 @@ internal sealed class NativeProfileCoordinator
         if (!selection.IsSpecified)
         {
             state = NativeProfileState.Inactive;
-            return new NativeProfilePreparation(state, null, null);
+            return CreatePreparation(null, null);
         }
 
         ScaleProfileDefinition? proposal = ResolveProposal(selection.ProfileId);
@@ -167,7 +175,7 @@ internal sealed class NativeProfileCoordinator
                 world,
                 candidate,
                 NativeProfilePersistenceState.Pending);
-            store.Write(pending.AsSpan());
+            WriteEnvelope(store, pending);
         }
         catch (Exception exception)
         {
@@ -210,6 +218,8 @@ internal sealed class NativeProfileCoordinator
                 "Pending profile envelope differs from the bytes written in memory."));
         }
 
+        RecordEnvelope(reread);
+
         NativeProfileResult<FrozenScaleProfile> strictReload = ReloadEnvelope(
             world,
             selection,
@@ -229,6 +239,7 @@ internal sealed class NativeProfileCoordinator
         try
         {
             beforeCommit?.Invoke();
+            gateCallbackRegistered = beforeCommit is not null;
         }
         catch (Exception exception)
         {
@@ -242,13 +253,15 @@ internal sealed class NativeProfileCoordinator
                     $"World generation gate could not be registered ({exception.GetType().Name})."));
         }
 
+        byte[] committed;
         try
         {
-            byte[] committed = NativeFrozenProfileEnvelopeCodec.Encode(
+            committed = NativeFrozenProfileEnvelopeCodec.Encode(
                 world,
                 strictReload.Value!,
                 NativeProfilePersistenceState.Committed);
-            store.Write(committed.AsSpan());
+            WriteEnvelope(store, committed);
+            RecordEnvelope(committed);
         }
         catch (Exception exception)
         {
@@ -282,7 +295,7 @@ internal sealed class NativeProfileCoordinator
             }
 
             state = NativeProfileState.Inactive;
-            return new NativeProfilePreparation(state, null, null);
+            return CreatePreparation(null, null);
         }
 
         NativeProfileResult<FrozenScaleProfile> reload = ReloadEnvelope(
@@ -301,6 +314,7 @@ internal sealed class NativeProfileCoordinator
             return Reject(worldMutation);
         }
 
+        RecordEnvelope(persisted);
         return Publish(reload.Value!);
     }
 
@@ -397,7 +411,7 @@ internal sealed class NativeProfileCoordinator
     {
         Volatile.Write(ref publishedProfile, profile);
         state = NativeProfileState.Frozen;
-        return new NativeProfilePreparation(state, profile, null);
+        return CreatePreparation(profile, null);
     }
 
     private NativeProfilePreparation RejectAfterWrite(
@@ -407,17 +421,24 @@ internal sealed class NativeProfileCoordinator
         NativeProfileError error)
     {
         string tombstoneStatus;
+        ClearEnvelope();
         try
         {
             byte[] tombstone = NativeFrozenProfileEnvelopeCodec.Encode(
                 world,
                 candidate,
                 NativeProfilePersistenceState.Rejected);
-            store.Write(tombstone.AsSpan());
+            WriteEnvelope(store, tombstone);
             byte[]? reread = store.Read()?.ToArray();
-            tombstoneStatus = reread is not null && tombstone.AsSpan().SequenceEqual(reread)
-                ? "Rejected tombstone persisted and reread."
-                : "Rejected tombstone write returned but its readback could not be verified.";
+            if (reread is not null && tombstone.AsSpan().SequenceEqual(reread))
+            {
+                RecordEnvelope(reread);
+                tombstoneStatus = "Rejected tombstone persisted and reread.";
+            }
+            else
+            {
+                tombstoneStatus = "Rejected tombstone write returned but its readback could not be verified.";
+            }
         }
         catch (Exception exception)
         {
@@ -434,13 +455,49 @@ internal sealed class NativeProfileCoordinator
     {
         Volatile.Write(ref publishedProfile, null);
         state = NativeProfileState.Rejected;
-        return new NativeProfilePreparation(state, null, error);
+        return CreatePreparation(null, error);
     }
 
     private NativeProfilePreparation Reject(
         GenerationFailureCode code,
         string stage,
         string details) => Reject(new NativeProfileError(code, stage, details));
+
+    private NativeProfilePreparation CreatePreparation(
+        FrozenScaleProfile? profile,
+        NativeProfileError? error) => new(
+            state,
+            profile,
+            error,
+            new NativeProfilePersistenceEvidence(
+                preparationSource,
+                persistenceWrites,
+                envelopeBytes,
+                envelopeSha256,
+                gateCallbackRegistered));
+
+    private void WriteEnvelope(IFrozenProfileStore store, ReadOnlySpan<byte> content)
+    {
+        persistenceWrites = checked(persistenceWrites + 1);
+        store.Write(content);
+    }
+
+    private void RecordEnvelope(ReadOnlySpan<byte> content)
+    {
+        if (content.Length is < 1 or > NativeFrozenProfileEnvelopeCodec.MaximumEnvelopeBytes)
+        {
+            throw new ArgumentException("Observed native profile envelope is outside its canonical bound.", nameof(content));
+        }
+
+        envelopeBytes = content.Length;
+        envelopeSha256 = Hash256.Compute(content);
+    }
+
+    private void ClearEnvelope()
+    {
+        envelopeBytes = 0;
+        envelopeSha256 = Hash256.Zero;
+    }
 
     private static ScaleProfileDefinition? ResolveProposal(string? profileId)
     {

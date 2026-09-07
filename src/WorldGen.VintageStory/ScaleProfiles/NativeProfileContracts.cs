@@ -12,6 +12,13 @@ internal enum NativeProfileState
     Rejected
 }
 
+internal enum NativeProfilePreparationSource
+{
+    Unspecified,
+    New,
+    Reload
+}
+
 internal sealed record NativeWorldSnapshot
 {
     internal NativeWorldSnapshot(
@@ -112,10 +119,55 @@ internal sealed class NativeProfileResult<T>
         string details) => new(null, new NativeProfileError(code, stage, details));
 }
 
+internal sealed record NativeProfilePersistenceEvidence
+{
+    internal NativeProfilePersistenceEvidence(
+        NativeProfilePreparationSource source,
+        int persistenceWrites,
+        int envelopeBytes,
+        Hash256 envelopeSha256,
+        bool gateCallbackRegistered)
+    {
+        if (!Enum.IsDefined(source) ||
+            persistenceWrites < 0 ||
+            envelopeBytes is < 0 or > NativeFrozenProfileEnvelopeCodec.MaximumEnvelopeBytes ||
+            (envelopeBytes == 0) != (envelopeSha256 == Hash256.Zero))
+        {
+            throw new ArgumentException("Native profile persistence evidence is not canonical.");
+        }
+
+        Source = source;
+        PersistenceWrites = persistenceWrites;
+        EnvelopeBytes = envelopeBytes;
+        EnvelopeSha256 = envelopeSha256;
+        GateCallbackRegistered = gateCallbackRegistered;
+    }
+
+    internal NativeProfilePreparationSource Source { get; }
+
+    internal int PersistenceWrites { get; }
+
+    internal int EnvelopeBytes { get; }
+
+    internal Hash256 EnvelopeSha256 { get; }
+
+    internal bool GateCallbackRegistered { get; }
+
+    internal string SourceToken => Source switch
+    {
+        NativeProfilePreparationSource.New => "new",
+        NativeProfilePreparationSource.Reload => "reload",
+        _ => "unspecified"
+    };
+
+    internal string EnvelopeSha256Token => EnvelopeBytes == 0 ? "none" : EnvelopeSha256.ToString();
+}
+
 internal sealed record NativeProfilePreparation(
     NativeProfileState State,
     FrozenScaleProfile? Profile,
-    NativeProfileError? Error);
+    NativeProfileError? Error,
+    NativeProfilePersistenceEvidence Evidence);
 
 internal sealed record NativeWorldgenGateObservation(
     bool CanGenerate,
