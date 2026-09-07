@@ -50,14 +50,13 @@ public sealed class EvidenceArtifactTests
         ValidateProvenanceBeforeWriting(repository, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash);
         string output = Path.Combine(repository, ".local", "L03B", runName);
         if (Directory.Exists(output)) throw new InvalidOperationException("Evidence terminal directory must be absent before an atomic campaign starts.");
-        using FileStream runLock = new(output + ".lock", FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         (string Code, LandscapeFamily Family)[] blindOrder = DeriveBlindOrder(nonce);
         Directory.CreateDirectory(Path.Combine(output, "blind"));
         Directory.CreateDirectory(Path.Combine(output, "sealed"));
         string reportPath = Path.Combine(output, "sealed", "T03-05-06-S.json");
         string manifestPath = Path.Combine(output, "blind", "T03-06-S-manifest.json");
-        WriteBlindManifest(manifestPath, commit, tree, configuration, testAssemblyHash, coreAssemblyHash,
-            automatedStatus: "RUNNING", qualitativeReviewStatus: "REVIEW_REQUIRED", overallStatus: "RUNNING", Array.Empty<BlindArtifact>());
+        WriteBlindManifest(manifestPath, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash,
+            automatedStatus: "RUNNING", qualitativeReviewStatus: "REVIEW_REQUIRED", overallStatus: "RUNNING", Array.Empty<L03BBlindArtifact>());
         WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
@@ -88,8 +87,8 @@ public sealed class EvidenceArtifactTests
                 configuration,
                 failure = new { type = exception.GetType().FullName, exception.Message },
             }, JsonOptions));
-            WriteBlindManifest(manifestPath, commit, tree, configuration, testAssemblyHash, coreAssemblyHash,
-                automatedStatus: "FAIL", qualitativeReviewStatus: "NOT_RUN", overallStatus: "FAIL", Array.Empty<BlindArtifact>());
+            WriteBlindManifest(manifestPath, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash,
+                automatedStatus: "FAIL", qualitativeReviewStatus: "NOT_RUN", overallStatus: "FAIL", Array.Empty<L03BBlindArtifact>());
             throw;
         }
     }
@@ -129,7 +128,7 @@ public sealed class EvidenceArtifactTests
         Assert.AreEqual("geology.landscapes.vertical-above-sea", impossibleAbove.Error.Stage);
 
         var fixtureMetrics = new List<BlindFixtureMetric>();
-        var blindArtifacts = new List<BlindArtifact>();
+        var blindArtifacts = new List<L03BBlindArtifact>();
         var sealedFixtures = new List<object>();
         var profileRows = new StringBuilder("code,direction,index,normalized-height\n");
         var sampledByCode = new Dictionary<string, double[,]>(StringComparer.Ordinal);
@@ -153,7 +152,7 @@ public sealed class EvidenceArtifactTests
             byte[] bitmap = RenderBitmap(samples);
             string mapPath = Path.Combine(output, "blind", $"T03-06-{code}.bmp");
             WriteAtomic(mapPath, bitmap);
-            blindArtifacts.Add(new BlindArtifact(RelativeArtifactPath(output, mapPath), L03BTestSupport.Sha256(bitmap)));
+            blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, mapPath), L03BTestSupport.Sha256(bitmap)));
             sealedFixtures.Add(new { code, family = family.ToString(), fixture.Seed, site = fixture.SiteId.ToString() });
 
             AppendProfiles(profileRows, code, samples);
@@ -178,8 +177,8 @@ public sealed class EvidenceArtifactTests
         string metricsPath = Path.Combine(output, "blind", "T03-06-S-blind-metrics.json");
         byte[] metricsBytes = JsonSerializer.SerializeToUtf8Bytes(fixtureMetrics, JsonOptions);
         WriteAtomic(metricsPath, metricsBytes);
-        blindArtifacts.Add(new BlindArtifact(RelativeArtifactPath(output, profilesPath), L03BTestSupport.Sha256(profileBytes)));
-        blindArtifacts.Add(new BlindArtifact(RelativeArtifactPath(output, metricsPath), L03BTestSupport.Sha256(metricsBytes)));
+        blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, profilesPath), L03BTestSupport.Sha256(profileBytes)));
+        blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, metricsPath), L03BTestSupport.Sha256(metricsBytes)));
         byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
@@ -192,6 +191,8 @@ public sealed class EvidenceArtifactTests
 
         string fixturesPath = Path.Combine(L03BTestSupport.FindRepositoryRoot(), "registry", "fixtures.json");
         byte[] fixturesBytes = File.ReadAllBytes(fixturesPath);
+        Assert.AreEqual(fixturesBlob, L03BEvidenceProtocol.GitBlobObjectId(fixturesBytes),
+            "The exact fixture bytes consumed by evidence must be the blob committed at HEAD.");
         FixtureCorpus fixtureCorpus = FixtureCorpus.Load(fixturesBytes);
         IReadOnlyList<int> calibrationSeeds = fixtureCorpus.CalibrationSeeds;
         IReadOnlyList<int> holdoutSeeds = fixtureCorpus.HoldoutSeeds;
@@ -301,7 +302,7 @@ public sealed class EvidenceArtifactTests
 
         // PASS is the last atomic write, after every assertion and every referenced artifact.
         WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(report, JsonOptions));
-        WriteBlindManifest(manifestPath, commit, tree, configuration, testAssemblyHash, coreAssemblyHash,
+        WriteBlindManifest(manifestPath, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash,
             automatedStatus: "PASS", qualitativeReviewStatus: "REVIEW_REQUIRED", overallStatus: "REVIEW_REQUIRED", blindArtifacts);
     }
 
@@ -632,11 +633,12 @@ public sealed class EvidenceArtifactTests
 
     private static void ValidateProvenanceBeforeWriting(string repository, string commit, string tree, string fixturesBlob, string configuration, string testAssemblyHash, string coreAssemblyHash)
     {
+        int detachedExitCode = GitExitCode(repository, "symbolic-ref", "-q", "HEAD");
         if (!string.Equals(Git(repository, "rev-parse", "HEAD"), commit, StringComparison.Ordinal) ||
             !string.Equals(Git(repository, "rev-parse", "HEAD^{tree}"), tree, StringComparison.Ordinal) ||
             !string.Equals(Git(repository, "rev-parse", "HEAD:registry/fixtures.json"), fixturesBlob, StringComparison.Ordinal) ||
             !string.IsNullOrEmpty(Git(repository, "status", "--porcelain", "--untracked-files=all")) ||
-            GitExitCode(repository, "symbolic-ref", "-q", "HEAD") == 0)
+            detachedExitCode != 1)
         {
             throw new InvalidOperationException("Evidence requires detached HEAD at the requested commit/tree and a fully clean working tree.");
         }
@@ -678,18 +680,48 @@ public sealed class EvidenceArtifactTests
         process.Start();
         Task<string> stdout = process.StandardOutput.ReadToEndAsync();
         Task<string> stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Task completion = Task.WhenAll(process.WaitForExitAsync(), stdout, stderr);
         try
         {
-            Task.WaitAll([process.WaitForExitAsync(timeout.Token), stdout, stderr]);
+            completion.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
         }
-        catch (OperationCanceledException)
+        catch (TimeoutException exception)
         {
-            process.Kill(entireProcessTree: true);
-            process.WaitForExit();
-            throw new TimeoutException("Git provenance check timed out.");
+            TerminateAndDrain(process, stdout, stderr);
+            throw new TimeoutException("Git provenance check timed out.", exception);
+        }
+        catch (Exception exception)
+        {
+            TerminateAndDrain(process, stdout, stderr);
+            throw new InvalidOperationException("Git provenance check failed while collecting process output.", exception);
         }
         return new GitResult(process.ExitCode, stdout.Result, stderr.Result);
+    }
+
+    private static void TerminateAndDrain(Process process, Task<string> stdout, Task<string> stderr)
+    {
+        TryKill(process);
+        try
+        {
+            Task.WhenAll(process.WaitForExitAsync(), stdout, stderr)
+                .WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            // The original process failure remains terminal even if an inherited pipe cannot be drained.
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException)
+        {
+            // The process exited between HasExited and Kill.
+        }
     }
 
     private static byte[] RenderBitmap(double[,] samples)
@@ -754,33 +786,27 @@ public sealed class EvidenceArtifactTests
         string manifestPath,
         string commit,
         string tree,
+        string fixturesBlob,
         string configuration,
         string testAssemblyHash,
         string coreAssemblyHash,
         string automatedStatus,
         string qualitativeReviewStatus,
         string overallStatus,
-        IReadOnlyList<BlindArtifact> artifacts)
+        IReadOnlyList<L03BBlindArtifact> artifacts)
     {
-        BlindArtifact[] ordered = artifacts.OrderBy(item => item.Path, StringComparer.Ordinal).ToArray();
-        string signatureText = string.Join("\n", new[]
-        {
-            "ISRW-L03B-S-blind-bundle-v1", commit, tree, configuration, testAssemblyHash, coreAssemblyHash,
-        }.Concat(ordered.Select(item => item.Path + "\\t" + item.Sha256)));
-        WriteAtomic(manifestPath, JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            schemaVersion = 1,
+        WriteAtomic(manifestPath, L03BEvidenceProtocol.CreateBlindManifest(
+            L03BEvidenceProtocol.ManifestSchemaVersion,
             automatedStatus,
             qualitativeReviewStatus,
             overallStatus,
             commit,
             tree,
+            fixturesBlob,
             configuration,
-            testAssemblySha256 = testAssemblyHash,
-            coreAssemblySha256 = coreAssemblyHash,
-            artifacts = ordered,
-            bundleSignature = L03BTestSupport.Sha256(Encoding.UTF8.GetBytes(signatureText)),
-        }, JsonOptions));
+            testAssemblyHash,
+            coreAssemblyHash,
+            artifacts));
     }
 
     private static void WriteInt32(byte[] destination, int offset, int value)
@@ -825,8 +851,6 @@ public sealed class EvidenceArtifactTests
         DirectionalJumpStatistics Jumps,
         double DirectionalBalance,
         int SaturatedPixelCount);
-
-    private sealed record BlindArtifact(string Path, string Sha256);
 
     private sealed record GitResult(int ExitCode, string StandardOutput, string StandardError);
 
