@@ -32,6 +32,9 @@ public sealed class EvidenceArtifactTests
     public void T0305AndT0306PublishAtomicBlindReviewEvidence()
     {
         string commit = RequireEnvironment("ISR_L03B_EVIDENCE_COMMIT", "^[0-9a-f]{40}$");
+        string tree = RequireEnvironment("ISR_L03B_EVIDENCE_TREE", "^[0-9a-f]{40}$");
+        string testAssemblyHash = RequireEnvironment("ISR_L03B_EVIDENCE_TEST_ASSEMBLY_SHA256", "^[0-9a-f]{64}$");
+        string coreAssemblyHash = RequireEnvironment("ISR_L03B_EVIDENCE_CORE_ASSEMBLY_SHA256", "^[0-9a-f]{64}$");
         string nonce = RequireEnvironment("ISR_L03B_EVIDENCE_NONCE", "^[0-9a-f]{64}$");
         string configuration = RequireEnvironment("ISR_L03B_EVIDENCE_CONFIGURATION", "^Release$");
         string runName = Environment.GetEnvironmentVariable("ISR_L03B_EVIDENCE_RUN") ?? $"evidence-s-terminal-{commit}";
@@ -44,9 +47,10 @@ public sealed class EvidenceArtifactTests
         {
             throw new InvalidOperationException("Evidence run name must exactly seal the requested commit.");
         }
-        ValidateProvenanceBeforeWriting(repository, commit, configuration);
+        ValidateProvenanceBeforeWriting(repository, commit, tree, configuration, testAssemblyHash, coreAssemblyHash);
         string output = Path.Combine(repository, ".local", "L03B", runName);
         if (Directory.Exists(output)) throw new InvalidOperationException("Evidence terminal directory must be absent before an atomic campaign starts.");
+        using FileStream runLock = new(output + ".lock", FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         (string Code, LandscapeFamily Family)[] blindOrder = DeriveBlindOrder(nonce);
         Directory.CreateDirectory(Path.Combine(output, "blind"));
         Directory.CreateDirectory(Path.Combine(output, "sealed"));
@@ -610,12 +614,14 @@ public sealed class EvidenceArtifactTests
             .ToArray();
     }
 
-    private static void ValidateProvenanceBeforeWriting(string repository, string commit, string configuration)
+    private static void ValidateProvenanceBeforeWriting(string repository, string commit, string tree, string configuration, string testAssemblyHash, string coreAssemblyHash)
     {
         if (!string.Equals(Git(repository, "rev-parse", "HEAD"), commit, StringComparison.Ordinal) ||
-            !string.IsNullOrEmpty(Git(repository, "status", "--porcelain", "--untracked-files=no")))
+            !string.Equals(Git(repository, "rev-parse", "HEAD^{tree}"), tree, StringComparison.Ordinal) ||
+            !string.IsNullOrEmpty(Git(repository, "status", "--porcelain", "--untracked-files=all")) ||
+            GitExitCode(repository, "symbolic-ref", "-q", "HEAD") == 0)
         {
-            throw new InvalidOperationException("Evidence requires the requested commit at a clean tracked working tree.");
+            throw new InvalidOperationException("Evidence requires detached HEAD at the requested commit/tree and a fully clean working tree.");
         }
 
         Assembly assembly = typeof(EvidenceArtifactTests).Assembly;
@@ -626,6 +632,11 @@ public sealed class EvidenceArtifactTests
             informational is null || !informational.EndsWith($"+{commit}", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Evidence requires a Release assembly with informational version suffix +commit.");
+        }
+        if (!string.Equals(L03BTestSupport.Sha256(File.ReadAllBytes(assembly.Location)), testAssemblyHash, StringComparison.Ordinal) ||
+            !string.Equals(L03BTestSupport.Sha256(File.ReadAllBytes(typeof(LandscapeModel).Assembly.Location)), coreAssemblyHash, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Evidence assembly hashes do not match the runner preflight.");
         }
     }
 
@@ -649,6 +660,15 @@ public sealed class EvidenceArtifactTests
         process.WaitForExit();
         if (process.ExitCode != 0) throw new InvalidOperationException($"Git provenance check failed: {stderr.Trim()}");
         return stdout.Trim();
+    }
+
+    private static int GitExitCode(string repository, params string[] arguments)
+    {
+        using var process = Process.Start(new ProcessStartInfo("git") { WorkingDirectory = repository, UseShellExecute = false, CreateNoWindow = true });
+        if (process is null) throw new InvalidOperationException("Git provenance process did not start.");
+        foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
+        process.WaitForExit(10_000);
+        return process.HasExited ? process.ExitCode : throw new TimeoutException("Git provenance check timed out.");
     }
 
     private static byte[] RenderBitmap(double[,] samples)
