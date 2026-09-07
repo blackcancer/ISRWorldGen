@@ -71,7 +71,7 @@ public readonly record struct LandscapeSample(
 /// Immutable regional frame.  The extents describe the owning Voronoi cell in a
 /// deterministic oriented frame; they are inputs to morphology, not a post-sample clamp.
 /// </summary>
-internal readonly record struct LandscapeRegionPlan(
+public readonly record struct LandscapeRegionPlan(
     long CenterX,
     long CenterZ,
     double OrientationRadians,

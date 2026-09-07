@@ -96,7 +96,7 @@ public static class LandscapeSignatureSampler
     /// extent and variant are part of the deterministic plan, so a morphology adapts
     /// to its region rather than repeating at a global fixed scale.
     /// </summary>
-    internal static double SampleRegional(
+    public static double SampleRegional(
         LandscapeFamilyProfile profile,
         long x,
         long z,
@@ -112,7 +112,8 @@ public static class LandscapeSignatureSampler
         // prevents a tiny or unusually broad Voronoi cell from turning a family
         // primitive into an unrecognisable global wave while still making the
         // regional footprint a real input to the primitive.
-        double regionalScale = Math.Sqrt(region.TransitionExtentUBlocks * region.TransitionExtentVBlocks);
+        double regionalScale = (Math.Sqrt(region.TransitionExtentUBlocks * region.TransitionExtentVBlocks) +
+            Math.Sqrt(region.CoreExtentUBlocks * region.CoreExtentVBlocks)) / 2d;
         double extentFactor = Math.Clamp(regionalScale / profile.MacroWavelengthBlocks, .75d, 1.25d);
         double scale = profile.MacroWavelengthBlocks * extentFactor;
         double u = ((cos * dx) + (sin * dz)) / scale;

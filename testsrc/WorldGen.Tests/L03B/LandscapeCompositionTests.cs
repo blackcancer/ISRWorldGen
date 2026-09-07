@@ -283,6 +283,27 @@ public sealed class LandscapeCompositionTests
     }
 
     [TestMethod]
+    public void RegionalPlanParametersAffectSampleRegionalAndPublishedChecksum()
+    {
+        LandscapeFamilyProfile family = LandscapeFamilyCatalog.Get(LandscapeFamily.RuggedRanges);
+        LandscapeRegionPlan baseline = new(0, 0, 0, 8_000, 8_000, 12_000, 12_000, 1);
+        (long X, long Z)[] points = [(7_000, -4_000), (21_000, 13_000), (-16_000, 9_000)];
+        Assert.IsTrue(points.Any(point => LandscapeSignatureSampler.SampleRegional(family, point.X, point.Z, 73, 11, baseline) != LandscapeSignatureSampler.SampleRegional(family, point.X, point.Z, 73, 11, baseline with { OrientationRadians = Math.PI / 3 })));
+        Assert.IsTrue(points.Any(point => LandscapeSignatureSampler.SampleRegional(family, point.X, point.Z, 73, 11, baseline) != LandscapeSignatureSampler.SampleRegional(family, point.X, point.Z, 73, 11, baseline with { CoreExtentUBlocks = 80_000, CoreExtentVBlocks = 80_000 })));
+        Assert.IsTrue(points.Any(point => LandscapeSignatureSampler.SampleRegional(family, point.X, point.Z, 73, 11, baseline) != LandscapeSignatureSampler.SampleRegional(family, point.X, point.Z, 73, 11, baseline with { VariantOrdinal = 99 })));
+
+        FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("laboratory");
+        GenerationIdentity identity = L03BTestSupport.Identity(73, profile);
+        (AtlasMesh atlas, PlateAtlasSnapshot plates) = L03BTestSupport.PlateFixture(identity.NativeSeed, profile);
+        LandscapeModel first = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), profile.SiteQuota, 1.25)));
+        LandscapeModel changedPlan = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates, profile,
+            new LandscapeGenerationSettings(new ReliefBudgetRequest(28, 40, 96), profile.SiteQuota, 1.05)));
+        Assert.AreNotEqual(first.ContentChecksum, changedPlan.ContentChecksum,
+            "The V6 checksum must bind the regional plan, including its core/transition extents.");
+    }
+
+    [TestMethod]
     public void AnalyticPrimitiveBoundsAvoidUniformClippingForPublishedExtremeProfiles()
     {
         foreach (LandscapeFamily family in Enum.GetValues<LandscapeFamily>())
