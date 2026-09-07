@@ -3,11 +3,14 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$EvidencePath,
 
-    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
+
+    [string]$GamePath = 'D:\Jeux\Vintagestory'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'L00CInitializationRefusalEvidence.psm1') -Force
 
 if (-not (Test-Path -LiteralPath $EvidencePath -PathType Leaf)) {
     throw "L00-C evidence is missing: $EvidencePath"
@@ -211,20 +214,12 @@ foreach ($session in $orderedEvidenceSessions) {
     }
     elseif ($session.WorldRole -eq 'missing-handler') {
         Assert-Equal $session.GracefulShutdown $true "Session $($session.Cycle) fail-closed shutdown"
-        if ($log -notmatch "L00C_ERROR code=expected-handler-absent instance=$instance ") {
-            throw 'Missing-handler session lacks the explicit expected-handler-absent error.'
+        [void](Assert-L00CInitializationRefusalLog -WorldRole ([string]$session.WorldRole) -Log $log -InstanceId ([string]$session.InstanceId))
+        if ($null -eq $session.PSObject.Properties['RefusalDatabase'] -or $null -eq $session.RefusalDatabase) {
+            throw 'Missing-handler session must retain its refusal database when the server created one.'
         }
-        if ($log -notmatch "L00C_INITIALIZATION_FAILED instance=$instance .* type=System\.InvalidOperationException " -or
-            $log -notmatch "L00C_INITIALIZATION_SHUTDOWN instance=$instance .* accepted=True cleanupError=none shutdownError=none" -or
-            [regex]::Matches($log, "L00C_INITIALIZATION_SHUTDOWN instance=$instance ").Count -ne 1 -or
-            $log -notmatch 'Forced: Shutdown through Server API' -or $log -notmatch 'World saved!') {
-            throw 'Missing-handler session did not fail closed through exactly one successful server shutdown request.'
-        }
-        if ($log -match "L00C_ACTIVATED instance=$instance " -or
-            $log -match "L00C_FIXTURE_WRITTEN instance=$instance " -or
-            $log -match "L00C_(?:MARKER_SAVED|MAP_SNAPSHOT_COMMITTED|PERSISTED_MAP_SNAPSHOT_LOADED|COLUMN_REQUEST|TRANSIENT_LOAD_ACCEPTED|FOOTPRINT_REFRESH|DELAYED_SHUTDOWN_FIRED) instance=$instance ") {
-            throw 'Missing-handler session activated, generated, armed callbacks, wrote the fixture, or published a marker candidate after refusal.'
-        }
+        $refusalDatabasePath = Assert-Artifact $session.RefusalDatabase "Session $($session.Cycle) refusal database"
+        [void](Test-L00CInitializationRefusalDatabase -DatabasePath $refusalDatabasePath -GamePath $GamePath)
     }
     elseif ($session.WorldRole -like 'activated-*') {
         Assert-Equal $session.GracefulShutdown $true "Session $($session.Cycle) graceful shutdown"
