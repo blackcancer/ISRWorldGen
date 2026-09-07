@@ -89,3 +89,28 @@ le hash publié exact. Reprendre T00-06 par F5 dès confirmation de connexion.
 
 Prochaine action : valider le registre et publier ce checkpoint, puis reprendre
 le correctif L03-B avec un agent d'implémentation GPT-5.6 Terra Medium.
+
+## Reprise au 2026-09-07 — politique Terra et campagne S L03-B rejetée
+
+- Le checkpoint publié `c50f05eb83a47b42864893c0b9cf65e459ac08c5` fixe Terra
+  Medium comme profil local par défaut, Sol Medium/xHigh comme expertise
+  ciblée et Astra comme capacité future non encore exposée sur ce poste. Les
+  outils de délégation permettent de demander explicitement Terra ou Sol ; le
+  modèle effectivement exécuté n'est pas exposé et reste `NON_VERIFIE`.
+- Après revue Terra et préflight détaché neuf, le candidat L03-B
+  `ee92c24a54cb662091ed816493d5cb1fee7a2e5c` a produit un bundle S terminal
+  isolé sous `.local/L03B/` : automatisation `PASS`, rapport qualitatif
+  `REVIEW_REQUIRED`, commit/tree et clé/TRX/hash scellés concordants.
+- La revue aveugle indépendante a validé le manifeste et les six artefacts,
+  puis la levée de clé a donné **1/6** seulement. Les confusions portent sur
+  S01--S05 ; seul le domaine volcanique a été reconnu. Le verdict qualitatif
+  est donc `REJECT` : T03-06 et L03-B restent non qualifiés, aucun code L03-B
+  n'est intégré dans `main` et le registre reste inchangé.
+- Une tentative antérieure sur `78cdde8` avait échoué avant corpus, carte ou
+  bundle terminal à cause de la conversion CRLF du checkout Windows. Elle est
+  conservée comme reproduction non qualifiante ; `ee92c24` consomme désormais
+  le blob Git brut des fixtures.
+
+Prochaine action : analyser les cinq confusions morphologiques sur les cartes
+S scellées et le code L03-B, corriger le catalogue sans affaiblir T03-06, puis
+faire une nouvelle campagne aveugle avec une permutation et un worktree neufs.
