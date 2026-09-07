@@ -166,3 +166,41 @@ La validation reçoit ensuite quatre `server-main.log` distincts et un JSON `cas
 | T02-05 candidat instrumenté | NOT_RUN | Revue du commit requise avant reprise du verrou Visual Studio/MCP/jeu. |
 
 `ISaveGame.StoreData` n'expose toujours ni flush, suppression, transaction ni CAS. Le compteur prouve les appels émis par le coordinateur, pas leur durabilité disque ; la campagne doit encore confirmer arrêt/sauvegarde close et enveloppe SQLite avant reload.
+
+## Erratum re-review — identité binaire et provenance Visual Studio fermées
+
+Cet erratum complète l'addendum sans effacer l'historique. La phrase précédente autorisant un `debuggerClaim` optionnel et qualifiant la provenance de `campaign-supplied-unverified-by-oracle` est désormais obsolète : un tel dossier ne peut plus produire `PASS`.
+
+### Snapshot v2 avant lancement
+
+`Invoke-L02CNativeRuntimeEvidence.ps1 -Phase Snapshot` crée toujours les fichiers avec `FileMode.CreateNew`, et scelle maintenant :
+
+- `Commit` et `ExpectedAssemblyInformationalVersion=1.0.0+<HEAD>` ; pour les deux DLL, `FileVersionInfo.ProductVersion` et l'attribut PE `AssemblyInformationalVersionAttribute` doivent être égaux à cette valeur ;
+- SHA-256, taille, versions et empreinte normalisée du chemin package de chaque artefact ;
+- pour chaque paire DLL/PDB, nom PDB CodeView, GUID, age et stamp PE, puis GUID/stamp du content ID du Portable PDB. La paire est rejetée si ces identités ne correspondent pas ; la simple coexistence des fichiers ne suffit plus ;
+- l'identité inchangée du serveur 1.22.7 déjà auditée.
+
+La validation recontrôle d'abord les deux paires dans le snapshot et dans le package courant. Chaque log doit ensuite contenir exactement un `L00A_BOOTSTRAP` Server dont PID, nom `ISRWorldGen.dll` et SHA-256 correspondent à la session et au snapshot. Le module observé au breakpoint doit fournir l'empreinte du chemin exact, ProductVersion, SHA DLL/PDB et identité CodeView attendus.
+
+### JSON durable de campagne v2
+
+Le fichier de campagne a un schéma fermé, sans note libre :
+
+- racine exacte : `Schema`, `TestedCommit`, `SnapshotManifestSha256`, `VisualStudioProfile`, `DebuggerTransport`, `Provenance`, `Cases` ;
+- valeurs imposées : `Schema=isrworldgen.t02-05.visual-studio-campaign.v2`, profil `ISRWorldGen Server (isolated data)`, transport `visual-studio-debugger`, provenance `visual-studio-debugger-session-verified` ;
+- quatre cas exacts `new|reload|height|rectangle`, chacun avec `SessionId`, `ServerPid`, `StartedUtc`, `BreakpointUtc`, `CompletedUtc`, `LogSha256`, `BreakpointId`, `CallstackFrames`, `CallstackSha256`, `Module` ;
+- `Module` a exactement `FileName`, `PathSha256`, `Sha256`, `ProductVersion`, `PdbFileName`, `PdbSha256`, `CodeViewGuid`, `CodeViewAge`, `CodeViewStamp` ; toutes ces valeurs doivent correspondre au snapshot ;
+- breakpoint et callstack utilisent uniquement les enums fermés du script : chemin Frozen à `GameReady` pour new/reload, chemin `Shutdown` après rejet pour height/rectangle. Leur empreinte est recalculée, et l'heure du breakpoint doit être corrélée au marqueur runtime horodaté du même log ;
+- le rapport ne recopie ni frames, chemin, texte opérateur, token, save path ni détails libres : uniquement enums validés, PID, timestamps canoniques, identifiants bornés, empreintes et booléens dérivés.
+
+Provenance absente/non vérifiée, champ supplémentaire, frame arbitraire, log périmé ou muté, mismatch bootstrap/hash/version/chemin, paire PDB invalide et callback colonne absent sont tous des refus explicites de l'oracle.
+
+### Oracle runtime corrigé
+
+- `new` exige l'ordre réel `GameReady < Frozen < WorldReady < GATE_FROZEN < premier L00B_COLUMN_CALLBACK < RunGame`; il exige aussi `L00C_INACTIVE` entre `WorldReady` et `RunGame`, puis témoin L00-C, armement/feu de l'arrêt différé, Shutdown API, sauvegarde et fermeture. L'ordre relatif entre les deux callbacks d'initialisation L00-C/L02-C n'est pas surcontraint ; plusieurs callbacks colonne restent permis.
+- `reload` n'exige toujours pas le callback de coordinateur absent par conception et ne présume pas si un callback colonne hors scénario apparaît. Il exige cependant `Frozen`, `PublishedProfile`, `Gate.CanGenerate`, même enveloppe/hash, zéro écriture avant `WorldReady`, puis `L00C_INACTIVE`, un cycle `RunGame` complet et un arrêt/sauvegarde doux.
+- `height` et `rectangle` exigent le rejet structuré et le Shutdown API sans `WorldReady`, `RunGame`, gate, callback colonne ISR ni sauvegarde géographique publiée.
+
+Ces contrôles qualifient le harnais statique. Ils ne remplacent pas la campagne Visual Studio : le candidat corrigé demeure `NOT_RUN` tant que les quatre sessions réelles n'ont pas fourni ce dossier v2.
+
+Validation hors moteur de cet erratum : oracle et ses 13 négatifs `PASS` en Debug/Release ; contrôle API/IL/package `PASS` en Debug/Release ; 38/38 tests L02CNative et 195/195 tests globaux `PASS` dans les deux configurations ; build 0 avertissement/0 erreur et format solution `PASS`. La ProductVersion doit être reconstruite et ces contrôles répétés après le commit final, puisque le SHA informatif change avec HEAD.

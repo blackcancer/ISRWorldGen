@@ -256,15 +256,48 @@ $requiredRuntimeOracleFragments = @(
     "'ISRWorldGen.pdb'",
     "'ISRWorldGen.Core.pdb'",
     "'3AD6294240B9B55D3E0DB3CD323D90C31EC8474EAE6E4E16B58FE76507CB9D0D'",
-    "'campaign-supplied-unverified-by-oracle'",
+    "'L00A_BOOTSTRAP'",
+    "'visual-studio-debugger-session-verified'",
+    "'ISRWorldGen Server (isolated data)'",
+    'ExpectedAssemblyInformationalVersion',
+    'AssemblyInformationalVersionAttribute',
+    'Get-SymbolPairIdentity',
+    '[Reflection.PortableExecutable.DebugDirectoryEntryType]::CodeView',
+    '[Reflection.Metadata.BlobContentId]',
+    'Assert-ClosedSchema',
+    'CallstackSha256',
+    'BootstrapModuleBinding',
+    'PdbPairingVerified',
     "Assert-ExactToken `$reloadTokens 'persistencewrites' '0' 'reload'",
     "Assert-ExactToken `$reloadTokens 'gatecallbackregistered' 'false' 'reload'",
     "Assert-ExactToken `$reloadTokens 'envelopesha256' `$newTokens.envelopesha256 'reload'",
-    "Assert-Omits `$logs.reload.Content 'L02C_NATIVE_GATE_FROZEN' 'reload'"
+    "Assert-Omits `$logs.reload.Content 'L02C_NATIVE_GATE_FROZEN' 'reload'",
+    "Assert-ContainsAtLeastOnce `$logs.new.Content 'L00B_COLUMN_CALLBACK' 'new'"
 )
 foreach ($fragment in $requiredRuntimeOracleFragments) {
     if (-not $runtimeOracleSource.Contains($fragment)) {
         throw "Required T02-05 runtime evidence oracle fragment is missing: $fragment"
+    }
+}
+
+$runtimeOracleTestSource = Get-Content -LiteralPath $runtimeOracleTestPath -Raw
+foreach ($fragment in @(
+    "'Unverified provenance'",
+    "'Absent provenance'",
+    "'Visual Studio profile mismatch'",
+    "'Malicious extra field'",
+    "'Malicious callstack field'",
+    "'Module version mismatch'",
+    "'Module path mismatch'",
+    "'Bootstrap hash mismatch'",
+    "'Bootstrap absence'",
+    "'New callback absence'",
+    "'Stale log'",
+    "'Arbitrary log mutation'",
+    "'PDB mismatch'"
+)) {
+    if (-not $runtimeOracleTestSource.Contains($fragment)) {
+        throw "Required T02-05 runtime evidence negative test is missing: $fragment"
     }
 }
 

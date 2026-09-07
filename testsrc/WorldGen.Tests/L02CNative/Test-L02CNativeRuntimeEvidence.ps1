@@ -15,6 +15,12 @@ function Write-Utf8Fixture {
     [IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Write-JsonFixture {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Value)
+
+    Write-Utf8Fixture $Path ($Value | ConvertTo-Json -Depth 12)
+}
+
 function Assert-True {
     param([Parameter(Mandatory)][bool]$Condition, [Parameter(Mandatory)][string]$Message)
 
@@ -23,8 +29,150 @@ function Assert-True {
     }
 }
 
+function Get-TextSha256 {
+    param([Parameter(Mandatory)][string]$Value)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Value)
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+}
+
+function Get-LocalLogTimestamp {
+    param([Parameter(Mandatory)][DateTimeOffset]$Utc)
+
+    $zone = [TimeZoneInfo]::FindSystemTimeZoneById('Romance Standard Time')
+    return [TimeZoneInfo]::ConvertTime($Utc, $zone).ToString('d.M.yyyy HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-Artifact {
+    param([Parameter(Mandatory)]$Manifest, [Parameter(Mandatory)][string]$Name)
+
+    $matches = @($Manifest.Artifacts | Where-Object FileName -ceq $Name)
+    if ($matches.Count -ne 1) {
+        throw "Self-test snapshot expected one artifact $Name."
+    }
+
+    return $matches[0]
+}
+
+function Get-SymbolPair {
+    param([Parameter(Mandatory)]$Manifest, [Parameter(Mandatory)][string]$AssemblyName)
+
+    $matches = @($Manifest.SymbolPairs | Where-Object AssemblyFileName -ceq $AssemblyName)
+    if ($matches.Count -ne 1) {
+        throw "Self-test snapshot expected one symbol pair for $AssemblyName."
+    }
+
+    return $matches[0]
+}
+
+function New-CaseObservation {
+    param(
+        [Parameter(Mandatory)][string]$CaseName,
+        [Parameter(Mandatory)][int]$ServerPid,
+        [Parameter(Mandatory)][string]$LogPath,
+        [Parameter(Mandatory)][DateTimeOffset]$Started,
+        [Parameter(Mandatory)][DateTimeOffset]$BreakpointUtc,
+        [Parameter(Mandatory)][DateTimeOffset]$Completed,
+        [Parameter(Mandatory)]$AssemblyArtifact,
+        [Parameter(Mandatory)]$PdbArtifact,
+        [Parameter(Mandatory)]$SymbolPair
+    )
+
+    $breakpointId = if ($CaseName -in @('new', 'reload')) {
+        'native-profile-game-ready-frozen'
+    }
+    else {
+        'native-profile-host-shutdown'
+    }
+    $frames = if ($breakpointId -ceq 'native-profile-game-ready-frozen') {
+        @(
+            'native-profile-host.create-frozen-diagnostic',
+            'native-profile-bridge.try-log-frozen',
+            'native-profile-bridge.on-game-ready'
+        )
+    }
+    else {
+        @(
+            'native-profile-host.shutdown',
+            'native-profile-bridge.reject-and-stop',
+            'native-profile-bridge.on-game-ready'
+        )
+    }
+
+    return [ordered]@{
+        SessionId = (Get-TextSha256 "session-$CaseName-$ServerPid").Substring(0, 32).ToLowerInvariant()
+        ServerPid = $ServerPid
+        StartedUtc = $Started.ToUniversalTime().ToString('o')
+        BreakpointUtc = $BreakpointUtc.ToUniversalTime().ToString('o')
+        CompletedUtc = $Completed.ToUniversalTime().ToString('o')
+        LogSha256 = (Get-FileHash -LiteralPath $LogPath -Algorithm SHA256).Hash
+        BreakpointId = $breakpointId
+        CallstackFrames = $frames
+        CallstackSha256 = Get-TextSha256 ($frames -join "`n")
+        Module = [ordered]@{
+            FileName = 'ISRWorldGen.dll'
+            PathSha256 = [string]$AssemblyArtifact.PackagePathSha256
+            Sha256 = [string]$AssemblyArtifact.Sha256
+            ProductVersion = [string]$AssemblyArtifact.ProductVersion
+            PdbFileName = 'ISRWorldGen.pdb'
+            PdbSha256 = [string]$PdbArtifact.Sha256
+            CodeViewGuid = [string]$SymbolPair.CodeViewGuid
+            CodeViewAge = [int]$SymbolPair.CodeViewAge
+            CodeViewStamp = [uint32]$SymbolPair.CodeViewStamp
+        }
+    }
+}
+
+function Invoke-Validation {
+    param(
+        [Parameter(Mandatory)][string]$Oracle,
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$ObservationPath,
+        [Parameter(Mandatory)][hashtable]$LogPaths
+    )
+
+    & $Oracle -Phase Validate -EvidenceRoot $Root -RepositoryRoot $RepositoryRoot `
+        -VintageStoryPath $VintageStoryPath -Configuration $Configuration `
+        -NewLog $LogPaths.new -ReloadLog $LogPaths.reload `
+        -HeightRefusalLog $LogPaths.height -RectangleRefusalLog $LogPaths.rectangle `
+        -CampaignObservationPath $ObservationPath | Out-Null
+}
+
+function Assert-ValidationFails {
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][string]$ExpectedMessage,
+        [Parameter(Mandatory)][scriptblock]$Action,
+        [Parameter(Mandatory)][string]$ReportPath
+    )
+
+    if (Test-Path -LiteralPath $ReportPath) {
+        Remove-Item -LiteralPath $ReportPath -Force
+    }
+
+    $failed = $false
+    try {
+        & $Action
+    }
+    catch {
+        $failed = $true
+        if (-not $_.Exception.Message.Contains($ExpectedMessage, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "$Label failed for the wrong reason: $($_.Exception.Message)"
+        }
+    }
+
+    if (-not $failed) {
+        throw "$Label unexpectedly passed the runtime evidence oracle."
+    }
+
+    if (Test-Path -LiteralPath $ReportPath) {
+        Remove-Item -LiteralPath $ReportPath -Force
+    }
+}
+
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $testRoot = Join-Path $tempBase ("isrworldgen-l02c-runtime-evidence-" + [Guid]::NewGuid().ToString('N'))
+$pdbMismatchRoot = $null
 [IO.Directory]::CreateDirectory($testRoot) | Out-Null
 try {
     $oracle = Join-Path $PSScriptRoot 'Invoke-L02CNativeRuntimeEvidence.ps1'
@@ -36,98 +184,198 @@ try {
     $commit = ([string]($commitResult | Select-Object -Last 1)).Trim()
     & $oracle -Phase Snapshot -EvidenceRoot $testRoot -RepositoryRoot $RepositoryRoot `
         -VintageStoryPath $VintageStoryPath -Configuration $Configuration -ExpectedCommit $commit | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Runtime evidence snapshot self-test failed.'
-    }
+    $manifestPath = Join-Path $testRoot 'prelaunch-snapshot\prelaunch-snapshot.json'
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -DateKind String
+    Assert-True ($manifest.ExpectedAssemblyInformationalVersion -ceq "1.0.0+$commit") `
+        'Snapshot did not bind ProductVersion to HEAD/AssemblyInformationalVersion.'
+    Assert-True (@($manifest.SymbolPairs).Count -eq 2) 'Snapshot did not attest both DLL/PDB symbol pairs.'
 
-    $hash = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-    $bytes = 406
+    $assemblyArtifact = Get-Artifact $manifest 'ISRWorldGen.dll'
+    $pdbArtifact = Get-Artifact $manifest 'ISRWorldGen.pdb'
+    $symbolPair = Get-SymbolPair $manifest 'ISRWorldGen.dll'
+    $envelopeHash = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    $envelopeBytes = 406
+    $eventUtc = [DateTimeOffset]::UtcNow.AddSeconds(-1)
+    $logTimestamp = Get-LocalLogTimestamp $eventUtc
     $logs = [ordered]@{
         new = @"
-L00B_DEBUG_PROBE_READY pid=101 module=ISRWorldGen.dll pass=Terrain worldtype=standard
-Entering runphase GameReady
-L02C_NATIVE_PROFILE_FROZEN profile=laboratory source=new persistencewrites=2 envelopebytes=$bytes envelopesha256=$hash gatestate=Frozen gatecangenerate=true gatecallbackregistered=true publishedprofile=true dimensions=4096x256x4096 chunk=32 rules=vintagestory-1.22.7-effective-world-v1:1
-Entering runphase WorldReady
-L02C_NATIVE_GATE_FROZEN profile=laboratory
-L00B_COLUMN_CALLBACK chunk=(1,1)
-Server stop requested, begin shutdown sequence. Stop reason: Forced: Shutdown through Server API
-Saved savegamedata...2
-World saved! Saved 1 chunks, 1 mapchunks, 1 mapregions.
-Stopped the server!
+$logTimestamp [Notification] [isrworldgen] L00A_BOOTSTRAP modid=isrworldgen instance=1 pid=101 side=Server assembly=ISRWorldGen.dll sha256=$($assemblyArtifact.Sha256) runtime=.NET_10.0 architecture=X64
+$logTimestamp [Notification] [isrworldgen] L00B_DEBUG_PROBE_READY pid=101 module=ISRWorldGen.dll pass=Terrain worldtype=standard
+$logTimestamp [Notification] Entering runphase GameReady
+$logTimestamp [Notification] [isrworldgen] L02C_NATIVE_PROFILE_FROZEN profile=laboratory source=new persistencewrites=2 envelopebytes=$envelopeBytes envelopesha256=$envelopeHash gatestate=Frozen gatecangenerate=true gatecallbackregistered=true publishedprofile=true dimensions=4096x256x4096 chunk=32 rules=vintagestory-1.22.7-effective-world-v1:1
+$logTimestamp [Notification] Entering runphase WorldReady
+$logTimestamp [Notification] L00C_INACTIVE instance=fixture reason=existing-world-without-marker
+$logTimestamp [Notification] [isrworldgen] L02C_NATIVE_GATE_FROZEN profile=laboratory
+$logTimestamp [Notification] [isrworldgen] L00B_COLUMN_CALLBACK chunk=(1,1)
+$logTimestamp [Notification] Entering runphase RunGame
+$logTimestamp [Notification] L00C_WITNESS_NO_REQUEST instance=fixture loadrequests=0 transientrequests=0 refreshpasses=0 fixturewrites=0 markers=0
+$logTimestamp [Notification] L00C_DELAYED_SHUTDOWN_ARMED instance=fixture run=1 reason=inactive-witness-complete delayms=50 listener=1
+$logTimestamp [Notification] L00C_DELAYED_SHUTDOWN_FIRED instance=fixture run=1 reason=inactive-witness-complete
+$logTimestamp [Notification] Server stop requested, begin shutdown sequence. Stop reason: Forced: Shutdown through Server API
+$logTimestamp [Event] Saved savegamedata...2
+$logTimestamp [Event] World saved! Saved 1 chunks, 1 mapchunks, 1 mapregions.
+$logTimestamp [Event] Stopped the server!
 "@
         reload = @"
-L00B_DEBUG_PROBE_READY pid=102 module=ISRWorldGen.dll pass=Terrain worldtype=standard
-Entering runphase GameReady
-L02C_NATIVE_PROFILE_FROZEN profile=laboratory source=reload persistencewrites=0 envelopebytes=$bytes envelopesha256=$hash gatestate=Frozen gatecangenerate=true gatecallbackregistered=false publishedprofile=true dimensions=4096x256x4096 chunk=32 rules=vintagestory-1.22.7-effective-world-v1:1
-Entering runphase WorldReady
-Server stop requested, begin shutdown sequence. Stop reason: Forced: Shutdown through Server API
-Saved savegamedata...2
-World saved! Saved 1 chunks, 1 mapchunks, 1 mapregions.
-Stopped the server!
+$logTimestamp [Notification] [isrworldgen] L00A_BOOTSTRAP modid=isrworldgen instance=1 pid=102 side=Server assembly=ISRWorldGen.dll sha256=$($assemblyArtifact.Sha256) runtime=.NET_10.0 architecture=X64
+$logTimestamp [Notification] [isrworldgen] L00B_DEBUG_PROBE_READY pid=102 module=ISRWorldGen.dll pass=Terrain worldtype=standard
+$logTimestamp [Notification] Entering runphase GameReady
+$logTimestamp [Notification] [isrworldgen] L02C_NATIVE_PROFILE_FROZEN profile=laboratory source=reload persistencewrites=0 envelopebytes=$envelopeBytes envelopesha256=$envelopeHash gatestate=Frozen gatecangenerate=true gatecallbackregistered=false publishedprofile=true dimensions=4096x256x4096 chunk=32 rules=vintagestory-1.22.7-effective-world-v1:1
+$logTimestamp [Notification] Entering runphase WorldReady
+$logTimestamp [Notification] L00C_INACTIVE instance=fixture reason=existing-world-without-marker
+$logTimestamp [Notification] Entering runphase RunGame
+$logTimestamp [Notification] L00C_WITNESS_NO_REQUEST instance=fixture loadrequests=0 transientrequests=0 refreshpasses=0 fixturewrites=0 markers=0
+$logTimestamp [Notification] L00C_DELAYED_SHUTDOWN_ARMED instance=fixture run=1 reason=inactive-witness-complete delayms=50 listener=1
+$logTimestamp [Notification] L00C_DELAYED_SHUTDOWN_FIRED instance=fixture run=1 reason=inactive-witness-complete
+$logTimestamp [Notification] Server stop requested, begin shutdown sequence. Stop reason: Forced: Shutdown through Server API
+$logTimestamp [Event] Saved savegamedata...2
+$logTimestamp [Event] World saved! Saved 1 chunks, 1 mapchunks, 1 mapregions.
+$logTimestamp [Event] Stopped the server!
 "@
         height = @"
-L00B_DEBUG_PROBE_READY pid=103 module=ISRWorldGen.dll pass=Terrain worldtype=standard
-Entering runphase GameReady
-L02C_NATIVE_PROFILE_REJECTED code=InvalidInput stage=atlas.profile.native-height source=new persistencewrites=0 envelopebytes=0 envelopesha256=none gatestate=Rejected gatecangenerate=false gatecallbackregistered=false details=height dimensions=4096x320x4096 chunk=32 rules=vintagestory-1.22.7-effective-world-v1:1
-Server stop requested, begin shutdown sequence. Stop reason: Forced: Shutdown through Server API
-Stopped the server!
+$logTimestamp [Notification] [isrworldgen] L00A_BOOTSTRAP modid=isrworldgen instance=1 pid=103 side=Server assembly=ISRWorldGen.dll sha256=$($assemblyArtifact.Sha256) runtime=.NET_10.0 architecture=X64
+$logTimestamp [Notification] [isrworldgen] L00B_DEBUG_PROBE_READY pid=103 module=ISRWorldGen.dll pass=Terrain worldtype=standard
+$logTimestamp [Notification] Entering runphase GameReady
+$logTimestamp [Error] [isrworldgen] L02C_NATIVE_PROFILE_REJECTED code=InvalidInput stage=atlas.profile.native-height source=new persistencewrites=0 envelopebytes=0 envelopesha256=none gatestate=Rejected gatecangenerate=false gatecallbackregistered=false details=height dimensions=4096x320x4096 chunk=32 rules=vintagestory-1.22.7-effective-world-v1:1
+$logTimestamp [Notification] Server stop requested, begin shutdown sequence. Stop reason: Forced: Shutdown through Server API
+$logTimestamp [Event] Stopped the server!
 "@
         rectangle = @"
-L00B_DEBUG_PROBE_READY pid=104 module=ISRWorldGen.dll pass=Terrain worldtype=standard
-Entering runphase GameReady
-L02C_NATIVE_PROFILE_REJECTED code=InvalidInput stage=native-profile.effective-dimensions source=new persistencewrites=0 envelopebytes=0 envelopesha256=none gatestate=Rejected gatecangenerate=false gatecallbackregistered=false details=dimensions dimensions=4096x256x8192 chunk=32 rules=vintagestory-1.22.7-effective-world-v1:1
-Server stop requested, begin shutdown sequence. Stop reason: Forced: Shutdown through Server API
-Stopped the server!
+$logTimestamp [Notification] [isrworldgen] L00A_BOOTSTRAP modid=isrworldgen instance=1 pid=104 side=Server assembly=ISRWorldGen.dll sha256=$($assemblyArtifact.Sha256) runtime=.NET_10.0 architecture=X64
+$logTimestamp [Notification] [isrworldgen] L00B_DEBUG_PROBE_READY pid=104 module=ISRWorldGen.dll pass=Terrain worldtype=standard
+$logTimestamp [Notification] Entering runphase GameReady
+$logTimestamp [Error] [isrworldgen] L02C_NATIVE_PROFILE_REJECTED code=InvalidInput stage=native-profile.effective-dimensions source=new persistencewrites=0 envelopebytes=0 envelopesha256=none gatestate=Rejected gatecangenerate=false gatecallbackregistered=false details=dimensions dimensions=4096x256x8192 chunk=32 rules=vintagestory-1.22.7-effective-world-v1:1
+$logTimestamp [Notification] Server stop requested, begin shutdown sequence. Stop reason: Forced: Shutdown through Server API
+$logTimestamp [Event] Stopped the server!
 "@
     }
 
+    $logPaths = @{}
     foreach ($caseName in @('new', 'reload', 'height', 'rectangle')) {
-        Write-Utf8Fixture (Join-Path $testRoot "$caseName.log") $logs[$caseName]
+        $logPaths[$caseName] = Join-Path $testRoot "$caseName.log"
+        Write-Utf8Fixture $logPaths[$caseName] $logs[$caseName]
     }
 
+    $started = $eventUtc.AddSeconds(-1)
+    $completed = [DateTimeOffset]::UtcNow
     $observations = [ordered]@{
-        cases = [ordered]@{
-            new = [ordered]@{ pid = 101; breakpoint = 'GameReady'; callstack = @('Frame.New') ; debuggerClaim = 'fixture claim' }
-            reload = [ordered]@{ pid = 102; breakpoint = 'GameReady'; callstack = @('Frame.Reload') ; debuggerClaim = 'fixture claim' }
-            height = [ordered]@{ pid = 103; breakpoint = 'ShutDown'; callstack = @('Frame.Height') ; debuggerClaim = 'fixture claim' }
-            rectangle = [ordered]@{ pid = 104; breakpoint = 'ShutDown'; callstack = @('Frame.Rectangle') ; debuggerClaim = 'fixture claim' }
-        }
+        Schema = 'isrworldgen.t02-05.visual-studio-campaign.v2'
+        TestedCommit = $commit
+        SnapshotManifestSha256 = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
+        VisualStudioProfile = 'ISRWorldGen Server (isolated data)'
+        DebuggerTransport = 'visual-studio-debugger'
+        Provenance = 'visual-studio-debugger-session-verified'
+        Cases = [ordered]@{}
+    }
+    $pids = [ordered]@{ new = 101; reload = 102; height = 103; rectangle = 104 }
+    foreach ($caseName in @('new', 'reload', 'height', 'rectangle')) {
+        $observations.Cases[$caseName] = New-CaseObservation $caseName $pids[$caseName] $logPaths[$caseName] `
+            $started $eventUtc $completed $assemblyArtifact $pdbArtifact $symbolPair
     }
     $observationPath = Join-Path $testRoot 'campaign-observation.json'
-    Write-Utf8Fixture $observationPath ($observations | ConvertTo-Json -Depth 8)
+    Write-JsonFixture $observationPath $observations
 
-    & $oracle -Phase Validate -EvidenceRoot $testRoot -RepositoryRoot $RepositoryRoot `
-        -VintageStoryPath $VintageStoryPath -Configuration $Configuration `
-        -NewLog (Join-Path $testRoot 'new.log') -ReloadLog (Join-Path $testRoot 'reload.log') `
-        -HeightRefusalLog (Join-Path $testRoot 'height.log') `
-        -RectangleRefusalLog (Join-Path $testRoot 'rectangle.log') `
-        -CampaignObservationPath $observationPath | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Runtime evidence validation self-test failed.'
-    }
-
-    $report = Get-Content -LiteralPath (Join-Path $testRoot 'runtime-evidence.json') -Raw | ConvertFrom-Json
+    Invoke-Validation $oracle $testRoot $observationPath $logPaths
+    $reportPath = Join-Path $testRoot 'runtime-evidence.json'
+    $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json -DateKind String
     Assert-True ($report.Status -ceq 'PASS') 'Runtime evidence self-test report did not pass.'
-    Assert-True ($report.EnvelopeSha256 -ceq $hash) 'Runtime evidence self-test changed the envelope hash.'
-    Assert-True ($report.Cases[0].DebuggerObservation.Provenance -ceq 'campaign-supplied-unverified-by-oracle') `
-        'Runtime evidence self-test invented debugger provenance.'
+    Assert-True ($report.EnvelopeSha256 -ceq $envelopeHash) 'Runtime evidence self-test changed the envelope hash.'
+    Assert-True ($report.VisualStudio.Provenance -ceq 'visual-studio-debugger-session-verified') `
+        'Runtime evidence self-test did not retain verified Visual Studio provenance.'
 
-    $tamperedHash = '1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-    Write-Utf8Fixture (Join-Path $testRoot 'reload.log') ($logs.reload.Replace($hash, $tamperedHash))
-    $tamperRejected = $false
-    try {
-        & $oracle -Phase Validate -EvidenceRoot $testRoot -RepositoryRoot $RepositoryRoot `
-            -VintageStoryPath $VintageStoryPath -Configuration $Configuration `
-            -NewLog (Join-Path $testRoot 'new.log') -ReloadLog (Join-Path $testRoot 'reload.log') `
-            -HeightRefusalLog (Join-Path $testRoot 'height.log') `
-            -RectangleRefusalLog (Join-Path $testRoot 'rectangle.log') `
-            -CampaignObservationPath $observationPath | Out-Null
-    }
-    catch {
-        $tamperRejected = $true
-    }
-    Assert-True $tamperRejected 'Reload envelope-hash mutation unexpectedly passed the runtime oracle.'
-    Write-Utf8Fixture (Join-Path $testRoot 'reload.log') $logs.reload
+    $originalObservationJson = Get-Content -LiteralPath $observationPath -Raw
+    $originalNewLog = $logs.new
+
+    $observations.Provenance = 'unverified'
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Unverified provenance' 'provenance' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.PSObject.Properties.Remove('Provenance')
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Absent provenance' 'closed schema' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.VisualStudioProfile = 'arbitrary-profile'
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Visual Studio profile mismatch' 'profile' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations | Add-Member -NotePropertyName OperatorNote -NotePropertyValue '..\..\secret-token'
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Malicious extra field' 'closed schema' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.new.CallstackFrames[0] = '..\..\arbitrary-frame'
+    $observations.Cases.new.CallstackSha256 = Get-TextSha256 ($observations.Cases.new.CallstackFrames -join "`n")
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Malicious callstack field' 'callstack' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.new.Module.ProductVersion = '1.0.0+0000000000000000000000000000000000000000'
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Module version mismatch' 'ProductVersion' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $observations.Cases.new.Module.PathSha256 = '0' * 64
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Module path mismatch' 'path' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    Write-Utf8Fixture $logPaths.new ($originalNewLog.Replace([string]$assemblyArtifact.Sha256, ('F' * 64)))
+    $observations.Cases.new.LogSha256 = (Get-FileHash -LiteralPath $logPaths.new -Algorithm SHA256).Hash
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Bootstrap hash mismatch' 'bootstrap' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $logPaths.new $originalNewLog
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    Write-Utf8Fixture $logPaths.new ($originalNewLog -replace '(?m)^.*L00A_BOOTSTRAP.*\r?\n', '')
+    $observations.Cases.new.LogSha256 = (Get-FileHash -LiteralPath $logPaths.new -Algorithm SHA256).Hash
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Bootstrap absence' 'L00A_BOOTSTRAP' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $logPaths.new $originalNewLog
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    Write-Utf8Fixture $logPaths.new ($originalNewLog -replace '(?m)^.*L00B_COLUMN_CALLBACK.*\r?\n', '')
+    $observations.Cases.new.LogSha256 = (Get-FileHash -LiteralPath $logPaths.new -Algorithm SHA256).Hash
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'New callback absence' 'L00B_COLUMN_CALLBACK' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $logPaths.new $originalNewLog
+    Write-Utf8Fixture $observationPath $originalObservationJson
+    $observations = $originalObservationJson | ConvertFrom-Json -DateKind String
+
+    $staleTimestamp = '1.1.2000 00:00:00'
+    Write-Utf8Fixture $logPaths.new $originalNewLog.Replace($logTimestamp, $staleTimestamp)
+    $observations.Cases.new.LogSha256 = (Get-FileHash -LiteralPath $logPaths.new -Algorithm SHA256).Hash
+    Write-JsonFixture $observationPath $observations
+    Assert-ValidationFails 'Stale log' 'timestamp' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $logPaths.new $originalNewLog
+    Write-Utf8Fixture $observationPath $originalObservationJson
+
+    Add-Content -LiteralPath $logPaths.new -Value 'arbitrary stale content'
+    Assert-ValidationFails 'Arbitrary log mutation' 'log SHA-256' `
+        { Invoke-Validation $oracle $testRoot $observationPath $logPaths } $reportPath
+    Write-Utf8Fixture $logPaths.new $originalNewLog
 
     $duplicateFailed = $false
     try {
@@ -139,23 +387,44 @@ Stopped the server!
     }
     Assert-True $duplicateFailed 'CreateNew snapshot unexpectedly allowed evidence replacement.'
 
+    $pdbMismatchRoot = Join-Path $tempBase ("isrworldgen-l02c-pdb-mismatch-" + [Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($pdbMismatchRoot) | Out-Null
+    & $oracle -Phase Snapshot -EvidenceRoot $pdbMismatchRoot -RepositoryRoot $RepositoryRoot `
+        -VintageStoryPath $VintageStoryPath -Configuration $Configuration -ExpectedCommit $commit | Out-Null
+    [IO.File]::Copy(
+        (Join-Path $pdbMismatchRoot 'prelaunch-snapshot\ISRWorldGen.Core.pdb'),
+        (Join-Path $pdbMismatchRoot 'prelaunch-snapshot\ISRWorldGen.pdb'),
+        $true)
+    Assert-ValidationFails 'PDB mismatch' 'PDB pairing' `
+        { Invoke-Validation $oracle $pdbMismatchRoot $observationPath $logPaths } `
+        (Join-Path $pdbMismatchRoot 'runtime-evidence.json')
+
     [ordered]@{
         TestId = 'T02-05-RUNTIME-EVIDENCE-ORACLE'
         Status = 'PASS'
         Configuration = $Configuration
         CreateNewReplacementRejected = $duplicateFailed
-        EnvelopeHashMutationRejected = $tamperRejected
-        DebuggerProvenance = 'campaign-supplied-unverified-by-oracle'
+        NegativeCases = 13
+        BootstrapModuleBinding = $true
+        PortablePdbPairing = $true
+        VisualStudioProvenance = 'visual-studio-debugger-session-verified'
     } | ConvertTo-Json -Depth 4
 }
 finally {
-    $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)
-    if (-not $resolvedTestRoot.StartsWith($tempBase, [StringComparison]::OrdinalIgnoreCase) -or
-        -not (Split-Path -Leaf $resolvedTestRoot).StartsWith('isrworldgen-l02c-runtime-evidence-', [StringComparison]::Ordinal)) {
-        throw "Refusing to clean unexpected runtime evidence self-test path: $resolvedTestRoot"
-    }
+    foreach ($candidate in @($testRoot, $pdbMismatchRoot)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
 
-    if (Test-Path -LiteralPath $resolvedTestRoot) {
-        Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
+        $resolved = [IO.Path]::GetFullPath($candidate)
+        $leaf = Split-Path -Leaf $resolved
+        if (-not $resolved.StartsWith($tempBase, [StringComparison]::OrdinalIgnoreCase) -or
+            ($leaf -notmatch '^isrworldgen-l02c-(runtime-evidence|pdb-mismatch)-[0-9a-f]{32}$')) {
+            throw "Refusing to clean unexpected runtime evidence self-test path: $resolved"
+        }
+
+        if (Test-Path -LiteralPath $resolved) {
+            Remove-Item -LiteralPath $resolved -Recurse -Force
+        }
     }
 }
