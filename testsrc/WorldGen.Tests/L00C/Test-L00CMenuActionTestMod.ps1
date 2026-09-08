@@ -23,6 +23,9 @@ foreach ($path in @($project, $modSystem, $laboratoryHost, $driver, (Join-Path $
 if (Select-String -LiteralPath $project -Pattern 'ProjectReference|src\\WorldGen' -Quiet) {
     throw 'Test mod must not reference product projects.'
 }
+if (-not (Select-String -LiteralPath $project -SimpleMatch 'BeforeTargets="PrepareForBuild"' -Quiet)) {
+    throw 'Release rejection must run before PrepareForBuild, before C# compilation.'
+}
 if (Select-String -LiteralPath @($modSystem, $laboratoryHost, $driver) -Pattern 'SendKeys|mouse_event|keybd_event|WindowsInput|Process\.Start|Start-Process|GetCredential|AuthenticationHeader|Token|Password' -Quiet) {
     throw 'L00-C laboratory host must not synthesize input, start a process, or access authentication material.'
 }
@@ -39,11 +42,20 @@ foreach ($packageFile in @('ISRWorldGen.L00C.MenuActionLab.dll', 'modinfo.json')
     if (-not (Test-Path -LiteralPath (Join-Path $output $packageFile) -PathType Leaf)) { throw "L00-C local package is incomplete: $packageFile" }
 }
 if (Select-String -LiteralPath $product -SimpleMatch 'L00CMenuActionLab' -Quiet) { throw 'Production package must not reference the L00-C test mod.' }
+
+$releaseOutput = (& dotnet build $project --configuration Release --nologo "-p:VintageStoryPath=$GamePath" 2>&1 | Out-String)
+$releaseExitCode = $LASTEXITCODE
+if ($releaseExitCode -eq 0) { throw 'L00-C test mod Release build unexpectedly succeeded.' }
+if ($releaseOutput -notmatch [regex]::Escape('L00-C menu laboratory mod is Debug-only.')) {
+    throw "L00-C test mod Release build did not fail at the explicit Debug-only gate:$([Environment]::NewLine)$releaseOutput"
+}
+if ($releaseOutput -match 'CS0169') { throw "L00-C test mod Release build reached C# compilation instead of the Debug-only gate:$([Environment]::NewLine)$releaseOutput" }
 [ordered]@{
     TestId = 'L00-C-MENU-HOST-TESTMOD-STATIC'
     Status = 'PASS'
     Scope = 'Debug test-mod compilation and isolation only; no client runtime or authentication was exercised.'
     Package = $output
     ModSystem = 'ISRWorldGen.L00C.Laboratory.L00CMenuActionLabModSystem'
+    ReleaseRejection = 'PASS: RejectNonDebugLaboratoryBuild before PrepareForBuild'
     Utc = [DateTimeOffset]::UtcNow.ToString('o')
 } | ConvertTo-Json -Depth 4
