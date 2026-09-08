@@ -529,10 +529,10 @@
       "blocker": null
     },
     "L14-B": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
+      "status": "IN_PROGRESS",
+      "owner": "agent:l14-b",
+      "branch": "agent/l14-b",
+      "base_commit": "7e4d08f",
       "evidence": [],
       "blocker": null
     },
