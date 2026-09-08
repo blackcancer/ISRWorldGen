@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Foundation;
@@ -145,6 +146,8 @@ public readonly record struct StratigraphicLayer
 /// <summary>A world-space fracture stripe. Its permeability effect never changes the host rock code.</summary>
 public readonly record struct FractureZone
 {
+    private const long MaximumDirectionComponent = 1_000_000;
+
     public FractureZone(
         StableId fractureId,
         long anchorX,
@@ -154,7 +157,8 @@ public readonly record struct FractureZone
         double halfWidthBlocks,
         double permeabilityBoostNormalized)
     {
-        if ((directionX == 0 && directionZ == 0) || !double.IsFinite(halfWidthBlocks) || halfWidthBlocks <= 0 ||
+        if ((directionX == 0 && directionZ == 0) || directionX is < -MaximumDirectionComponent or > MaximumDirectionComponent || directionZ is < -MaximumDirectionComponent or > MaximumDirectionComponent ||
+            !double.IsFinite(halfWidthBlocks) || halfWidthBlocks <= 0 ||
             !double.IsFinite(permeabilityBoostNormalized) || permeabilityBoostNormalized is < 0 or > 1)
         {
             throw new ArgumentOutOfRangeException(nameof(directionX), "Fractures require a non-zero direction, positive finite width, and a normalized boost.");
@@ -185,11 +189,11 @@ public readonly record struct FractureZone
 
     public bool Contains(long x, long z)
     {
-        decimal dx = (decimal)x - AnchorX;
-        decimal dz = (decimal)z - AnchorZ;
-        decimal cross = (dx * DirectionZ) - (dz * DirectionX);
+        BigInteger dx = (BigInteger)x - AnchorX;
+        BigInteger dz = (BigInteger)z - AnchorZ;
+        BigInteger cross = (dx * DirectionZ) - (dz * DirectionX);
         double directionLength = Math.Sqrt(((double)DirectionX * DirectionX) + ((double)DirectionZ * DirectionZ));
-        return Math.Abs((double)cross) / directionLength <= HalfWidthBlocks;
+        return (double)BigInteger.Abs(cross) / directionLength <= HalfWidthBlocks;
     }
 }
 
@@ -202,6 +206,120 @@ public readonly record struct MaterialSample(
 public interface IMaterialQuery
 {
     MaterialSample Query(long x, int y, long z);
+}
+
+/// <summary>Minimal Core hand-off used by erosion, cavern, or resource code without selecting any game asset.</summary>
+public interface IMaterialSampleConsumer
+{
+    void Consume(MaterialSample sample);
+}
+
+public static class MaterialQueryDelivery
+{
+    public static void Deliver(IMaterialQuery query, long x, int y, long z, IMaterialSampleConsumer consumer)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(consumer);
+        consumer.Consume(query.Query(x, y, z));
+    }
+}
+
+public enum RockRemovalKind : byte
+{
+    Valley = 0,
+    Cavern = 1,
+}
+
+/// <summary>Explicit semi-open Core removal volume; it never carries a replacement material palette.</summary>
+public readonly record struct RockRemovalVolume
+{
+    public RockRemovalVolume(
+        RockRemovalKind kind,
+        long minX,
+        long maxXExclusive,
+        int bottomInclusiveY,
+        int topExclusiveY,
+        long minZ,
+        long maxZExclusive)
+    {
+        if (!Enum.IsDefined(kind) || maxXExclusive <= minX || maxZExclusive <= minZ || topExclusiveY <= bottomInclusiveY)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxXExclusive), "Rock removal volumes must use known kinds and non-empty semi-open bounds.");
+        }
+
+        Kind = kind;
+        MinX = minX;
+        MaxXExclusive = maxXExclusive;
+        BottomInclusiveY = bottomInclusiveY;
+        TopExclusiveY = topExclusiveY;
+        MinZ = minZ;
+        MaxZExclusive = maxZExclusive;
+    }
+
+    public RockRemovalKind Kind { get; }
+
+    public long MinX { get; }
+
+    public long MaxXExclusive { get; }
+
+    public int BottomInclusiveY { get; }
+
+    public int TopExclusiveY { get; }
+
+    public long MinZ { get; }
+
+    public long MaxZExclusive { get; }
+
+    public bool Contains(long x, int y, long z) =>
+        x >= MinX && x < MaxXExclusive && y >= BottomInclusiveY && y < TopExclusiveY && z >= MinZ && z < MaxZExclusive;
+}
+
+/// <summary>
+/// Core exposure view. Removal can hide a material cell, but every exposed solid is
+/// re-read from the immutable material snapshot and therefore cannot be recolored.
+/// </summary>
+public sealed class MaterialExposure
+{
+    private readonly MaterialSnapshot snapshot;
+    private readonly RockRemovalVolume[] removals;
+
+    public MaterialExposure(MaterialSnapshot snapshot, IEnumerable<RockRemovalVolume> removals)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(removals);
+        this.snapshot = snapshot;
+        this.removals = removals.OrderBy(removal => removal.Kind).ThenBy(removal => removal.MinX).ThenBy(removal => removal.MinZ)
+            .ThenBy(removal => removal.BottomInclusiveY).ThenBy(removal => removal.TopExclusiveY).ToArray();
+    }
+
+    public bool TryQuerySolid(long x, int y, long z, out MaterialSample sample)
+    {
+        if (removals.Any(removal => removal.Contains(x, y, z)))
+        {
+            sample = default;
+            return false;
+        }
+
+        sample = snapshot.Query(x, y, z);
+        return true;
+    }
+
+    public bool TryGetExposedSolidBelow(long x, long z, int removedBottomExclusiveY, out int exposedY, out MaterialSample sample)
+    {
+        int lowestY = snapshot.Layers[^1].BottomInclusiveY;
+        for (int y = checked(removedBottomExclusiveY - 1); y >= lowestY; y--)
+        {
+            if (TryQuerySolid(x, y, z, out sample))
+            {
+                exposedY = y;
+                return true;
+            }
+        }
+
+        exposedY = default;
+        sample = default;
+        return false;
+    }
 }
 
 /// <summary>

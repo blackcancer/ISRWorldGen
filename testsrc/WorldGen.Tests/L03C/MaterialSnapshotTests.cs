@@ -14,12 +14,16 @@ public sealed class MaterialSnapshotTests
         MaterialSample sandstone = snapshot.Query(100, 70, 100);
         MaterialSample limestoneFracture = snapshot.Query(0, 45, 1);
         MaterialSample basalt = snapshot.Query(100, 10, 100);
+        var consumer = new RecordingConsumer();
+        MaterialQueryDelivery.Deliver(snapshot, 0, 45, 1, consumer);
 
         Assert.AreEqual(GeologicalMaterialCode.Sandstone, sandstone.MaterialCode);
         Assert.AreEqual(GeologicalMaterialCode.Limestone, limestoneFracture.MaterialCode);
         Assert.AreEqual(GeologicalMaterialCode.Basalt, basalt.MaterialCode);
         Assert.IsTrue(limestoneFracture.IsFractured);
         Assert.AreEqual(0.9, limestoneFracture.Properties.PermeabilityNormalized, 1e-15);
+        Assert.AreEqual(limestoneFracture, consumer.LastSample);
+        Assert.AreEqual(limestoneFracture.Properties, consumer.LastSample.Properties);
         foreach (MaterialProperties properties in snapshot.Catalog.Properties.Values)
         {
             Assert.IsTrue(double.IsFinite(properties.ErosionResistanceNormalized));
@@ -38,17 +42,26 @@ public sealed class MaterialSnapshotTests
     public void T03_04_ExcavationRevealsExistingStrataAndChunkBoundariesDoNotReassignThem()
     {
         MaterialSnapshot snapshot = SyntheticSnapshot();
+        RockRemovalVolume valley = new(RockRemovalKind.Valley, 0, 32, 60, 90, 0, 32);
+        RockRemovalVolume cavern = new(RockRemovalKind.Cavern, 4, 28, 20, 60, 4, 28);
+        var exposure = new MaterialExposure(snapshot, [valley, cavern]);
+        ChunkGrid chunks = new(16);
 
-        MaterialSample beforeExcavation = snapshot.Query(15, 70, 15);
-        MaterialSample exposedAfterRemovingOverburden = snapshot.Query(15, 45, 15);
-        MaterialSample sameExposedPointFromNextChunk = snapshot.Query(16, 45, 15);
-        MaterialSample replay = snapshot.Query(15, 45, 15);
+        Assert.IsFalse(exposure.TryQuerySolid(15, 70, 15, out _));
+        Assert.IsFalse(exposure.TryQuerySolid(15, 45, 15, out _));
+        Assert.IsTrue(exposure.TryGetExposedSolidBelow(15, 15, valley.BottomInclusiveY, out int valleyFloorY, out MaterialSample valleyFloor));
+        Assert.IsTrue(exposure.TryGetExposedSolidBelow(15, 15, cavern.BottomInclusiveY, out int cavernFloorY, out MaterialSample cavernFloor));
+        Assert.AreEqual(19, cavernFloorY);
+        Assert.AreEqual(GeologicalMaterialCode.Basalt, cavernFloor.MaterialCode);
+        Assert.AreEqual(snapshot.Query(15, cavernFloorY, 15), cavernFloor);
 
-        Assert.AreEqual(GeologicalMaterialCode.Sandstone, beforeExcavation.MaterialCode);
-        Assert.AreEqual(GeologicalMaterialCode.Limestone, exposedAfterRemovingOverburden.MaterialCode);
-        Assert.AreEqual(exposedAfterRemovingOverburden, replay);
-        Assert.AreEqual(exposedAfterRemovingOverburden.MaterialCode, sameExposedPointFromNextChunk.MaterialCode);
-        Assert.AreEqual(exposedAfterRemovingOverburden.LayerId, sameExposedPointFromNextChunk.LayerId);
+        Assert.AreEqual(new ChunkPosition(0, 0), chunks.Split(new WorldBlockPosition(15, 15)).Chunk);
+        Assert.AreEqual(new ChunkPosition(1, 0), chunks.Split(new WorldBlockPosition(16, 15)).Chunk);
+        Assert.IsTrue(exposure.TryGetExposedSolidBelow(15, 15, valley.BottomInclusiveY, out _, out MaterialSample leftBoundary));
+        Assert.IsTrue(exposure.TryGetExposedSolidBelow(16, 15, valley.BottomInclusiveY, out _, out MaterialSample rightBoundary));
+        Assert.AreEqual(19, valleyFloorY); // The stacked cavern is also removed below the valley.
+        Assert.AreEqual(leftBoundary.MaterialCode, rightBoundary.MaterialCode);
+        Assert.AreEqual(leftBoundary.LayerId, rightBoundary.LayerId);
     }
 
     [TestMethod]
@@ -61,6 +74,32 @@ public sealed class MaterialSnapshotTests
             Layer(1, 21, 40, GeologicalMaterialCode.Limestone),
         ], []));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => SyntheticSnapshot().Query(0, 100, 0));
+    }
+
+    [TestMethod]
+    public void InputOrderAndOverlappingFracturesProduceTheSameSnapshotAndBoundaryMaterial()
+    {
+        MaterialSnapshot forward = SyntheticSnapshot();
+        MaterialSnapshot reversed = new(Catalog(), forward.Layers.Reverse(), forward.Fractures.Reverse());
+        var overlap = new MaterialSnapshot(Catalog(), forward.Layers,
+        [
+            new FractureZone(Id(11), 0, 0, 1, 0, 2, 0.7),
+            new FractureZone(Id(12), 0, 0, 1, 0, 2, 0.95),
+        ]);
+
+        Assert.AreEqual(forward.ContentChecksum, reversed.ContentChecksum);
+        Assert.AreEqual(forward.Query(100, 45, 100), reversed.Query(100, 45, 100));
+        MaterialSample edge = overlap.Query(0, 45, 2);
+        Assert.IsTrue(edge.IsFractured);
+        Assert.AreEqual(0.95, edge.Properties.PermeabilityNormalized, 1e-15);
+    }
+
+    [TestMethod]
+    public void FractureCoordinatesCannotOverflowAndDirectionsAreBounded()
+    {
+        var fracture = new FractureZone(Id(13), long.MinValue, long.MaxValue, 1_000_000, -1_000_000, 0.5, 0.6);
+        Assert.IsFalse(fracture.Contains(long.MaxValue, long.MaxValue));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new FractureZone(Id(14), 0, 0, 1_000_001, 0, 1, 0.5));
     }
 
     private static MaterialSnapshot SyntheticSnapshot() => new(
@@ -86,4 +125,11 @@ public sealed class MaterialSnapshotTests
     private static StratigraphicLayer Layer(ulong id, int bottom, int top, GeologicalMaterialCode code) => new(Id(id), bottom, top, code);
 
     private static StableId Id(ulong index) => StableId.Derive(RandomDomain.Geology, StableId.Zero, index + 50_000);
+
+    private sealed class RecordingConsumer : IMaterialSampleConsumer
+    {
+        public MaterialSample LastSample { get; private set; }
+
+        public void Consume(MaterialSample sample) => LastSample = sample;
+    }
 }
