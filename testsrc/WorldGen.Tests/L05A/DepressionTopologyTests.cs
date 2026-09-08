@@ -66,5 +66,68 @@ public sealed class DepressionTopologyTests
         Assert.ThrowsExactly<ArgumentException>(() => DepressionTopologyBuilder.Build([Cell(1, 1, [2]), Cell(2, 1, [])]));
     }
 
+    [TestMethod]
+    public void T05_02_AllInputAndNeighbourPermutationsProduceTheSameDagAndHierarchy()
+    {
+        DrainageCell[] cells =
+        [
+            Cell(20, 0, [30], DrainageTerminalKind.Ocean),
+            Cell(30, 5, [20, 40, 50]),
+            Cell(40, 1, [30, 60]),
+            Cell(50, 1, [30, 60]),
+            Cell(60, 1, [50, 40, 70]),
+            Cell(70, 5, [60]),
+        ];
+        DrainageTopology baseline = DepressionTopologyBuilder.Build(cells);
+        DrainageTopology permuted = DepressionTopologyBuilder.Build(cells.Reverse()
+            .Select(cell => Cell(cell.Id, cell.PhysicalElevation, cell.Neighbours.Reverse().ToArray(), cell.Terminal)));
+
+        CollectionAssert.AreEqual(baseline.Cells.ToArray(), permuted.Cells.ToArray());
+        CollectionAssert.AreEqual(
+            baseline.Depressions.Select(item => (item.Id, Cells: string.Join(',', item.CellIds), item.SpillElevation, item.Capacity, item.ParentDepressionId)).ToArray(),
+            permuted.Depressions.Select(item => (item.Id, Cells: string.Join(',', item.CellIds), item.SpillElevation, item.Capacity, item.ParentDepressionId)).ToArray());
+        CollectionAssert.AreEqual(baseline.Connectivity.ToArray(), permuted.Connectivity.ToArray());
+        Assert.AreEqual(20L, baseline.Cells.Single(cell => cell.Id == 30).ReceiverId,
+            "Equivalent saddle exits must select the lowest stable terminal ID.");
+    }
+
+    [TestMethod]
+    public void T05_04_ConnectivityClassifiesOceanOnlyWhenItReachesAnOceanTerminal()
+    {
+        DrainageTopology topology = DepressionTopologyBuilder.Build(
+        [
+            Cell(1, -10, [2]), Cell(2, -8, [1], DrainageTerminalKind.DryBasin),
+            Cell(10, -4, [11]), Cell(11, 0, [10], DrainageTerminalKind.Ocean),
+            Cell(20, 100, [21]), Cell(21, 105, [20], DrainageTerminalKind.EndorheicLake),
+        ], seaLevel: 0d);
+
+        DrainageConnectivity submergedBasin = topology.Connectivity.Single(item => item.CellId == 1);
+        Assert.AreEqual(DrainageTerminalKind.DryBasin, submergedBasin.TerminalKind,
+            "A sub-sea-level interior basin is not ocean without topological connection.");
+        Assert.AreEqual(DrainageTerminalKind.Ocean, topology.Connectivity.Single(item => item.CellId == 10).TerminalKind,
+            "The open lagoon reaches its declared marine outlet.");
+        Assert.AreEqual(DrainageTerminalKind.EndorheicLake, topology.Connectivity.Single(item => item.CellId == 20).TerminalKind,
+            "A closed mountain lake remains a distinct terminal kind.");
+        Assert.AreEqual(DrainageWaterKind.SubmarineDryBasin, topology.WaterStates.Single(item => item.CellId == 1).Kind);
+        Assert.AreEqual(DrainageWaterKind.OceanConnected, topology.WaterStates.Single(item => item.CellId == 10).Kind);
+        Assert.AreEqual(DrainageWaterKind.ClosedLake, topology.WaterStates.Single(item => item.CellId == 20).Kind);
+    }
+
+    [TestMethod]
+    public void InvalidTopologiesAndUnsupportedNumericCapacityAreRejectedExplicitly()
+    {
+        Assert.ThrowsExactly<ArgumentException>(() => DepressionTopologyBuilder.Build(
+        [Cell(1, 0, [1])]));
+        Assert.ThrowsExactly<ArgumentException>(() => DepressionTopologyBuilder.Build(
+        [Cell(1, 0, [2]), Cell(1, 0, [2])]));
+        Assert.ThrowsExactly<ArgumentException>(() => DepressionTopologyBuilder.Build(
+        [Cell(1, 0, [2]), Cell(2, 0, [])]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DepressionTopologyBuilder.Build(
+        [Cell(0, double.MaxValue, [1], DrainageTerminalKind.Ocean), Cell(1, -double.MaxValue, [0])]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DepressionTopologyBuilder.Build(
+        [Cell(0, 0, [], DrainageTerminalKind.Ocean)], double.NaN));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => Cell(0, double.PositiveInfinity, []));
+    }
+
     private static DrainageCell Cell(long id, double elevation, long[] neighbours, DrainageTerminalKind? terminal = null) => new(id, elevation, neighbours, terminal);
 }
