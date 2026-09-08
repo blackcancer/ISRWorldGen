@@ -4,6 +4,16 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $driverPath = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
 $libPath = Join-Path $GamePath 'VintagestoryLib.dll'
+$cscPath = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
+if (-not (Test-Path -LiteralPath $cscPath -PathType Leaf)) { throw "L00-C menu POC compile gate cannot find csc.exe: $cscPath" }
+$compileOutput = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-poc-" + [Guid]::NewGuid().ToString('N') + '.dll')
+try {
+    & $cscPath /nologo /target:library /langversion:latest "/out:$compileOutput" $driverPath
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $compileOutput -PathType Leaf)) { throw 'L00-C menu POC driver compilation failed.' }
+}
+finally {
+    if (Test-Path -LiteralPath $compileOutput) { Remove-Item -LiteralPath $compileOutput -Force }
+}
 if ((Get-FileHash -LiteralPath $libPath -Algorithm SHA256).Hash -ne 'E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0') { throw 'L00-C menu POC version lock refused VintagestoryLib.dll.' }
 Add-Type -Path (Join-Path $GamePath 'Lib\Mono.Cecil.dll')
 $module = [Mono.Cecil.ModuleDefinition]::ReadModule($libPath)
@@ -22,6 +32,6 @@ if ($null -eq $sendLeave -or $sendLeave.ReturnType.FullName -ne 'System.Void' -o
 if (-not ($sendLeave.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.FullName -eq 'Packet_Client Vintagestory.Client.ClientPackets::Leave(System.Int32)' })) {
     throw 'L00-C menu POC version lock refused: SendLeave no longer forwards its reason to ClientPackets.Leave(int).'
 }
-foreach ($required in @('RequiredLibVersion = "1.22.7.0"', 'RequiredLibSha256 = "E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0"', 'Debugger.IsAttached', 'ISR_L00C_LAB', 'public const int SaveQuitLeaveReason = 0;', 'InvokeExact(clientMain, "SendLeave", new object?[] { SaveQuitLeaveReason });', 'DestroyGameSession', 'SoftExit', 'StartMainMenu')) { if (-not (Select-String -LiteralPath $driverPath -SimpleMatch $required -Quiet)) { throw "Missing POC contract: $required" } }
+foreach ($required in @('internal static class L00CMenuActionDriver', 'internal sealed class L00CMenuActionReceipt', 'RequiredLibVersion = "1.22.7.0"', 'RequiredLibSha256 = "E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0"', 'Debugger.IsAttached', 'debugger origin is not inferred', 'ISR_L00C_LAB', 'internal const int SaveQuitLeaveReason = 0;', 'GuardTarget(clientMain, "Vintagestory.Client.NoObf.ClientMain", "SendLeave", new[] { typeof(int) });', 'MethodInfo destroy = GuardDestroyGameSession(clientMain);', 'GuardTarget(screenManager, "Vintagestory.Client.ScreenManager", "StartMainMenu", Type.EmptyTypes);', 'InvokeExact(clientMain, "SendLeave", new object?[] { SaveQuitLeaveReason });', 'IsInstanceOfType(target)', 'DestroyGameSession', 'SoftExit', 'StartMainMenu')) { if (-not (Select-String -LiteralPath $driverPath -SimpleMatch $required -Quiet)) { throw "Missing POC contract: $required" } }
 if (Select-String -LiteralPath $driverPath -Pattern 'SendKeys|mouse_event|keybd_event|WindowsInput|Start-Process|Process\.Start' -Quiet) { throw 'POC must not synthesize UI input or launch the game.' }
-[ordered]@{ TestId='L00-C-MENU-ACTION-POC-STATIC'; Status='PASS'; Scope='Static contract only; no T00-06 client cycle was executed.'; VintagestoryLibVersion=([Reflection.AssemblyName]::GetAssemblyName($libPath).Version.ToString()); VintagestoryLibSha256=(Get-FileHash -LiteralPath $libPath -Algorithm SHA256).Hash; Utc=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json
+[ordered]@{ TestId='L00-C-MENU-ACTION-POC-STATIC'; Status='PASS'; Scope='Compile and static contract only; no T00-06 client cycle was executed.'; DriverCompilation='PASS'; VintagestoryLibVersion=([Reflection.AssemblyName]::GetAssemblyName($libPath).Version.ToString()); VintagestoryLibSha256=(Get-FileHash -LiteralPath $libPath -Algorithm SHA256).Hash; Utc=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json

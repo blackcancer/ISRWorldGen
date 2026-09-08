@@ -11,7 +11,7 @@ using System.Security.Cryptography;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
-public sealed class L00CMenuActionReceipt
+internal sealed class L00CMenuActionReceipt
 {
     public L00CMenuActionReceipt(string action, DateTimeOffset startedUtc, DateTimeOffset completedUtc,
         string vintagestoryLibVersion, string vintagestoryLibSha256, string targetMethod, bool completed)
@@ -35,37 +35,34 @@ public sealed class L00CMenuActionReceipt
 }
 
 /// <summary>Version/hash locked reflection bridge for the audited 1.22.7 client menu actions.</summary>
-public static class L00CMenuActionDriver
+internal static class L00CMenuActionDriver
 {
-    public const string RequiredLibVersion = "1.22.7.0";
-    public const string RequiredLibSha256 = "E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0";
-    public const int SaveQuitLeaveReason = 0;
+    internal const string RequiredLibVersion = "1.22.7.0";
+    internal const string RequiredLibSha256 = "E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0";
+    internal const int SaveQuitLeaveReason = 0;
 
-    public static L00CMenuActionReceipt EnterSingleplayerMenu(object mainMenuLeft)
+    internal static L00CMenuActionReceipt EnterSingleplayerMenu(object mainMenuLeft)
     {
-        Guard("Vintagestory.Client.GuiCompositeMainMenuLeft", "OnSingleplayer", Type.EmptyTypes);
+        GuardTarget(mainMenuLeft, "Vintagestory.Client.GuiCompositeMainMenuLeft", "OnSingleplayer", Type.EmptyTypes);
         return Invoke(mainMenuLeft, "OnSingleplayer", Array.Empty<object?>(), "enter-singleplayer-menu", true);
     }
 
-    public static L00CMenuActionReceipt ReopenPrimaryWorld(object singleplayerScreen, int saveCellIndex)
+    internal static L00CMenuActionReceipt ReopenPrimaryWorld(object singleplayerScreen, int saveCellIndex)
     {
-        Guard("Vintagestory.Client.GuiScreenSingleplayer", "OnClickCellLeft", new[] { typeof(int) });
+        GuardTarget(singleplayerScreen, "Vintagestory.Client.GuiScreenSingleplayer", "OnClickCellLeft", new[] { typeof(int) });
         return Invoke(singleplayerScreen, "OnClickCellLeft", new object?[] { saveCellIndex }, "reopen-primary-world", false);
     }
 
-    public static L00CMenuActionReceipt ReturnToMainMenu(object clientMain, object screenManager)
+    internal static L00CMenuActionReceipt ReturnToMainMenu(object clientMain, object screenManager)
     {
-        RequireDebugLab();
+        // All type/version/hash/method checks run before SendLeave or any session mutation.
+        GuardTarget(clientMain, "Vintagestory.Client.NoObf.ClientMain", "SendLeave", new[] { typeof(int) });
+        MethodInfo destroy = GuardDestroyGameSession(clientMain);
+        GuardTarget(screenManager, "Vintagestory.Client.ScreenManager", "StartMainMenu", Type.EmptyTypes);
         // Same shutdown chain as Save & Quit: SendLeave(0) → DestroyGameSession(false, SoftExit) → StartMainMenu.
         InvokeExact(clientMain, "SendLeave", new object?[] { SaveQuitLeaveReason });
-        MethodInfo destroy = clientMain.GetType().GetMethods(PrivateInstance)
-            .SingleOrDefault(m => m.Name == "DestroyGameSession" && m.GetParameters().Length == 2)
-            ?? throw new InvalidOperationException("L00-C menu POC refused: ClientMain.DestroyGameSession(bool, SoftExit) was not found.");
         Type exitType = destroy.GetParameters()[1].ParameterType;
-        if (!exitType.IsEnum || !Enum.GetNames(exitType).Contains("SoftExit", StringComparer.Ordinal))
-            throw new InvalidOperationException("L00-C menu POC refused: the audited SoftExit enum member was not found.");
         InvokeMethod(clientMain, destroy, new object?[] { false, Enum.Parse(exitType, "SoftExit") });
-        Guard("Vintagestory.Client.ScreenManager", "StartMainMenu", Type.EmptyTypes);
         return Invoke(screenManager, "StartMainMenu", Array.Empty<object?>(), "return-main-menu", false);
     }
 
@@ -91,11 +88,33 @@ public static class L00CMenuActionDriver
             ?? throw new InvalidOperationException($"L00-C menu POC refused: {typeName}.{methodName} is absent.");
     }
 
+    private static void GuardTarget(object target, string typeName, string methodName, Type[] parameters)
+    {
+        if (target == null) throw new ArgumentNullException(nameof(target));
+        Guard(typeName, methodName, parameters);
+        Type auditedType = FindLoadedLib().GetType(typeName, false)
+            ?? throw new InvalidOperationException($"L00-C menu POC refused: {typeName} is absent.");
+        if (!auditedType.IsInstanceOfType(target))
+            throw new InvalidOperationException($"L00-C menu POC refused: supplied target is not an instance of audited {typeName}.");
+    }
+
+    private static MethodInfo GuardDestroyGameSession(object clientMain)
+    {
+        MethodInfo destroy = clientMain.GetType().GetMethods(PrivateInstance)
+            .SingleOrDefault(m => m.Name == "DestroyGameSession" && m.GetParameters().Length == 2)
+            ?? throw new InvalidOperationException("L00-C menu POC refused: ClientMain.DestroyGameSession(bool, SoftExit) was not found.");
+        ParameterInfo[] parameters = destroy.GetParameters();
+        Type exitType = parameters[1].ParameterType;
+        if (parameters[0].ParameterType != typeof(bool) || !exitType.IsEnum || !Enum.GetNames(exitType).Contains("SoftExit", StringComparer.Ordinal))
+            throw new InvalidOperationException("L00-C menu POC refused: ClientMain.DestroyGameSession(bool, SoftExit) drifted.");
+        return destroy;
+    }
+
     private static void RequireDebugLab()
     {
-        if (!Debugger.IsAttached) throw new InvalidOperationException("L00-C menu POC refuses execution outside the Visual Studio debugger.");
+        if (!Debugger.IsAttached) throw new InvalidOperationException("L00-C menu POC requires a debugger to be attached; debugger origin is not inferred.");
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal))
-            throw new InvalidOperationException("L00-C menu POC refuses execution without ISR_L00C_LAB=1.");
+            throw new InvalidOperationException("L00-C menu POC requires ISR_L00C_LAB=1 in addition to an attached debugger.");
     }
 
     private static Assembly FindLoadedLib() => AppDomain.CurrentDomain.GetAssemblies().SingleOrDefault(a => a.GetName().Name == "VintagestoryLib")
