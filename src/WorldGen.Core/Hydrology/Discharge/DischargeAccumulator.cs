@@ -58,14 +58,17 @@ public sealed record DischargeBalance(
 /// <summary>Immutable hand-off for L05-C/L07; arrays are canonically ordered by stable cell ID.</summary>
 public sealed class DischargeSnapshot
 {
-    internal DischargeSnapshot(IEnumerable<DischargeReach> reaches, IEnumerable<DischargeTerminal> terminals, DischargeBalance balance)
+    internal DischargeSnapshot(int iteration, IEnumerable<DischargeReach> reaches, IEnumerable<DischargeTerminal> terminals, DischargeBalance balance)
     {
+        Iteration = iteration;
         Reaches = Array.AsReadOnly(reaches.OrderBy(reach => reach.CellId).ToArray());
         Terminals = Array.AsReadOnly(terminals.OrderBy(terminal => terminal.CellId).ToArray());
         Balance = balance;
     }
 
     public const int AlgorithmVersion = 1;
+    /// <summary>Exact preparatory cycle identity received from the water-budget hand-off.</summary>
+    public int Iteration { get; }
     public ReadOnlyCollection<DischargeReach> Reaches { get; }
     public ReadOnlyCollection<DischargeTerminal> Terminals { get; }
     public DischargeBalance Balance { get; }
@@ -92,6 +95,8 @@ public static class DischargeAccumulator
         ArgumentNullException.ThrowIfNull(classification);
         if (waterBudget.AlgorithmVersion != WaterBudgetSnapshot.AlgorithmVersion)
             throw new ArgumentException("The water-budget snapshot uses an unsupported algorithm version.", nameof(waterBudget));
+        if (waterBudget.Iteration < 0)
+            throw new ArgumentOutOfRangeException(nameof(waterBudget), "The water-budget iteration must be non-negative.");
 
         WaterBudgetCell[] cells = waterBudget.Cells.OrderBy(cell => cell.CellId).ToArray();
         RoutedCell[] routed = topology.Cells.OrderBy(cell => cell.Id).ToArray();
@@ -154,7 +159,7 @@ public static class DischargeAccumulator
         double globalResidual = local - terminal - losses - storage;
         double reference = Math.Max(local, Math.Max(terminal + losses, Math.Abs(storage)));
         EnsureBalanced(globalResidual, reference, nameof(waterBudget));
-        return new DischargeSnapshot(reaches, terminals, new DischargeBalance(local, terminal, losses, storage, globalResidual, reference));
+        return new DischargeSnapshot(waterBudget.Iteration, reaches, terminals, new DischargeBalance(local, terminal, losses, storage, globalResidual, reference));
     }
 
     private static void ValidateCells(IReadOnlyList<WaterBudgetCell> budgets, IReadOnlyList<RoutedCell> routes)
@@ -163,9 +168,14 @@ public static class DischargeAccumulator
             routes.Select(route => route.Id).Distinct().Count() != routes.Count || !budgets.Select(cell => cell.CellId).SequenceEqual(routes.Select(route => route.Id)))
             throw new ArgumentException("Water-budget and drainage cell IDs must be unique and exactly identical.");
         foreach (WaterBudgetCell cell in budgets)
-            if (!double.IsFinite(cell.AreaModelSquareLength) || cell.AreaModelSquareLength <= 0d || !double.IsFinite(cell.RunoffModelLengthPerYear) || cell.RunoffModelLengthPerYear < 0d ||
+            if (!double.IsFinite(cell.AreaModelSquareLength) || cell.AreaModelSquareLength <= 0d ||
+                !double.IsFinite(cell.PrecipitationModelLengthPerYear) || cell.PrecipitationModelLengthPerYear < 0d ||
+                !double.IsFinite(cell.ActualEvapotranspirationModelLengthPerYear) || cell.ActualEvapotranspirationModelLengthPerYear < 0d ||
+                !double.IsFinite(cell.RunoffModelLengthPerYear) || cell.RunoffModelLengthPerYear < 0d ||
+                !double.IsFinite(cell.RechargeModelLengthPerYear) || cell.RechargeModelLengthPerYear < 0d ||
+                !double.IsFinite(cell.StorageChangeModelLengthPerYear) || !double.IsFinite(cell.SoilMoistureNormalized) || cell.SoilMoistureNormalized is < 0d or > 1d ||
                 !double.IsFinite(cell.RechargeModelVolumePerYear) || cell.RechargeModelVolumePerYear < 0d)
-                throw new ArgumentOutOfRangeException(nameof(budgets), "Water-budget flows and areas must be finite and non-negative.");
+                throw new ArgumentOutOfRangeException(nameof(budgets), "Water-budget terms, soil state, and areas must be finite and within their declared bounds.");
         foreach (RoutedCell route in routes)
             if (route.ReceiverId is long receiver && !routes.Any(candidate => candidate.Id == receiver))
                 throw new ArgumentException("Every routed receiver must be a known cell.", nameof(routes));

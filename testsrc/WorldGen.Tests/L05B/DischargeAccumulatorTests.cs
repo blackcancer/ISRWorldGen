@@ -14,7 +14,7 @@ public sealed class DischargeAccumulatorTests
     public void T05_03_AnalyticalYConservesEveryJunctionAndTheGlobalBasin()
     {
         DischargeSnapshot result = DischargeAccumulator.Accumulate(
-            Budget(), Topology(), [new DischargeAdjustment(3, 2d, 1d)], Classification);
+            Budget(iteration: 27), Topology(), [new DischargeAdjustment(3, 2d, 1d)], Classification);
 
         DischargeReach left = result.Reaches.Single(reach => reach.CellId == 1);
         DischargeReach right = result.Reaches.Single(reach => reach.CellId == 2);
@@ -25,6 +25,7 @@ public sealed class DischargeAccumulatorTests
         Assert.AreEqual(9d, junction.DischargeModelVolumePerYear, 1e-12);
         Assert.AreEqual(40d, junction.DrainageAreaModelSquareLength, 1e-12);
         Assert.AreEqual(DischargeReachClass.River, junction.Classification, "Classification depends on conserved flow and area, not Strahler order.");
+        Assert.AreEqual(27, result.Iteration, "The published discharge hand-off must retain the exact C02 preparatory cycle identity.");
         Assert.IsLessThanOrEqualTo(Tolerance(junction.DischargeModelVolumePerYear), Math.Abs(junction.ResidualModelVolumePerYear));
         Assert.AreEqual(12d, result.Balance.LocalWaterModelVolumePerYear, 1e-12);
         Assert.AreEqual(9d, result.Balance.TerminalDischargeModelVolumePerYear, 1e-12);
@@ -37,8 +38,8 @@ public sealed class DischargeAccumulatorTests
     [TestMethod]
     public void T05_03_PermutationsAndDryReachDoNotChangeTheImmutableSnapshot()
     {
-        TestBudget source = Budget();
-        var reversed = new TestBudget(source.Cells.Reverse(), source.Transfers.Reverse());
+        TestBudget source = Budget(iteration: 41);
+        var reversed = new TestBudget(source.Cells.Reverse(), source.Transfers.Reverse(), source.Iteration);
         DrainageTopology topology = Topology();
         DischargeSnapshot first = DischargeAccumulator.Accumulate(source, topology, [new DischargeAdjustment(3, 2d, 1d), new DischargeAdjustment(4, 0d, 0d)], Classification);
         DischargeSnapshot second = DischargeAccumulator.Accumulate(reversed, topology, [new DischargeAdjustment(4, 0d, 0d), new DischargeAdjustment(3, 2d, 1d)], Classification);
@@ -46,6 +47,8 @@ public sealed class DischargeAccumulatorTests
         CollectionAssert.AreEqual(first.Reaches.ToArray(), second.Reaches.ToArray());
         CollectionAssert.AreEqual(first.Terminals.ToArray(), second.Terminals.ToArray());
         Assert.AreEqual(first.Balance, second.Balance);
+        Assert.AreEqual(41, first.Iteration);
+        Assert.AreEqual(first.Iteration, second.Iteration);
         Assert.IsTrue(first.Reaches.All(reach => double.IsFinite(reach.DischargeModelVolumePerYear) && double.IsFinite(reach.DrainageAreaModelSquareLength)));
     }
 
@@ -57,11 +60,33 @@ public sealed class DischargeAccumulatorTests
         Assert.ThrowsExactly<ArgumentException>(() => DischargeAccumulator.Accumulate(duplicated, Topology(), [], Classification));
     }
 
-    private static TestBudget Budget(GroundwaterTransfer? replacement = null) => new(
+    [TestMethod]
+    public void T05_03_RejectsNonFiniteBudgetTransferLossAndStorageTermsExplicitly()
+    {
+        WaterBudgetCell[] cells = Budget().Cells.ToArray();
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DischargeAccumulator.Accumulate(new TestBudget([cells[0] with { PrecipitationModelLengthPerYear = double.NaN }, .. cells[1..]], []), Topology(), [], Classification));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DischargeAccumulator.Accumulate(Budget(new GroundwaterTransfer(Id(99), Id(1), Id(2), double.PositiveInfinity, GroundwaterTransferKind.Resurgence)), Topology(), [], Classification));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DischargeAccumulator.Accumulate(Budget(), Topology(), [new DischargeAdjustment(1, double.NaN, 0d)], Classification));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DischargeAccumulator.Accumulate(Budget(), Topology(), [new DischargeAdjustment(1, 0d, double.NegativeInfinity)], Classification));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DischargeAccumulator.Accumulate(Budget(iteration: -1), Topology(), [], Classification));
+    }
+
+    [TestMethod]
+    public void T05_03_RejectsExtremeVolumeOverflowStablyAcrossPermutations()
+    {
+        WaterBudgetCell[] cells = Budget().Cells.ToArray();
+        WaterBudgetCell extreme = cells[0] with { AreaModelSquareLength = double.MaxValue, RunoffModelLengthPerYear = 2d, RechargeModelLengthPerYear = 0d };
+        var forward = new TestBudget([extreme, .. cells[1..]], []);
+        var reverse = new TestBudget(cells[1..].Reverse().Append(extreme), []);
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DischargeAccumulator.Accumulate(forward, Topology(), [], Classification));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => DischargeAccumulator.Accumulate(reverse, Topology(), [], Classification));
+    }
+
+    private static TestBudget Budget(GroundwaterTransfer? replacement = null, int iteration = 0) => new(
     [
         Cell(1, 2d, 4d, 10d, Id(1)), Cell(2, 3d, 2d, 10d, Id(2)), Cell(3, 1d, 0d, 20d, Id(3)), Cell(4, 0d, 0d, 5d, Id(4)),
     ],
-    [replacement ?? new GroundwaterTransfer(Id(99), Id(1), Id(2), 1d, GroundwaterTransferKind.Resurgence)]);
+    [replacement ?? new GroundwaterTransfer(Id(99), Id(1), Id(2), 1d, GroundwaterTransferKind.Resurgence)], iteration);
 
     private static DrainageTopology Topology() => DepressionTopologyBuilder.Build(
     [
@@ -73,10 +98,10 @@ public sealed class DischargeAccumulatorTests
     private static StableId Id(ulong low) => new(0, low);
     private static double Tolerance(double reference) => DischargeAccumulator.AbsoluteResidualToleranceModelVolumePerYear + (DischargeAccumulator.RelativeResidualTolerance * reference);
 
-    private sealed class TestBudget(IEnumerable<WaterBudgetCell> cells, IEnumerable<GroundwaterTransfer> transfers) : IWaterBudgetSnapshotSource
+    private sealed class TestBudget(IEnumerable<WaterBudgetCell> cells, IEnumerable<GroundwaterTransfer> transfers, int iteration = 0) : IWaterBudgetSnapshotSource
     {
         public int AlgorithmVersion => WaterBudgetSnapshot.AlgorithmVersion;
-        public int Iteration => 0;
+        public int Iteration => iteration;
         public IReadOnlyList<WaterBudgetCell> Cells { get; } = cells.ToArray();
         public IReadOnlyList<GroundwaterTransfer> Transfers { get; } = transfers.ToArray();
     }
