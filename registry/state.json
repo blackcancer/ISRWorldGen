@@ -498,10 +498,10 @@
       "blocker": null
     },
     "L05-D": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
+      "status": "IN_PROGRESS",
+      "owner": "agent:l05-d",
+      "branch": "agent/l05-d",
+      "base_commit": "c8faebcb9ba5155adacf9600101df2b8ca8c1840",
       "evidence": [],
       "blocker": null
     },
