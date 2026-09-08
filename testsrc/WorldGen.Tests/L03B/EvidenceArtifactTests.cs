@@ -55,7 +55,9 @@ public sealed class EvidenceArtifactTests
         Directory.CreateDirectory(Path.Combine(output, "sealed"));
         string reportPath = Path.Combine(output, "sealed", "T03-05-06-S.json");
         string manifestPath = Path.Combine(output, "blind", "T03-06-S-manifest.json");
-        string commitmentsPath = Path.Combine(output, "blind", "T03-06-S-attribution-commitments.json");
+        string commitmentsPath = Path.Combine(output, L03BEvidenceProtocol.CommitmentsArtifactPath.Replace('/', Path.DirectorySeparatorChar));
+        string keyPath = Path.Combine(output, "sealed", "T03-06-S-review-key.json");
+        string successMarkerPath = Path.Combine(output, L03BEvidenceProtocol.SuccessMarkerArtifactPath.Replace('/', Path.DirectorySeparatorChar));
         byte[] commitmentsBytes = L03BEvidenceProtocol.CreateAttributionCommitments(
             runName, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash, blindOrder, nonce);
         WriteAtomic(commitmentsPath, commitmentsBytes);
@@ -82,6 +84,10 @@ public sealed class EvidenceArtifactTests
         }
         catch (Exception exception)
         {
+            // The runner also excludes these paths structurally.  This best-effort
+            // deletion closes the ordinary managed-exception path before it writes FAIL.
+            TryDeleteSensitiveArtifact(keyPath);
+            TryDeleteSensitiveArtifact(successMarkerPath);
             string failureAttributionPath = Path.Combine(output, "sealed", "T03-06-S-failure-attribution.json");
             string? failureAttributionSha256 = File.Exists(failureAttributionPath)
                 ? L03BTestSupport.Sha256(File.ReadAllBytes(failureAttributionPath))
@@ -126,6 +132,8 @@ public sealed class EvidenceArtifactTests
         byte[] commitmentsBytes,
         IReadOnlyList<L03BBlindArtifact> initialBlindArtifacts)
     {
+        string keyPath = Path.Combine(output, "sealed", "T03-06-S-review-key.json");
+        string successMarkerPath = Path.Combine(output, L03BEvidenceProtocol.SuccessMarkerArtifactPath.Replace('/', Path.DirectorySeparatorChar));
         VerticalMetric[] verticalMetrics = new[] { "laboratory", "balanced", "vast-expeditions" }
             .Select(VerticalMetricFor)
             .ToArray();
@@ -270,22 +278,6 @@ public sealed class EvidenceArtifactTests
         byte[] reviewFormBytes = L03BEvidenceProtocol.CreateBlindReviewForm(blindOrder.Select(item => item.Code).ToArray());
         WriteAtomic(reviewFormPath, reviewFormBytes);
         blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, reviewFormPath), L03BTestSupport.Sha256(reviewFormBytes)));
-        byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            schemaVersion = 2,
-            instruction = "Do not open until a completed identification+confidence response copied from blind/T03-06-S-review-form.json has been timestamped and hashed.",
-            runId = Path.GetFileName(output),
-            nonce,
-            attributionCommitments = new
-            {
-                path = "blind/T03-06-S-attribution-commitments.json",
-                sha256 = L03BTestSupport.Sha256(commitmentsBytes),
-            },
-            entries = blindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
-        }, JsonOptions);
-        string keyPath = Path.Combine(output, "sealed", "T03-06-S-review-key.json");
-        WriteAtomic(keyPath, keyBytes);
-
         byte[] fixturesBytes = L03BEvidenceProtocol.ReadVerifiedGitBlob(repository, fixturesBlob);
         FixtureCorpus fixtureCorpus = FixtureCorpus.Load(fixturesBytes);
         IReadOnlyList<int> calibrationSeeds = fixtureCorpus.CalibrationSeeds;
@@ -344,98 +336,149 @@ public sealed class EvidenceArtifactTests
                 group.Where(item => !item.Trait.Passed).Select(item => item.Seed).Order().ToArray()))
             .ToArray();
 
-        object report = new
+        // The complete mapping is materialized only after every corpus item and
+        // campaign assertion has completed.  It is not written until all terminal
+        // payloads have also serialized successfully below.
+        byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            schemaVersion = 1,
-            requirementIds = new[] { "R03-05", "R03-06" },
-            automatedStatus = "PASS",
-            qualitativeReviewStatus = "REVIEW_REQUIRED",
-            overallStatus = "REVIEW_REQUIRED",
-            reason = "T03-06 requires independent recognition review; numeric thresholds are a predeclared non-normative alarm only.",
-            commit,
-            tree,
-            configuration,
-            targetFramework = "net10.0",
-            runtime = new { runtimeVersion = Environment.Version.ToString(), os = Environment.OSVersion.VersionString },
-            frozenFixtureCorpus = new
+            schemaVersion = 2,
+            instruction = "Do not open until a completed identification+confidence response copied from blind/T03-06-S-review-form.json has been timestamped and hashed.",
+            runId = Path.GetFileName(output),
+            nonce,
+            attributionCommitments = new
             {
-                calibrationSeeds,
-                holdoutSeeds,
-                fixturesBlob,
-                fixturesSha256 = L03BTestSupport.Sha256(fixturesBytes),
+                path = L03BEvidenceProtocol.CommitmentsArtifactPath,
+                sha256 = L03BTestSupport.Sha256(commitmentsBytes),
             },
-            provisionalMetricPolicy = new
+            entries = blindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
+        }, JsonOptions);
+
+        try
+        {
+            object report = new
             {
-                minimumTargetVariance = MinimumTargetVariance,
-                minimumPairwiseMeanAbsoluteDifference = MinimumPairwiseMeanAbsoluteDifference,
-                minimumCorpusFamilies = MinimumCorpusFamilies,
-                justification = "Signal-presence, pairwise-difference and broad-corpus diversity alarms; none is a normative T03-06 recognition threshold.",
-                declaredBeforeCampaign = true,
-            },
-            t0305 = new
-            {
-                verticalMetrics,
-                impossiblePresets = new[]
+                schemaVersion = 1,
+                requirementIds = new[] { "R03-05", "R03-06" },
+                automatedStatus = "PASS",
+                qualitativeReviewStatus = "REVIEW_REQUIRED",
+                overallStatus = "REVIEW_REQUIRED",
+                reason = "T03-06 requires independent recognition review; numeric thresholds are a predeclared non-normative alarm only.",
+                commit,
+                tree,
+                configuration,
+                targetFramework = "net10.0",
+                runtime = new { runtimeVersion = Environment.Version.ToString(), os = Environment.OSVersion.VersionString },
+                frozenFixtureCorpus = new
+                {
+                    calibrationSeeds,
+                    holdoutSeeds,
+                    fixturesBlob,
+                    fixturesSha256 = L03BTestSupport.Sha256(fixturesBytes),
+                },
+                provisionalMetricPolicy = new
+                {
+                    minimumTargetVariance = MinimumTargetVariance,
+                    minimumPairwiseMeanAbsoluteDifference = MinimumPairwiseMeanAbsoluteDifference,
+                    minimumCorpusFamilies = MinimumCorpusFamilies,
+                    justification = "Signal-presence, pairwise-difference and broad-corpus diversity alarms; none is a normative T03-06 recognition threshold.",
+                    declaredBeforeCampaign = true,
+                },
+                t0305 = new
+                {
+                    verticalMetrics,
+                    impossiblePresets = new[]
                 {
                     new { impossibleBelow.Error.Code, impossibleBelow.Error.Stage, impossibleBelow.Error.Details },
                     new { impossibleAbove.Error.Code, impossibleAbove.Error.Stage, impossibleAbove.Error.Details },
                 },
-                mapping = "piecewise linear, model -1..0 => deepest ocean..sea; 0..1 => sea..highest relief; no output clamp",
-                quantization = "shared HeightQuantizer v1, 1/256 block; non-decreasing after quantization",
-            },
-            t0306 = new
-            {
-                blindReview = new
-                {
-                    maps = blindArtifacts.Where(item => item.Path.EndsWith(".bmp", StringComparison.Ordinal)),
-                    profiles = new
-                    {
-                        path = RelativeArtifactPath(output, profilesPath),
-                        sha256 = L03BTestSupport.Sha256(profileBytes),
-                    },
-                    blindMetrics = new { path = RelativeArtifactPath(output, metricsPath), sha256 = L03BTestSupport.Sha256(metricsBytes) },
-                    viewGeometryAndTransitionMasks = new { path = RelativeArtifactPath(output, viewsPath), sha256 = L03BTestSupport.Sha256(viewsBytes) },
-                    reviewProtocol = new
-                    {
-                        path = RelativeArtifactPath(output, reviewFormPath),
-                        sha256 = L03BTestSupport.Sha256(reviewFormBytes),
-                        requiredPrerevealFields = new[] { "identifiedFamilyBeforeReveal", "confidence0To100BeforeReveal", "morphologyObservations" },
-                    },
-                    separateKey = new
-                    {
-                        path = RelativeArtifactPath(output, keyPath),
-                        sha256 = L03BTestSupport.Sha256(keyBytes),
-                        instruction = "Reviewer must inspect neutral-code artifacts before opening the key.",
-                    },
-                    attributionCommitments = new
-                    {
-                        path = "blind/T03-06-S-attribution-commitments.json",
-                        sha256 = L03BTestSupport.Sha256(commitmentsBytes),
-                        protocol = L03BEvidenceProtocol.FailureAttributionScheme,
-                    },
-                    fixtureMetrics,
+                    mapping = "piecewise linear, model -1..0 => deepest ocean..sea; 0..1 => sea..highest relief; no output clamp",
+                    quantization = "shared HeightQuantizer v1, 1/256 block; non-decreasing after quantization",
                 },
-                progress = new
+                t0306 = new
                 {
-                    path = RelativeArtifactPath(output, progressPath),
-                    sha256 = L03BTestSupport.Sha256(File.ReadAllBytes(progressPath)),
-                    protocol = "atomic seed/stage heartbeat; the terminal corpus report preserves each of the 256 seeds once.",
+                    blindReview = new
+                    {
+                        maps = blindArtifacts.Where(item => item.Path.EndsWith(".bmp", StringComparison.Ordinal)),
+                        profiles = new
+                        {
+                            path = RelativeArtifactPath(output, profilesPath),
+                            sha256 = L03BTestSupport.Sha256(profileBytes),
+                        },
+                        blindMetrics = new { path = RelativeArtifactPath(output, metricsPath), sha256 = L03BTestSupport.Sha256(metricsBytes) },
+                        viewGeometryAndTransitionMasks = new { path = RelativeArtifactPath(output, viewsPath), sha256 = L03BTestSupport.Sha256(viewsBytes) },
+                        reviewProtocol = new
+                        {
+                            path = RelativeArtifactPath(output, reviewFormPath),
+                            sha256 = L03BTestSupport.Sha256(reviewFormBytes),
+                            requiredPrerevealFields = new[] { "identifiedFamilyBeforeReveal", "confidence0To100BeforeReveal", "morphologyObservations" },
+                        },
+                        separateKey = new
+                        {
+                            path = RelativeArtifactPath(output, keyPath),
+                            sha256 = L03BTestSupport.Sha256(keyBytes),
+                            instruction = "Reviewer must inspect neutral-code artifacts before opening the key.",
+                        },
+                        attributionCommitments = new
+                        {
+                            path = "blind/T03-06-S-attribution-commitments.json",
+                            sha256 = L03BTestSupport.Sha256(commitmentsBytes),
+                            protocol = L03BEvidenceProtocol.FailureAttributionScheme,
+                        },
+                        fixtureMetrics,
+                    },
+                    progress = new
+                    {
+                        path = RelativeArtifactPath(output, progressPath),
+                        sha256 = L03BTestSupport.Sha256(File.ReadAllBytes(progressPath)),
+                        protocol = "atomic seed/stage heartbeat; the terminal corpus report preserves each of the 256 seeds once.",
+                    },
+                    measures = "pure-owner samples only: mean, variance, slope, multi-scale roughness, residual energy after planar detrend, eight-neighbor extrema at a documented contrast fraction, line/column/diagonal jumps, directional balance and saturation; descriptive only, not T03-06 thresholds",
+                    grayscale = new { minimum = -1d, maximum = 1d, mapping = "common linear grayscale shared by every S view" },
+                    unfilteredCorpus = corpus,
+                    corpusFamilyCount,
+                    traitFailureRates,
+                    traitEvaluationStatus = traitFailureRates.All(item => item.Failures == 0) ? "ALL_PASSED" : "OBSERVED_FAILURES_RETAINED",
+                    traitPolicy = "Every measured family/seed retains each individual outcome. Rates are failures/attempts; no median or percentile decides a trait.",
+                    sealedFixtures,
                 },
-                measures = "pure-owner samples only: mean, variance, slope, multi-scale roughness, residual energy after planar detrend, eight-neighbor extrema at a documented contrast fraction, line/column/diagonal jumps, directional balance and saturation; descriptive only, not T03-06 thresholds",
-                grayscale = new { minimum = -1d, maximum = 1d, mapping = "common linear grayscale shared by every S view" },
-                unfilteredCorpus = corpus,
-                corpusFamilyCount,
-                traitFailureRates,
-                traitEvaluationStatus = traitFailureRates.All(item => item.Failures == 0) ? "ALL_PASSED" : "OBSERVED_FAILURES_RETAINED",
-                traitPolicy = "Every measured family/seed retains each individual outcome. Rates are failures/attempts; no median or percentile decides a trait.",
-                sealedFixtures,
-            },
-        };
+            };
 
-        // PASS is the last atomic write, after every assertion and every referenced artifact.
-        WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(report, JsonOptions));
-        WriteBlindManifest(manifestPath, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash,
-            automatedStatus: "PASS", qualitativeReviewStatus: "REVIEW_REQUIRED", overallStatus: "REVIEW_REQUIRED", blindArtifacts);
+            byte[] reportBytes = JsonSerializer.SerializeToUtf8Bytes(report, JsonOptions);
+            byte[] blindManifestBytes = L03BEvidenceProtocol.CreateBlindManifest(
+                L03BEvidenceProtocol.ManifestSchemaVersion,
+                "PASS",
+                "REVIEW_REQUIRED",
+                "REVIEW_REQUIRED",
+                commit,
+                tree,
+                fixturesBlob,
+                configuration,
+                testAssemblyHash,
+                coreAssemblyHash,
+                blindArtifacts);
+            byte[] successMarkerBytes = L03BEvidenceProtocol.CreateSuccessMarker(
+                Path.GetFileName(output),
+                commit,
+                tree,
+                fixturesBlob,
+                testAssemblyHash,
+                coreAssemblyHash,
+                L03BTestSupport.Sha256(reportBytes),
+                L03BTestSupport.Sha256(blindManifestBytes),
+                L03BTestSupport.Sha256(keyBytes),
+                L03BTestSupport.Sha256(commitmentsBytes));
+            WriteAtomic(reportPath, reportBytes);
+            WriteAtomic(manifestPath, blindManifestBytes);
+            WriteAtomic(successMarkerPath, successMarkerBytes);
+            // The complete key is the last fallible campaign operation.  The
+            // runner accepts it only after a clean test exit, a complete PASS TRX,
+            // and verification of the earlier marker's exact artifact hashes.
+            WriteAtomic(keyPath, keyBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(keyBytes);
+        }
     }
 
     private static VerticalMetric VerticalMetricFor(string profileId)
@@ -1034,6 +1077,23 @@ public sealed class EvidenceArtifactTests
         finally
         {
             if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
+    private static void TryDeleteSensitiveArtifact(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // The runner never copies this path into a failure publication and
+            // destroys the entire source staging directory in its finally block.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Same structural containment as the IOException path above.
         }
     }
 

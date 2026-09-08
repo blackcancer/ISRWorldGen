@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -154,6 +155,185 @@ public sealed class EvidenceProtocolTests
     }
 
     [TestMethod]
+    public void SuccessMarkerBindsTheCompletedArtifactsWithoutContainingTheReviewSecret()
+    {
+        string reportHash = new('1', 64);
+        string manifestHash = new('2', 64);
+        string reviewKeyHash = new('3', 64);
+        string commitmentsHash = new('4', 64);
+        byte[] marker = L03BEvidenceProtocol.CreateSuccessMarker(
+            RunId, Commit, Tree, FixturesBlob, TestHash, CoreHash,
+            reportHash, manifestHash, reviewKeyHash, commitmentsHash);
+
+        L03BEvidenceProtocol.VerifySuccessMarker(
+            marker, RunId, Commit, Tree, FixturesBlob, TestHash, CoreHash,
+            reportHash, manifestHash, reviewKeyHash, commitmentsHash);
+        string markerText = Encoding.UTF8.GetString(marker);
+        StringAssert.Contains(markerText, "\"status\": \"COMPLETE\"");
+        Assert.IsFalse(markerText.Contains(Nonce, StringComparison.Ordinal));
+        Assert.IsFalse(Enum.GetNames<LandscapeFamily>()
+            .Any(name => markerText.Contains(name, StringComparison.Ordinal)));
+
+        JsonObject changedKey = JsonNode.Parse(marker)!.AsObject();
+        changedKey["reviewKeySha256"] = new string('5', 64);
+        Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceProtocol.VerifySuccessMarker(
+            JsonSerializer.SerializeToUtf8Bytes(changedKey), RunId, Commit, Tree, FixturesBlob,
+            TestHash, CoreHash, reportHash, manifestHash, reviewKeyHash, commitmentsHash));
+        Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceProtocol.VerifySuccessMarker(
+            marker, RunId + "-other", Commit, Tree, FixturesBlob, TestHash, CoreHash,
+            reportHash, manifestHash, reviewKeyHash, commitmentsHash));
+    }
+
+    [TestMethod]
+    public void FailurePublicationAllowlistDropsPostKeyAndInterruptedPartialState()
+    {
+        string[] postKeyCandidateState =
+        [
+            L03BEvidenceProtocol.CommitmentsArtifactPath,
+            L03BEvidenceProtocol.FailureAttributionArtifactPath,
+            L03BEvidenceProtocol.TrxArtifactPath,
+            "sealed/T03-06-S-review-key.json",
+            L03BEvidenceProtocol.SuccessMarkerArtifactPath,
+            "sealed/T03-05-06-S.json",
+            "blind/T03-06-S-manifest.json",
+            "sealed/T03-06-S-progress.json",
+            "blind/T03-06-S05.bmp",
+        ];
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                L03BEvidenceProtocol.CommitmentsArtifactPath,
+                L03BEvidenceProtocol.FailureAttributionArtifactPath,
+                L03BEvidenceProtocol.TrxArtifactPath,
+            },
+            L03BEvidenceProtocol.SelectCompletedFailureArtifacts(postKeyCandidateState).ToArray(),
+            "A failure publication must never reuse the complete key, success marker, RUNNING/PASS report, manifest, progress, or maps.");
+
+        string[] logicalTimeoutState =
+        [
+            L03BEvidenceProtocol.CommitmentsArtifactPath,
+            "sealed/T03-05-06-S.trx.partial",
+            "sealed/T03-05-06-S.json",
+            "blind/T03-06-S-manifest.json",
+            "sealed/T03-06-S-review-key.json",
+        ];
+        CollectionAssert.AreEqual(
+            new[] { L03BEvidenceProtocol.CommitmentsArtifactPath },
+            L03BEvidenceProtocol.SelectCompletedFailureArtifacts(logicalTimeoutState).ToArray(),
+            "A logical interruption with an incomplete TRX retains only the already-atomic neutral commitments.");
+    }
+
+    [TestMethod]
+    public void ReviewKeyIsWrittenOnceAndOnlyAfterTheCompleteMarker()
+    {
+        string evidenceSource = File.ReadAllText(Path.Combine(L03BTestSupport.FindRepositoryRoot(),
+            "testsrc", "WorldGen.Tests", "L03B", "EvidenceArtifactTests.cs"));
+        int corpusComplete = evidenceSource.IndexOf("Assert.HasCount(256, corpus)", StringComparison.Ordinal);
+        int keyMaterialized = evidenceSource.IndexOf("byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes", StringComparison.Ordinal);
+        int markerWritten = evidenceSource.IndexOf("WriteAtomic(successMarkerPath, successMarkerBytes)", StringComparison.Ordinal);
+        const string keyWrite = "WriteAtomic(keyPath, keyBytes)";
+        int keyWritten = evidenceSource.IndexOf(keyWrite, StringComparison.Ordinal);
+
+        Assert.IsTrue(corpusComplete >= 0 && keyMaterialized > corpusComplete && markerWritten > keyMaterialized && keyWritten > markerWritten,
+            "Corpus assertions and COMPLETE marker must precede the only complete review-key write.");
+        Assert.AreEqual(keyWritten, evidenceSource.LastIndexOf(keyWrite, StringComparison.Ordinal),
+            "No early or alternate review-key write is permitted.");
+        StringAssert.Contains(evidenceSource, "TryDeleteSensitiveArtifact(keyPath)");
+        StringAssert.Contains(evidenceSource, "CryptographicOperations.ZeroMemory(keyBytes)");
+    }
+
+    [TestMethod]
+    public void FailurePublisherReconcilesPostKeyTimeoutWithoutLeakingPartialOrSecretFiles()
+    {
+        string repository = L03BTestSupport.FindRepositoryRoot();
+        string runnerPath = Path.Combine(repository, "testsrc", "WorldGen.Tests", "L03B", "Run-L03BEvidenceS.ps1");
+        string runner = File.ReadAllText(runnerPath);
+        int functionsStart = runner.IndexOf("function Get-EvidenceSha256", StringComparison.Ordinal);
+        int functionsEnd = runner.IndexOf("[void][IO.Directory]::CreateDirectory($localRoot)", functionsStart, StringComparison.Ordinal);
+        Assert.IsTrue(functionsStart >= 0 && functionsEnd > functionsStart);
+
+        string temporaryRoot = Path.Combine(Path.GetTempPath(), "isr-l03b-failure-protocol-" + Guid.NewGuid().ToString("N"));
+        string staging = Path.Combine(temporaryRoot, RunId);
+        string failurePublishing = Path.Combine(temporaryRoot, "failure-publishing");
+        string failureTerminal = Path.Combine(temporaryRoot, "failure-terminal");
+        string trxStaging = Path.Combine(temporaryRoot, "trx-staging");
+        const string secretSentinel = "complete-review-key-secret-sentinel";
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(staging, "blind"));
+            Directory.CreateDirectory(Path.Combine(staging, "sealed"));
+            Directory.CreateDirectory(trxStaging);
+            File.WriteAllBytes(Path.Combine(staging, L03BEvidenceProtocol.CommitmentsArtifactPath.Replace('/', Path.DirectorySeparatorChar)),
+                Commitments(RunId, Nonce));
+            File.WriteAllText(Path.Combine(staging, "sealed", "T03-06-S-review-key.json"), secretSentinel);
+            File.WriteAllText(Path.Combine(staging, L03BEvidenceProtocol.SuccessMarkerArtifactPath.Replace('/', Path.DirectorySeparatorChar)), "{\"status\":\"COMPLETE\"}");
+            File.WriteAllText(Path.Combine(staging, "sealed", "T03-05-06-S.json"), "{\"overallStatus\":\"RUNNING\"}");
+            File.WriteAllText(Path.Combine(staging, "blind", "T03-06-S-manifest.json"), "{\"overallStatus\":\"RUNNING\"}");
+            File.WriteAllText(Path.Combine(staging, "blind", "T03-06-S05.bmp"), "partial-map");
+            File.WriteAllText(Path.Combine(trxStaging, "T03-05-06-S.trx"),
+                "<TestRun><ResultSummary><Counters total=\"1\" executed=\"0\" passed=\"0\" failed=\"0\" /></ResultSummary>");
+
+            string functionText = runner[functionsStart..functionsEnd];
+            string harnessPath = Path.Combine(temporaryRoot, "failure-harness.ps1");
+            string harness = "$ErrorActionPreference = 'Stop'\n" + functionText + "\n" +
+                "function Assert-Provenance { param([string]$ExpectedHead, [string]$ExpectedTree); return [pscustomobject]@{ Head=$ExpectedHead; Tree=$ExpectedTree } }\n" +
+                "$base = $env:ISR_L03B_PROTOCOL_TEST_ROOT\n" +
+                "$published = Publish-EvidenceFailure -StagingPath (Join-Path $base '" + RunId + "') " +
+                "-FailureStagingPath (Join-Path $base 'failure-publishing') -FailureTerminalPath (Join-Path $base 'failure-terminal') " +
+                "-TrxStagingPath (Join-Path $base 'trx-staging') -TrxName 'T03-05-06-S.trx' " +
+                "-Head '" + Commit + "' -Tree '" + Tree + "' -FixturesBlob '" + FixturesBlob + "' " +
+                "-TestAssemblyHash '" + TestHash + "' -CoreAssemblyHash '" + CoreHash + "'\n" +
+                "if (-not $published) { throw 'Failure terminal was not published.' }\n";
+            File.WriteAllText(harnessPath, harness, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo("pwsh")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                },
+            };
+            process.StartInfo.ArgumentList.Add("-NoProfile");
+            process.StartInfo.ArgumentList.Add("-NonInteractive");
+            process.StartInfo.ArgumentList.Add("-File");
+            process.StartInfo.ArgumentList.Add(harnessPath);
+            process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_ROOT"] = temporaryRoot;
+            process.Start();
+            string stdout = process.StandardOutput.ReadToEnd();
+            string stderr = process.StandardError.ReadToEnd();
+            Assert.IsTrue(process.WaitForExit(15_000), "Failure-publisher harness timed out.");
+            Assert.AreEqual(0, process.ExitCode, $"Failure-publisher harness failed. stdout=[{stdout}] stderr=[{stderr}]");
+
+            string[] published = Directory.GetFiles(failureTerminal, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(failureTerminal, path).Replace('\\', '/'))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            CollectionAssert.AreEqual(new[]
+            {
+                "blind/T03-06-S-attribution-commitments.json",
+                "blind/T03-06-S-manifest.json",
+                "sealed/T03-05-06-S-manifest.json",
+                "sealed/T03-05-06-S.json",
+            }, published);
+            string terminalText = string.Join('\n', published.Select(path => File.ReadAllText(Path.Combine(failureTerminal, path.Replace('/', Path.DirectorySeparatorChar)))));
+            Assert.IsFalse(terminalText.Contains(secretSentinel, StringComparison.Ordinal));
+            Assert.IsFalse(terminalText.Contains("\"overallStatus\": \"RUNNING\"", StringComparison.Ordinal));
+            Assert.IsFalse(terminalText.Contains("\"overallStatus\":\"RUNNING\"", StringComparison.Ordinal));
+            Assert.IsFalse(published.Contains(L03BEvidenceProtocol.TrxArtifactPath, StringComparer.Ordinal),
+                "A parseable but incomplete timeout TRX must not be published.");
+            Assert.IsTrue(File.Exists(Path.Combine(staging, "sealed", "T03-06-S-review-key.json")),
+                "The publisher must reconstruct from an allowlist, not move or mutate source staging before runner cleanup.");
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void RunnerTextKeepsTheExclusivePreflightAndSealedTrxProtocol()
     {
         string script = File.ReadAllText(Path.Combine(L03BTestSupport.FindRepositoryRoot(),
@@ -171,8 +351,24 @@ public sealed class EvidenceProtocolTests
         StringAssert.Contains(script, "Publish-EvidenceFailure");
         StringAssert.Contains(script, "evidence-s-failure-$head-");
         StringAssert.Contains(script, "T03-06-S-failure-attribution.json");
+        StringAssert.Contains(script, "Assert-EvidenceSuccessMarker");
+        StringAssert.Contains(script, "Test-CompletedEvidenceTrx -Path $_");
+        StringAssert.Contains(script, "$failureStagingPath = \"$failureTerminalPath-publishing\"");
         StringAssert.Contains(script, "[IO.FileOptions]::DeleteOnClose");
         Assert.IsFalse(script.Contains("[string]$Nonce", StringComparison.Ordinal));
+
+        int failureStart = script.IndexOf("function Publish-EvidenceFailure", StringComparison.Ordinal);
+        int runnerStart = script.IndexOf("[void][IO.Directory]::CreateDirectory($localRoot)", failureStart, StringComparison.Ordinal);
+        Assert.IsTrue(failureStart >= 0 && runnerStart > failureStart);
+        string failurePublisher = script[failureStart..runnerStart];
+        StringAssert.Contains(failurePublisher, "$commitmentsRelativePath");
+        StringAssert.Contains(failurePublisher, "$attributionRelativePath");
+        StringAssert.Contains(failurePublisher, "$trxRelativePath");
+        StringAssert.Contains(failurePublisher, "$FailureStagingPath");
+        Assert.IsFalse(failurePublisher.Contains("review-key", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(failurePublisher.Contains("success.json", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(failurePublisher.Contains("Get-ChildItem", StringComparison.Ordinal));
+        Assert.IsFalse(failurePublisher.Contains("Move-Item -LiteralPath $StagingPath", StringComparison.Ordinal));
     }
 
     private static byte[] Commitments(string runId, string nonce) =>

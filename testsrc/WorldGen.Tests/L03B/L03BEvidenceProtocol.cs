@@ -15,7 +15,13 @@ internal static class L03BEvidenceProtocol
     internal const int ManifestSchemaVersion = 1;
     internal const string BlindSignatureScheme = "sha256-canonical-json-v1";
     internal const string FailureAttributionScheme = "sha256-run-bound-selective-opening-v1";
+    internal const string CommitmentsArtifactPath = "blind/T03-06-S-attribution-commitments.json";
+    internal const string FailureAttributionArtifactPath = "sealed/T03-06-S-failure-attribution.json";
+    internal const string TrxArtifactPath = "sealed/T03-05-06-S.trx";
+    internal const string SuccessMarkerArtifactPath = "sealed/T03-06-S-success.json";
     private static readonly string[] ExpectedNeutralCodes = ["S01", "S02", "S03", "S04", "S05", "S06"];
+    private static readonly string[] FailureSourceAllowlist =
+        [CommitmentsArtifactPath, FailureAttributionArtifactPath, TrxArtifactPath];
 
     private static readonly JsonSerializerOptions CanonicalJsonOptions = new()
     {
@@ -253,6 +259,69 @@ internal static class L03BEvidenceProtocol
         return family;
     }
 
+    internal static IReadOnlyList<string> SelectCompletedFailureArtifacts(IEnumerable<string> completedRelativePaths)
+    {
+        ArgumentNullException.ThrowIfNull(completedRelativePaths);
+        var completed = new HashSet<string>(completedRelativePaths, StringComparer.Ordinal);
+        return FailureSourceAllowlist.Where(completed.Contains).ToArray();
+    }
+
+    internal static byte[] CreateSuccessMarker(
+        string runId,
+        string commit,
+        string tree,
+        string fixturesBlob,
+        string testAssemblyHash,
+        string coreAssemblyHash,
+        string reportHash,
+        string blindManifestHash,
+        string reviewKeyHash,
+        string commitmentsHash)
+    {
+        var marker = new SuccessMarker(
+            1,
+            "COMPLETE",
+            runId,
+            commit,
+            tree,
+            fixturesBlob,
+            "Release",
+            testAssemblyHash,
+            coreAssemblyHash,
+            reportHash,
+            blindManifestHash,
+            reviewKeyHash,
+            commitmentsHash);
+        ValidateSuccessMarkerFields(marker);
+        return JsonSerializer.SerializeToUtf8Bytes(marker, ManifestJsonOptions);
+    }
+
+    internal static void VerifySuccessMarker(
+        byte[] markerBytes,
+        string runId,
+        string commit,
+        string tree,
+        string fixturesBlob,
+        string testAssemblyHash,
+        string coreAssemblyHash,
+        string reportHash,
+        string blindManifestHash,
+        string reviewKeyHash,
+        string commitmentsHash)
+    {
+        ArgumentNullException.ThrowIfNull(markerBytes);
+        SuccessMarker marker = JsonSerializer.Deserialize<SuccessMarker>(markerBytes, ManifestJsonOptions) ??
+            throw new InvalidDataException("Evidence success marker is empty.");
+        ValidateSuccessMarkerFields(marker);
+        SuccessMarker expected = new(
+            1, "COMPLETE", runId, commit, tree, fixturesBlob, "Release", testAssemblyHash, coreAssemblyHash,
+            reportHash, blindManifestHash, reviewKeyHash, commitmentsHash);
+        if (marker != expected)
+        {
+            throw new InvalidDataException("Evidence success marker does not bind the exact completed run artifacts.");
+        }
+    }
+
     internal static byte[] CreateBlindReviewForm(IReadOnlyList<string> codes)
     {
         ArgumentNullException.ThrowIfNull(codes);
@@ -386,6 +455,24 @@ internal static class L03BEvidenceProtocol
         IsLowerHex(binding.Commit, 40) && IsLowerHex(binding.Tree, 40) && IsLowerHex(binding.FixturesBlob, 40) &&
         binding.Configuration == "Release" && IsLowerHex(binding.TestAssemblySha256, 64) &&
         IsLowerHex(binding.CoreAssemblySha256, 64);
+
+    private static void ValidateSuccessMarkerFields(SuccessMarker marker)
+    {
+        var binding = new AttributionBinding(
+            marker.RunId,
+            marker.Commit,
+            marker.Tree,
+            marker.FixturesBlob,
+            marker.Configuration,
+            marker.TestAssemblySha256,
+            marker.CoreAssemblySha256);
+        if (marker.SchemaVersion != 1 || marker.Status != "COMPLETE" || !IsValidBinding(binding) ||
+            !IsLowerHex(marker.ReportSha256, 64) || !IsLowerHex(marker.BlindManifestSha256, 64) ||
+            !IsLowerHex(marker.ReviewKeySha256, 64) || !IsLowerHex(marker.CommitmentsSha256, 64))
+        {
+            throw new InvalidDataException("Evidence success marker is malformed.");
+        }
+    }
 
     private static bool IsLowerHex(string? value, int length) => value is not null && value.Length == length &&
         value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
@@ -521,4 +608,19 @@ internal static class L03BEvidenceProtocol
         string RevealedFamily,
         string Opening,
         string VerificationInstruction);
+
+    private sealed record SuccessMarker(
+        int SchemaVersion,
+        string Status,
+        string RunId,
+        string Commit,
+        string Tree,
+        string FixturesBlob,
+        string Configuration,
+        string TestAssemblySha256,
+        string CoreAssemblySha256,
+        string ReportSha256,
+        string BlindManifestSha256,
+        string ReviewKeySha256,
+        string CommitmentsSha256);
 }

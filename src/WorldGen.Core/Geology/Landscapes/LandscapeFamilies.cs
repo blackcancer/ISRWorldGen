@@ -185,9 +185,15 @@ public static class LandscapeSignatureSampler
         double gentleDrainage = Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 52) - .5;
         double fine = Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 53) - .5;
         double rollingRelief = (p.MacroWeight * .38d * broad) + (p.MesoWeight * .20d * gentleDrainage) + (p.DetailWeight * .10d * fine);
-        // tanh is smooth and bounded.  The catalog maximum is strictly below one:
-        // .90 + .60 * (.64*.38/2 + .26*.20/2 + .10*.10/2) = .99156.
-        return (.90d * Math.Tanh(regional.U)) + (.60d * rollingRelief);
+        // Every noise term is in [-.5,.5].  Allocate at most .099 of the
+        // normalized envelope to their weighted sum, for every valid profile,
+        // rather than relying on the catalog weights.  The catalog keeps its
+        // established .60 scale exactly; a macro-only profile uses .099/.19.
+        double rollingReliefBound = .5d * ((p.MacroWeight * .38d) + (p.MesoWeight * .20d) + (p.DetailWeight * .10d));
+        double rollingReliefScale = Math.Min(.60d, .099d / rollingReliefBound);
+        // Math.Tanh may round to +/-1 at large finite coordinates, so the
+        // analytic absolute bound is .90 + .099 = .999, without output clamp.
+        return (.90d * Math.Tanh(regional.U)) + (rollingReliefScale * rollingRelief);
     }
 
     private static double Volcanoes(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)

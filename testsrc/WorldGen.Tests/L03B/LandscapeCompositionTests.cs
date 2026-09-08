@@ -332,6 +332,53 @@ public sealed class LandscapeCompositionTests
     }
 
     [TestMethod]
+    public void PlainRollingReliefIsBoundedForEveryValidWeightAndClosesTheLegacyMacroOnlyOvershoot()
+    {
+        LandscapeFamilyProfile macroOnly = new(LandscapeFamily.Plains, 3, 2, 1, .2, 1, 0, 0);
+        const int seed = 73;
+        const ulong streamOrdinal = 11;
+        const long anchorX = 19;
+        const long anchorZ = -23;
+        StableId stableId = StableId.Derive(RandomDomain.Geology, StableId.Zero, streamOrdinal);
+        MethodInfo localMethod = typeof(LandscapeSignatureSampler).GetMethod("Local", BindingFlags.NonPublic | BindingFlags.Static)!;
+        MethodInfo regionalMethod = typeof(LandscapeSignatureSampler).GetMethod("OrientedLocal", BindingFlags.NonPublic | BindingFlags.Static)!;
+        MethodInfo noiseMethod = typeof(LandscapeSignatureSampler).GetMethod("Noise", BindingFlags.NonPublic | BindingFlags.Static)!;
+        // These anchors deliberately differ from every sampled coordinate.  The
+        // older anchorX=x/anchorZ=z probe forced regional.U to zero and therefore
+        // could not exercise the broad tanh term that caused the overshoot.
+        const double offenderX = 191;
+        const double offenderZ = 1_757;
+        double relativeX = offenderX - anchorX;
+        double relativeZ = offenderZ - anchorZ;
+        (double U, double V) q = ((double U, double V))localMethod.Invoke(
+            null, [relativeX, relativeZ, seed, stableId, 50UL, macroOnly.MacroWavelengthBlocks])!;
+        (double U, double V) regional = ((double U, double V))regionalMethod.Invoke(
+            null, [relativeX, relativeZ, seed, stableId, 54UL, macroOnly.MacroWavelengthBlocks])!;
+        double broad = (double)noiseMethod.Invoke(null, [q.U * 1.3d, q.V * 1.3d, seed, stableId, 51UL])! - .5d;
+        double legacy = (.90d * Math.Tanh(regional.U)) + (.60d * .38d * broad);
+        Assert.IsTrue(legacy is > 1.0137d and < 1.014d,
+            $"The non-degenerate probe must reproduce the former Plains overshoot; old={legacy:R}.");
+        double corrected = LandscapeSignatureSampler.Sample(
+            macroOnly, offenderX, offenderZ, seed, streamOrdinal, anchorX, anchorZ);
+        Assert.IsTrue(corrected is > -1 and < 1,
+            $"The former overshoot coordinate must now remain strictly bounded; old={legacy:R}, new={corrected:R}.");
+
+        foreach ((double macro, double meso, double detail) in new[]
+        {
+            (1d, 0d, 0d),
+            (0d, 1d, 0d),
+            (0d, 0d, 1d),
+            (.64d, .26d, .10d),
+        })
+        {
+            double noiseBound = .5d * ((macro * .38d) + (meso * .20d) + (detail * .10d));
+            double scale = Math.Min(.60d, .099d / noiseBound);
+            Assert.IsLessThan(1d, .90d + (scale * noiseBound),
+                $"The formal Plains envelope must hold for valid weights {(macro, meso, detail)}.");
+        }
+    }
+
+    [TestMethod]
     public void RegionalCoreIsPureAndTheOnlyResidualMixIsTheExplicitC1Band()
     {
         FrozenScaleProfile profile = L03BTestSupport.FrozenProfile("laboratory");
