@@ -26,6 +26,14 @@ function Assert-Calls([string]$type, [string]$methodName, [string]$target) {
 Assert-Calls 'Vintagestory.Client.GuiCompositeMainMenuLeft' 'OnSingleplayer' 'ScreenManager::LoadAndCacheScreen'
 Assert-Calls 'Vintagestory.Client.GuiScreenSingleplayer' 'OnClickCellLeft' 'ScreenManager::ConnectToSingleplayer'
 Assert-Calls 'Vintagestory.Client.ScreenManager' 'ConnectToSingleplayer' 'ScreenManager::StartGame'
+$newWorld = $module.GetType('Vintagestory.Client.GuiScreenSingleplayerNewWorld')
+$createWorld = $newWorld.Methods | Where-Object Name -eq 'CreateWorld' | Select-Object -First 1
+if ($null -eq $createWorld) { throw 'Audited native CreateWorld is absent.' }
+foreach ($fieldName in @('AllowCreativeMode', 'PlayStyle', 'PlayStyleLangCode', 'WorldType', 'WorldName', 'WorldConfiguration', 'SaveFileLocation', 'Seed', 'MapSizeY', 'CreatedByPlayerName', 'DisabledMods', 'Language', 'ClientModPaths')) {
+    if (-not ($createWorld.Body.Instructions | Where-Object { $_.OpCode.Code -eq [Mono.Cecil.Cil.Code]::Stfld -and $_.Operand -is [Mono.Cecil.FieldReference] -and $_.Operand.FullName.Contains("Vintagestory.Common.StartServerArgs::$fieldName") })) {
+        throw "Audited native CreateWorld no longer writes StartServerArgs.$fieldName."
+    }
+}
 function Assert-FieldRid([string]$type, [string]$fieldName, [int]$rid, [string]$fieldType, [bool]$isPublic) {
     $field = $module.GetType($type).Fields | Where-Object Name -eq $fieldName | Select-Object -First 1
     if ($null -eq $field -or (($field.MetadataToken.ToInt32() -band 0x00ffffff) -ne $rid) -or $field.FieldType.FullName -ne $fieldType -or $field.IsPublic -ne $isPublic -or $field.IsStatic) {
@@ -53,6 +61,20 @@ if (Select-String -LiteralPath $hostPath -Pattern 'Regex|System\.Text\.Json|Newt
 if (Select-String -LiteralPath $hostPath -SimpleMatch 'char.IsWhiteSpace' -Quiet) { throw 'Strict JSON parser must not accept non-JSON whitespace.' }
 foreach ($required in @('internal sealed class L00CFixtureBootstrap', 'CreateFixtureWorld', 'StartServerArgs', 'ConnectToSingleplayer', 'ReadUniqueSaveCell', 'GuiScreenSingleplayer.entries', 'ClientCellBindingConfirmed', 'FileMode.CreateNew', 'WaitPrimaryMenu', 'WaitSecondaryCell', 'L00CMenuActionLaboratoryHost.Open')) { if (-not (Select-String -LiteralPath @($bootstrapPath, $driverPath) -SimpleMatch $required -Quiet)) { throw "Missing bootstrap contract: $required" } }
 if (Select-String -LiteralPath $bootstrapPath -Pattern 'OnClickCellLeft|ClientSaveCellIndex\s*=\s*[0-9]' -Quiet) { throw 'Bootstrap must bind a cell from GuiScreenSingleplayer observations only.' }
+# Regression oracle for the native fixture creation fault: null WorldConfiguration
+# crashes SaveGame.SetNewWorldConfig.  The helper must mirror every audited native
+# field, retain JsonObject.Token and refuse a pre-LevelFinalize client allocation.
+foreach ($required in @('PlayStyleLangCode', 'preset-surviveandbuild', 'CreatedByPlayerName', 'DisabledMods', 'ClientModPaths', 'get_ModPaths', 'get_DisabledMods', 'get_PlayerName', 'JObject.Parse', 'worldWidth', 'worldLength', 'isrworldgenProfileId', 'JsonObject did not retain its Jworldconfig token', 'TryFindFinalizedNewWorldSession', 'clientPlayingFired', 'BlocksReceivedAndLoaded', 'DoneBlockAndItemShapeLoading', 'serverargs', 'expectedSavePath')) {
+    if (-not (Select-String -LiteralPath $driverPath -SimpleMatch $required -Quiet)) { throw "Missing native StartServerArgs/readiness contract: $required" }
+}
+foreach ($required in @('StableFinalizedNewWorld', 'TryFindFinalizedNewWorldSession(screenManager, fixture.SavePath', 'primary-created-returned', 'secondary-created-returned')) {
+    if (-not (Select-String -LiteralPath $bootstrapPath -SimpleMatch $required -Quiet)) { throw "Missing finalized fixture bootstrap contract: $required" }
+}
+if (Select-String -LiteralPath $bootstrapPath -SimpleMatch 'StableSession(' -Quiet) { throw 'Bootstrap must not return from a merely allocated client session.' }
+$waitPrimary = $bootstrapText = Get-Content -LiteralPath $bootstrapPath -Raw
+$primaryReturn = $waitPrimary.IndexOf('L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("primary-created-returned"', [StringComparison]::Ordinal)
+$primaryReady = $waitPrimary.IndexOf('if (!StableFinalizedNewWorld(screenManager, primary, out object? main)) return false;', [StringComparison]::Ordinal)
+if ($primaryReady -lt 0 -or $primaryReturn -lt 0 -or $primaryReady -ge $primaryReturn) { throw 'Primary fixture may return before finalized native readiness.' }
 
 $behaviorAssembly = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N') + '.dll')
 $behaviorRoot = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N'))

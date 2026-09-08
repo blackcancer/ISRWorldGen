@@ -47,7 +47,7 @@ internal sealed class L00CFixtureBootstrap
                 if (!StableMenu(screenManager)) return false;
                 Create(screenManager, primary); state = State.WaitPrimaryWorld; return false;
             case State.WaitPrimaryWorld:
-                if (!StableSession(screenManager, out object? main)) return false;
+                if (!StableFinalizedNewWorld(screenManager, primary, out object? main)) return false;
                 L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("primary-created-returned", primary, "return-main-menu"); state = State.WaitPrimaryCell; return false;
             case State.WaitPrimaryCell:
                 if (!TryBind(screenManager, primary)) return false;
@@ -56,7 +56,7 @@ internal sealed class L00CFixtureBootstrap
                 if (!StableMenu(screenManager)) return false;
                 Create(screenManager, secondary); state = State.WaitSecondaryWorld; return false;
             case State.WaitSecondaryWorld:
-                if (!StableSession(screenManager, out main)) return false;
+                if (!StableFinalizedNewWorld(screenManager, secondary, out main)) return false;
                 L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("secondary-created-returned", secondary, "return-main-menu"); state = State.WaitSecondaryCell; return false;
             case State.WaitSecondaryCell:
                 if (!TryBind(screenManager, secondary)) return false;
@@ -78,9 +78,16 @@ internal sealed class L00CFixtureBootstrap
         if (!L00CMenuActionDriver.TryFindMenuLeft(screenManager, out object? menu) || menu is null) { stableTicks = 0; return false; }
         return ++stableTicks >= 3 && ResetStable();
     }
-    private bool StableSession(object screenManager, out object? main)
+    private bool StableFinalizedNewWorld(object screenManager, Fixture fixture, out object? main)
     {
-        if (!L00CMenuActionDriver.TryFindClientSession(screenManager, out main, out _) || main is null) { stableTicks = 0; return false; }
+        // `clientPlayingFired` is the audited client-side LevelFinalize gate;
+        // the helper also requires all native ready flags and the exact local
+        // StartServerArgs path before it can issue the first return action.
+        if (!L00CMenuActionDriver.TryFindFinalizedNewWorldSession(screenManager, fixture.SavePath, out main) || main is null)
+        {
+            stableTicks = 0;
+            return false;
+        }
         return ++stableTicks >= 3 && ResetStable();
     }
     private bool TryBind(object screenManager, Fixture fixture)

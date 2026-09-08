@@ -3,6 +3,8 @@
 // profile, or synthesizes UI input. Invoke it only from a VS debugger session.
 #nullable enable
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -82,6 +84,39 @@ internal static class L00CMenuActionDriver
             new[] { RequireStartServerArgsType() });
         object args = CreateStartServerArgs(role, savePath);
         return Invoke(screenManager, "ConnectToSingleplayer", new[] { args }, "create-" + role + "-world", false);
+    }
+
+    /// <summary>
+    /// Refuses to leave a just-created single-player world until the native client
+    /// has consumed its LevelFinalize path and the running screen still owns the
+    /// exact new-world arguments.  A merely allocated ClientMain is not readiness.
+    /// </summary>
+    internal static bool TryFindFinalizedNewWorldSession(object screenManager, string expectedSavePath, out object? clientMain)
+    {
+        clientMain = null;
+        if (string.IsNullOrWhiteSpace(expectedSavePath)) throw new ArgumentException("L00-C expected save path is required.", nameof(expectedSavePath));
+        if (!TryFindClientSession(screenManager, out object? main, out _) || main is null) return false;
+        Assembly lib = FindLoadedLib(); RequireAuditedLibrary(lib);
+        Type mainType = RequireType(lib, "Vintagestory.Client.NoObf.ClientMain");
+        Type runningType = RequireType(lib, "Vintagestory.Client.GuiScreenRunningGame");
+        Type argsType = RequireStartServerArgsType();
+        if (!mainType.IsInstanceOfType(main)) throw new InvalidOperationException("L00-C bootstrap refused: client session main drifted.");
+        foreach ((string name, int token) in new[] {
+            ("clientPlayingFired", 0x11f2), ("Spawned", 0x1203), ("AssetsReceived", 0x11fc),
+            ("BlocksReceivedAndLoaded", 0x11fb), ("DoneColorMaps", 0x11fd), ("DoneBlockAndItemShapeLoading", 0x11fe) })
+        {
+            FieldInfo flag = RequireDeclaredInstanceField(mainType, name, typeof(bool), true, token);
+            if (flag.GetValue(main) is not true) return false;
+        }
+        FieldInfo running = RequireDeclaredInstanceField(mainType, "ScreenRunningGame", runningType, true, 0x11f3);
+        object? runningScreen = running.GetValue(main);
+        if (runningScreen is null) return false;
+        FieldInfo serverArgs = RequireDeclaredInstanceField(runningType, "serverargs", argsType, true, 0x1073);
+        object? nativeArgs = serverArgs.GetValue(runningScreen);
+        if (nativeArgs is null || !ReadStartServerArgsString(nativeArgs, "SaveFileLocation", 0x0f0e).Equals(Path.GetFullPath(expectedSavePath), StringComparison.OrdinalIgnoreCase)) return false;
+        if (ReadStartServerArgsBool(nativeArgs, "IsNew", 0x0f1b) is not true) return false;
+        clientMain = main;
+        return true;
     }
 
     internal static L00CMenuActionReceipt ReturnToMainMenu(object clientMain, object screenManager)
@@ -254,25 +289,101 @@ internal static class L00CMenuActionDriver
     {
         Type type = RequireStartServerArgsType();
         object args = Activator.CreateInstance(type) ?? throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs has no usable parameterless constructor.");
-        SetPublicField(args, "Seed", "24681357");
-        SetPublicField(args, "SaveFileLocation", Path.GetFullPath(savePath));
-        SetPublicField(args, "WorldName", "ISRWorldGen L00-C " + role);
-        SetPublicField(args, "AllowCreativeMode", false);
-        SetPublicField(args, "PlayStyle", "surviveandbuild");
-        SetPublicField(args, "WorldType", "standard");
-        SetPublicField(args, "MapSizeY", (int?)256);
-        SetPublicField(args, "IsNew", true);
+        // This mapping mirrors GuiScreenSingleplayerNewWorld.CreateWorld in 1.22.7.
+        // The private assembly fields are intentionally audited by name/type/token,
+        // rather than silently defaulting a client mod path or disabled-mod set.
+        SetStartServerArgsField(args, "Seed", "24681357", 0x0f0d, true);
+        SetStartServerArgsField(args, "SaveFileLocation", Path.GetFullPath(savePath), 0x0f0e, true);
+        SetStartServerArgsField(args, "WorldName", "ISRWorldGen L00-C " + role, 0x0f0f, true);
+        SetStartServerArgsField(args, "AllowCreativeMode", false, 0x0f10, true);
+        SetStartServerArgsField(args, "PlayStyle", "surviveandbuild", 0x0f11, true);
+        SetStartServerArgsField(args, "PlayStyleLangCode", "preset-surviveandbuild", 0x0f12, true);
+        SetStartServerArgsField(args, "WorldType", "standard", 0x0f13, true);
+        SetStartServerArgsField(args, "WorldConfiguration", CreateLaboratoryWorldConfiguration(type), 0x0f14, true);
+        SetStartServerArgsField(args, "MapSizeY", (int?)256, 0x0f15, true);
+        SetStartServerArgsField(args, "CreatedByPlayerName", ReadClientSetting(type, "get_PlayerName", 0x282b), 0x0f16, false);
+        SetStartServerArgsField(args, "DisabledMods", CloneStringList(type, ReadClientSetting(type, "get_DisabledMods", 0x28c3)), 0x0f17, false);
+        SetStartServerArgsField(args, "ClientModPaths", CloneStringList(type, ReadClientSetting(type, "get_ModPaths", 0x28c1)), 0x0f19, false);
+        SetStartServerArgsField(args, "Language", ReadClientSetting(type, "get_Language", 0x2869), 0x0f1a, true);
+        SetStartServerArgsField(args, "IsNew", true, 0x0f1b, true);
         return args;
     }
 
-    private static void SetPublicField(object target, string name, object? value)
+    private static object CreateLaboratoryWorldConfiguration(Type startServerArgsType)
     {
-        FieldInfo field = target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.Public)
-            ?? throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs." + name + " drifted.");
+        FieldInfo field = RequireStartServerArgsField(startServerArgsType, "WorldConfiguration", 0x0f14, true);
+        Type jsonObject = field.FieldType;
+        ConstructorInfo constructor = jsonObject.GetConstructors(BindingFlags.Instance | BindingFlags.Public)
+            .SingleOrDefault(c => c.GetParameters().Length == 1 && c.GetParameters()[0].ParameterType.FullName == "Newtonsoft.Json.Linq.JToken")
+            ?? throw new InvalidOperationException("L00-C bootstrap refused: JsonObject(JToken) drifted.");
+        Type jToken = constructor.GetParameters()[0].ParameterType;
+        Type jObject = jToken.Assembly.GetType("Newtonsoft.Json.Linq.JObject", false)
+            ?? throw new InvalidOperationException("L00-C bootstrap refused: JObject is absent.");
+        MethodInfo parse = jObject.GetMethod("Parse", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(string) }, null)
+            ?? throw new InvalidOperationException("L00-C bootstrap refused: JObject.Parse(string) drifted.");
+        // worldWidth/worldLength are required by WorldConfig.SetNewWorldConfig;
+        // profile selection passes only through ISRWorldGen's declared worldconfig key.
+        object token = parse.Invoke(null, new object?[] { "{\"worldWidth\":\"4096\",\"worldLength\":\"4096\",\"isrworldgenProfileId\":\"laboratory\"}" })
+            ?? throw new InvalidOperationException("L00-C bootstrap refused: JObject.Parse returned null.");
+        object config = constructor.Invoke(new[] { token });
+        PropertyInfo tokenProperty = jsonObject.GetProperty("Token", BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new InvalidOperationException("L00-C bootstrap refused: JsonObject.Token drifted.");
+        if (!ReferenceEquals(tokenProperty.GetValue(config), token)) throw new InvalidOperationException("L00-C bootstrap refused: JsonObject did not retain its Jworldconfig token.");
+        return config;
+    }
+
+    private static object? ReadClientSetting(Type startServerArgsType, string getter, int token)
+    {
+        Assembly lib = startServerArgsType.Assembly;
+        Type settings = RequireType(lib, "Vintagestory.Client.NoObf.ClientSettings");
+        MethodInfo method = settings.GetMethod(getter, BindingFlags.Static | BindingFlags.Public)
+            ?? throw new InvalidOperationException("L00-C bootstrap refused: ClientSettings." + getter + " drifted.");
+        if (method.MetadataToken != 0x06000000 + token || method.GetParameters().Length != 0)
+            throw new InvalidOperationException("L00-C bootstrap refused: ClientSettings." + getter + " token drifted.");
+        return method.Invoke(null, Array.Empty<object?>());
+    }
+
+    private static object CloneStringList(Type startServerArgsType, object? source)
+    {
+        if (source is not IEnumerable enumerable) throw new InvalidOperationException("L00-C bootstrap refused: ClientSettings list is absent.");
+        var values = new List<string>();
+        foreach (object? item in enumerable) { if (item is not string text) throw new InvalidOperationException("L00-C bootstrap refused: ClientSettings list drifted."); values.Add(text); }
+        return values;
+    }
+
+    private static void SetStartServerArgsField(object target, string name, object? value, int token, bool publicField)
+    {
+        FieldInfo field = RequireStartServerArgsField(target.GetType(), name, token, publicField);
         if (value is not null && !field.FieldType.IsInstanceOfType(value) && Nullable.GetUnderlyingType(field.FieldType) != value.GetType())
             throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs." + name + " has an unexpected type.");
         field.SetValue(target, value);
     }
+
+    private static FieldInfo RequireStartServerArgsField(Type type, string name, int token, bool publicField)
+    {
+        FieldInfo? field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+        Type? expected = name switch
+        {
+            "Seed" or "SaveFileLocation" or "WorldName" or "PlayStyle" or "PlayStyleLangCode" or "WorldType" or "CreatedByPlayerName" or "Language" => typeof(string),
+            "AllowCreativeMode" or "IsNew" => typeof(bool),
+            "MapSizeY" => typeof(int?),
+            "DisabledMods" or "ClientModPaths" => typeof(List<string>),
+            "WorldConfiguration" => null,
+            _ => throw new InvalidOperationException("L00-C bootstrap refused: unexpected StartServerArgs field " + name + ".")
+        };
+        if (field is null || field.IsStatic || field.IsPublic != publicField ||
+            (expected is not null ? field.FieldType != expected : field.FieldType.FullName != "Vintagestory.API.Datastructures.JsonObject") ||
+            (field.MetadataToken & 0x00ffffff) != token)
+            throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs." + name + " drifted.");
+        return field;
+    }
+
+    private static string ReadStartServerArgsString(object args, string name, int token)
+        => RequireStartServerArgsField(args.GetType(), name, token, true).GetValue(args) as string
+           ?? throw new InvalidOperationException("L00-C bootstrap refused: finalized StartServerArgs." + name + " is absent.");
+
+    private static bool? ReadStartServerArgsBool(object args, string name, int token)
+        => RequireStartServerArgsField(args.GetType(), name, token, true).GetValue(args) as bool?;
 
     // This is intentionally a fixed audited chain, not an object-graph search:
     // ClientCoreAPI.game -> ClientMain.ScreenRunningGame -> GuiScreen.ScreenManager.
