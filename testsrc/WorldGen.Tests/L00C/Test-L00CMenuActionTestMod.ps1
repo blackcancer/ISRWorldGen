@@ -14,10 +14,11 @@ $project = Join-Path $PSScriptRoot 'L00CMenuActionLabMod.csproj'
 $modSystem = Join-Path $PSScriptRoot 'L00CMenuActionLabModSystem.cs'
 $laboratoryHost = Join-Path $PSScriptRoot 'L00CMenuActionLaboratoryHost.cs'
 $driver = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
+$bootstrap = Join-Path $PSScriptRoot 'L00CFixtureBootstrap.cs'
 $product = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
 $output = Join-Path $RepositoryRoot '.local\L00C\menu-action-testmod\Debug\isrworldgenl00clab'
 
-foreach ($path in @($project, $modSystem, $laboratoryHost, $driver, (Join-Path $GamePath 'VintagestoryAPI.dll'))) {
+foreach ($path in @($project, $modSystem, $laboratoryHost, $driver, $bootstrap, (Join-Path $GamePath 'VintagestoryAPI.dll'))) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required L00-C laboratory input is missing: $path" }
 }
 if (Select-String -LiteralPath $project -Pattern 'ProjectReference|src\\WorldGen' -Quiet) {
@@ -35,6 +36,10 @@ foreach ($required in @('public sealed class L00CMenuActionLabModSystem', 'Start
 foreach ($required in @('TryAdvance(object api)', 'TryFindMenuLeft', 'TryFindSingleplayerScreen', 'TryFindClientSession', 'stableTicks < 3', 'RequiredPrimaryCycles = 5')) {
     if (-not (Select-String -LiteralPath @($laboratoryHost, $driver) -SimpleMatch $required -Quiet)) { throw "Missing client-cycle contract: $required" }
 }
+foreach ($required in @('L00CFixtureBootstrap', 'CreateFixtureWorld', 'ConnectToSingleplayer', 'StartServerArgs', 'GuiScreenSingleplayer.entries', 'ClientCellBindingConfirmed', 'File.Exists(fixture.SavePath)', 'FileMode.CreateNew', 'WaitPrimaryMenu', 'WaitSecondaryCell', 'L00CMenuActionLaboratoryHost.Open')) {
+    if (-not (Select-String -LiteralPath @($bootstrap, $driver, $modSystem) -SimpleMatch $required -Quiet)) { throw "Missing native bootstrap contract: $required" }
+}
+if (Select-String -LiteralPath $bootstrap -Pattern 'OnClickCellLeft|\[.*CellIndex.*\]|ClientSaveCellIndex\s*=\s*[0-9]' -Quiet) { throw 'Bootstrap must observe a live save cell; it must not infer or invoke a cell index.' }
 
 & dotnet build $project --configuration Debug --nologo "-p:VintageStoryPath=$GamePath"
 if ($LASTEXITCODE -ne 0) { throw "L00-C test mod Debug build failed with exit code $LASTEXITCODE." }

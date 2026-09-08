@@ -4,12 +4,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $driverPath = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
 $hostPath = Join-Path $PSScriptRoot 'L00CMenuActionLaboratoryHost.cs'
+$bootstrapPath = Join-Path $PSScriptRoot 'L00CFixtureBootstrap.cs'
 $libPath = Join-Path $GamePath 'VintagestoryLib.dll'
 $cscPath = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
 if (-not (Test-Path -LiteralPath $cscPath -PathType Leaf)) { throw "L00-C menu POC compile gate cannot find csc.exe: $cscPath" }
 $compileOutput = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-poc-" + [Guid]::NewGuid().ToString('N') + '.dll')
 try {
-    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$compileOutput" $driverPath $hostPath
+    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$compileOutput" $driverPath $hostPath $bootstrapPath
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $compileOutput -PathType Leaf)) { throw 'L00-C menu POC driver/host compilation failed.' }
 }
 finally {
@@ -41,11 +42,13 @@ if (Select-String -LiteralPath @($driverPath, $hostPath) -Pattern 'SendKeys|mous
 if (Select-String -LiteralPath $hostPath -Pattern 'using Vintagestory|Vintagestory\.' -Quiet) { throw 'Laboratory host must not take a stable Vintage Story assembly reference.' }
 if (Select-String -LiteralPath $hostPath -Pattern 'Regex|System\.Text\.Json|Newtonsoft' -Quiet) { throw 'Laboratory host must use its strict local parser without an unavailable JSON dependency.' }
 if (Select-String -LiteralPath $hostPath -SimpleMatch 'char.IsWhiteSpace' -Quiet) { throw 'Strict JSON parser must not accept non-JSON whitespace.' }
+foreach ($required in @('internal sealed class L00CFixtureBootstrap', 'CreateFixtureWorld', 'StartServerArgs', 'ConnectToSingleplayer', 'ReadUniqueSaveCell', 'GuiScreenSingleplayer.entries', 'ClientCellBindingConfirmed', 'FileMode.CreateNew', 'WaitPrimaryMenu', 'WaitSecondaryCell', 'L00CMenuActionLaboratoryHost.Open')) { if (-not (Select-String -LiteralPath @($bootstrapPath, $driverPath) -SimpleMatch $required -Quiet)) { throw "Missing bootstrap contract: $required" } }
+if (Select-String -LiteralPath $bootstrapPath -Pattern 'OnClickCellLeft|ClientSaveCellIndex\s*=\s*[0-9]' -Quiet) { throw 'Bootstrap must bind a cell from GuiScreenSingleplayer observations only.' }
 
 $behaviorAssembly = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N') + '.dll')
 $behaviorRoot = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N'))
 try {
-    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$behaviorAssembly" $driverPath $hostPath
+    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$behaviorAssembly" $driverPath $hostPath $bootstrapPath
     if ($LASTEXITCODE -ne 0) { throw 'Behavior oracle compilation failed.' }
     $labRoot = Join-Path $behaviorRoot 'repository\.local\L00C'
     $saveDirectory = Join-Path $labRoot 'saves'

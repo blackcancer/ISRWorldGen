@@ -53,6 +53,17 @@ internal static class L00CMenuActionDriver
         return Invoke(singleplayerScreen, "OnClickCellLeft", new object?[] { saveCellIndex }, "reopen-primary-world", false);
     }
 
+    /// <summary>Runs the audited native new-world connection chain.  It never writes a save itself.</summary>
+    internal static L00CMenuActionReceipt CreateFixtureWorld(object screenManager, string role, string savePath)
+    {
+        RequireDebugLab();
+        if (string.IsNullOrWhiteSpace(role) || string.IsNullOrWhiteSpace(savePath)) throw new ArgumentException("L00-C fixture role and save path are required.");
+        GuardTarget(screenManager, "Vintagestory.Client.ScreenManager", "ConnectToSingleplayer",
+            new[] { RequireStartServerArgsType() });
+        object args = CreateStartServerArgs(role, savePath);
+        return Invoke(screenManager, "ConnectToSingleplayer", new[] { args }, "create-" + role + "-world", false);
+    }
+
     internal static L00CMenuActionReceipt ReturnToMainMenu(object clientMain, object screenManager)
     {
         // All type/version/hash/method checks run before SendLeave or any session mutation.
@@ -130,6 +141,34 @@ internal static class L00CMenuActionDriver
         if (!Debugger.IsAttached) throw new InvalidOperationException("L00-C menu POC requires a debugger to be attached; debugger origin is not inferred.");
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal))
             throw new InvalidOperationException("L00-C menu POC requires ISR_L00C_LAB=1 in addition to an attached debugger.");
+    }
+
+    private static Type RequireStartServerArgsType()
+        => FindLoadedLib().GetType("Vintagestory.Common.StartServerArgs", false)
+           ?? throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs is absent.");
+
+    private static object CreateStartServerArgs(string role, string savePath)
+    {
+        Type type = RequireStartServerArgsType();
+        object args = Activator.CreateInstance(type) ?? throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs has no usable parameterless constructor.");
+        SetPublicField(args, "Seed", "24681357");
+        SetPublicField(args, "SaveFileLocation", Path.GetFullPath(savePath));
+        SetPublicField(args, "WorldName", "ISRWorldGen L00-C " + role);
+        SetPublicField(args, "AllowCreativeMode", false);
+        SetPublicField(args, "PlayStyle", "surviveandbuild");
+        SetPublicField(args, "WorldType", "standard");
+        SetPublicField(args, "MapSizeY", (int?)256);
+        SetPublicField(args, "IsNew", true);
+        return args;
+    }
+
+    private static void SetPublicField(object target, string name, object? value)
+    {
+        FieldInfo field = target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs." + name + " drifted.");
+        if (value is not null && !field.FieldType.IsInstanceOfType(value) && Nullable.GetUnderlyingType(field.FieldType) != value.GetType())
+            throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs." + name + " has an unexpected type.");
+        field.SetValue(target, value);
     }
 
     private static bool TryFindReachable(object root, string auditedTypeName, out object? target)
