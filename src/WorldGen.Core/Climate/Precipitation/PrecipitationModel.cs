@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using ISRWorldGen.Core.Climate.Temperature;
 using ISRWorldGen.Core.Foundation;
-using ISRWorldGen.Core.Geology.Materials;
 
 namespace ISRWorldGen.Core.Climate.Precipitation;
 
@@ -32,37 +31,30 @@ public sealed class PrecipitationSettings
     public PrecipitationSettings(
         double oceanEvaporationModelLengthPerYear,
         double baseCondensationFraction,
-        double orographicCondensationPerModelLength,
-        double rechargeFractionOfInfiltration,
-        double soilMoistureLengthAtSaturation)
+        double orographicCondensationPerModelLength)
     {
         if (!double.IsFinite(oceanEvaporationModelLengthPerYear) || oceanEvaporationModelLengthPerYear < 0d ||
-            !IsUnit(baseCondensationFraction) || !double.IsFinite(orographicCondensationPerModelLength) || orographicCondensationPerModelLength < 0d ||
-            !IsUnit(rechargeFractionOfInfiltration) || !double.IsFinite(soilMoistureLengthAtSaturation) || soilMoistureLengthAtSaturation <= 0d)
+            !IsUnit(baseCondensationFraction) || !double.IsFinite(orographicCondensationPerModelLength) || orographicCondensationPerModelLength < 0d)
         {
             throw new ArgumentOutOfRangeException(nameof(oceanEvaporationModelLengthPerYear),
-                "Settings must be finite; fractions are in [0,1], rates are non-negative, and soil saturation depth is positive.");
+                "Settings must be finite; fractions are in [0,1] and rates are non-negative.");
         }
 
         OceanEvaporationModelLengthPerYear = oceanEvaporationModelLengthPerYear;
         BaseCondensationFraction = baseCondensationFraction;
         OrographicCondensationPerModelLength = orographicCondensationPerModelLength;
-        RechargeFractionOfInfiltration = rechargeFractionOfInfiltration;
-        SoilMoistureLengthAtSaturation = soilMoistureLengthAtSaturation;
     }
 
     public double OceanEvaporationModelLengthPerYear { get; }
     public double BaseCondensationFraction { get; }
     public double OrographicCondensationPerModelLength { get; }
-    public double RechargeFractionOfInfiltration { get; }
-    public double SoilMoistureLengthAtSaturation { get; }
 
     private static bool IsUnit(double value) => double.IsFinite(value) && value is >= 0d and <= 1d;
 }
 
 /// <summary>
-/// Immutable input cell. Temperature and material are retained as distinct upstream
-/// snapshots: this pass consumes neither an implicit altitude correction nor game assets.
+/// Immutable input cell. The temperature snapshot stays separate from precipitation;
+/// material and water-budget partitioning belong to the L04-C consumer.
 /// </summary>
 public sealed record PrecipitationCell
 {
@@ -73,8 +65,7 @@ public sealed record PrecipitationCell
         WorldBlockPosition position,
         double elevationModelLength,
         bool isOcean,
-        TemperatureEvaluation temperature,
-        MaterialSample material)
+        TemperatureEvaluation temperature)
     {
         if (!double.IsFinite(elevationModelLength) || temperature.AlgorithmVersion != TemperatureField.AlgorithmVersion ||
             !double.IsFinite(temperature.Sample.SurfaceCelsius))
@@ -84,7 +75,7 @@ public sealed record PrecipitationCell
         }
 
         Id = id; GridX = gridX; GridZ = gridZ; Position = position; ElevationModelLength = elevationModelLength;
-        IsOcean = isOcean; Temperature = temperature; Material = material;
+        IsOcean = isOcean; Temperature = temperature;
     }
 
     public long Id { get; }
@@ -94,23 +85,27 @@ public sealed record PrecipitationCell
     public double ElevationModelLength { get; }
     public bool IsOcean { get; }
     public TemperatureEvaluation Temperature { get; }
-    public MaterialSample Material { get; }
 }
 
-/// <summary>Separate precipitation and land-water fields; all rates are L/Ymod except normalized soil moisture.</summary>
+/// <summary>Atmospheric humidity and precipitation are distinct annual model-depth fields (L/Ymod).</summary>
 public readonly record struct PrecipitationField(
     long CellId,
     double AtmosphericMoistureModelLengthPerYear,
-    double PrecipitationModelLengthPerYear,
-    double SoilMoistureNormalized,
-    double SurfaceRunoffModelLengthPerYear,
-    double GroundwaterRechargeModelLengthPerYear);
+    double PrecipitationModelLengthPerYear);
+
+/// <summary>Read-only hand-off consumed by L04-C before it computes ET, soil, runoff, and recharge.</summary>
+public interface IPrecipitationFieldSource
+{
+    int AlgorithmVersion { get; }
+    IReadOnlyList<PrecipitationField> Fields { get; }
+    bool TryGetField(long cellId, out PrecipitationField field);
+}
 
 /// <summary>
 /// Immutable publishable output for L04-C. It deliberately does not claim an ET or
 /// storage budget: those transfers remain the following lot's responsibility.
 /// </summary>
-public sealed class PrecipitationSnapshot
+public sealed class PrecipitationSnapshot : IPrecipitationFieldSource
 {
     internal PrecipitationSnapshot(IEnumerable<PrecipitationField> fields, WindVector wind, MoistureBoundaryCondition boundary)
     {
@@ -120,9 +115,21 @@ public sealed class PrecipitationSnapshot
     }
 
     public const int AlgorithmVersion = 1;
+    int IPrecipitationFieldSource.AlgorithmVersion => AlgorithmVersion;
     public ReadOnlyCollection<PrecipitationField> Fields { get; }
+    IReadOnlyList<PrecipitationField> IPrecipitationFieldSource.Fields => Fields;
     public WindVector Wind { get; }
     public MoistureBoundaryCondition Boundary { get; }
+
+    public bool TryGetField(long cellId, out PrecipitationField field)
+    {
+        foreach (PrecipitationField candidate in Fields)
+        {
+            if (candidate.CellId == cellId) { field = candidate; return true; }
+        }
+        field = default;
+        return false;
+    }
 }
 
 public static class PrecipitationSolver
@@ -132,9 +139,11 @@ public static class PrecipitationSolver
         WindVector wind,
         MoistureBoundaryCondition boundary,
         double globalBoundaryHumidityModelLengthPerYear,
+        IEnumerable<long> globalMoisturePortCellIds,
         PrecipitationSettings settings)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(globalMoisturePortCellIds);
         ArgumentNullException.ThrowIfNull(settings);
         if ((wind.X == 0 && wind.Z == 0) || wind.X is < -1 or > 1 || wind.Z is < -1 or > 1)
             throw new ArgumentOutOfRangeException(nameof(wind), "Wind must be an explicitly supported non-zero grid direction.");
@@ -149,27 +158,59 @@ public static class PrecipitationSolver
             throw new ArgumentException("Cell IDs and grid coordinates must both be unique.", nameof(source));
 
         Dictionary<(int X, int Z), PrecipitationCell> grid = cells.ToDictionary(cell => (cell.GridX, cell.GridZ));
+        long[] suppliedPorts = globalMoisturePortCellIds.ToArray();
+        var ports = suppliedPorts.ToHashSet();
+        if (ports.Count != suppliedPorts.Length) throw new ArgumentException("Global moisture port IDs must be unique.", nameof(globalMoisturePortCellIds));
+        if (boundary == MoistureBoundaryCondition.Closed && ports.Count != 0)
+            throw new ArgumentException("Closed boundaries cannot declare global moisture ports.", nameof(globalMoisturePortCellIds));
+        if (boundary == MoistureBoundaryCondition.OpenGlobalOcean && ports.Count == 0)
+            throw new ArgumentException("An open global ocean requires at least one explicit moisture port.", nameof(globalMoisturePortCellIds));
+        int minX = cells.Min(cell => cell.GridX), maxX = cells.Max(cell => cell.GridX);
+        int minZ = cells.Min(cell => cell.GridZ), maxZ = cells.Max(cell => cell.GridZ);
+        foreach (long portId in ports)
+        {
+            PrecipitationCell? port = cells.SingleOrDefault(cell => cell.Id == portId);
+            if (port is null || !port.IsOcean ||
+                TryGetUpwind(grid, port, wind, out _) ||
+                (wind.X > 0 && port.GridX != minX) || (wind.X < 0 && port.GridX != maxX) ||
+                (wind.Z > 0 && port.GridZ != minZ) || (wind.Z < 0 && port.GridZ != maxZ))
+            {
+                throw new ArgumentException("Global moisture ports must be declared ocean cells on the windward world boundary.", nameof(globalMoisturePortCellIds));
+            }
+        }
         var remaining = new Dictionary<long, double>();
         var fields = new List<PrecipitationField>(cells.Length);
         foreach (PrecipitationCell cell in cells.OrderBy(cell => (long)cell.GridX * wind.X + (long)cell.GridZ * wind.Z).ThenBy(cell => cell.Id))
         {
-            bool hasUpwind = grid.TryGetValue((cell.GridX - wind.X, cell.GridZ - wind.Z), out PrecipitationCell? upwind);
-            double carried = hasUpwind ? remaining[upwind!.Id] : boundary == MoistureBoundaryCondition.OpenGlobalOcean ? globalBoundaryHumidityModelLengthPerYear : 0d;
+            bool hasUpwind = TryGetUpwind(grid, cell, wind, out PrecipitationCell? upwind);
+            double carried = hasUpwind ? remaining[upwind!.Id] : ports.Contains(cell.Id) ? globalBoundaryHumidityModelLengthPerYear : 0d;
             double supplied = carried + (cell.IsOcean ? settings.OceanEvaporationModelLengthPerYear : 0d);
             double rise = hasUpwind ? Math.Max(0d, cell.ElevationModelLength - upwind!.ElevationModelLength) : 0d;
             double condensationFraction = Math.Min(1d, settings.BaseCondensationFraction + (rise * settings.OrographicCondensationPerModelLength));
             double precipitation = supplied * condensationFraction;
             double atmospheric = supplied - precipitation;
-            double permeability = cell.Material.Properties.PermeabilityNormalized;
-            double recharge = precipitation * permeability * settings.RechargeFractionOfInfiltration;
-            double runoff = precipitation - recharge;
-            double soil = Math.Clamp((precipitation / settings.SoilMoistureLengthAtSaturation) * (0.25d + (0.75d * permeability)), 0d, 1d);
-            if (!double.IsFinite(atmospheric) || !double.IsFinite(precipitation) || !double.IsFinite(recharge) || !double.IsFinite(runoff) || !double.IsFinite(soil))
+            if (!double.IsFinite(atmospheric) || !double.IsFinite(precipitation))
                 throw new OverflowException("Precipitation calculation exceeded the supported finite model domain.");
             remaining.Add(cell.Id, atmospheric);
-            fields.Add(new PrecipitationField(cell.Id, atmospheric, precipitation, soil, runoff, recharge));
+            fields.Add(new PrecipitationField(cell.Id, atmospheric, precipitation));
         }
 
         return new PrecipitationSnapshot(fields, wind, boundary);
+    }
+
+    private static bool TryGetUpwind(
+        IReadOnlyDictionary<(int X, int Z), PrecipitationCell> grid,
+        PrecipitationCell cell,
+        WindVector wind,
+        out PrecipitationCell? upwind)
+    {
+        if ((wind.X > 0 && cell.GridX == int.MinValue) || (wind.X < 0 && cell.GridX == int.MaxValue) ||
+            (wind.Z > 0 && cell.GridZ == int.MinValue) || (wind.Z < 0 && cell.GridZ == int.MaxValue))
+        {
+            upwind = null;
+            return false;
+        }
+
+        return grid.TryGetValue((cell.GridX - wind.X, cell.GridZ - wind.Z), out upwind);
     }
 }
