@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-08T06:43:39.2673025Z",
-  "integrated_commit": "35f13074aebca6fe1772ada7ac491d58d1dad58d",
+  "updated_utc": "2026-09-08T06:50:33.1174730Z",
+  "integrated_commit": "0c6a21d090c68aed089987977e1f51f93565ea9f",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -191,12 +191,18 @@
       "blocker": null
     },
     "L04-A": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
-      "evidence": [],
-      "blocker": null
+      "status": "DONE",
+      "owner": "integrator:l04-a",
+      "branch": "agent/l04-a",
+      "base_commit": "08295d8d48c35724d5b44a098351ac10760665cf",
+      "evidence": [
+        "worklogs/L04-A.md",
+        "commit:3637030d1efcb5b9791ef814560120fc3ec8483f",
+        "commit:0c6a21d090c68aed089987977e1f51f93565ea9f",
+        "local:.local/L04A-integrated/tests/debug/L04A-integrated-debug.trx",
+        "local:.local/L04A-integrated/tests/release/L04A-integrated-release.trx"
+      ],
+      "blocker": "T04-01 et T04-02 moteur restent BLOCKED : aucun adaptateur climat ni processus Vintage Story n'est encore disponible dans ce sous-lot."
     },
     "L04-B": {
       "status": "BACKLOG",
