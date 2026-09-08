@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-07T05:34:33.8326901Z",
-  "integrated_commit": "f6330f834dda1683eebe697ac775eedab9456764",
+  "updated_utc": "2026-09-08T06:30:50.8735154Z",
+  "integrated_commit": "75a42a4cf83f05f7d81afd3607077e5f6f7d07bd",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -160,11 +160,18 @@
       "blocker": null
     },
     "L03-B": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
-      "evidence": [],
+      "status": "DONE",
+      "owner": "integrator:l03-b",
+      "branch": "agent/l03-b-fix",
+      "base_commit": "f6330f834dda1683eebe697ac775eedab9456764",
+      "evidence": [
+        "worklogs/L03-B.md",
+        "commit:b8ba546e2c0c4678c5005c75974fa67ac4c7d805",
+        "commit:75a42a4cf83f05f7d81afd3607077e5f6f7d07bd",
+        "local:.local/L03B-integrated/tests/debug-regression/L03B-integrated-debug-regression.trx",
+        "local:.local/L03B-integrated/tests/release-regression/L03B-integrated-release-regression.trx",
+        "local:ISRWorldGen-worktrees/l03-b-s-restricted/.local/L03B/evidence-s-terminal-b8ba546e2c0c4678c5005c75974fa67ac4c7d805"
+      ],
       "blocker": null
     },
     "L03-C": {
