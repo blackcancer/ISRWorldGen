@@ -274,10 +274,10 @@ public sealed class EvidenceArtifactTests
         blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, profilesPath), L03BTestSupport.Sha256(profileBytes)));
         blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, metricsPath), L03BTestSupport.Sha256(metricsBytes)));
         blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, viewsPath), L03BTestSupport.Sha256(viewsBytes)));
-        string reviewFormPath = Path.Combine(output, "blind", "T03-06-S-review-form.json");
-        byte[] reviewFormBytes = L03BEvidenceProtocol.CreateBlindReviewForm(blindOrder.Select(item => item.Code).ToArray());
-        WriteAtomic(reviewFormPath, reviewFormBytes);
-        blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, reviewFormPath), L03BTestSupport.Sha256(reviewFormBytes)));
+        string reviewRequestPath = Path.Combine(output, "blind", "T03-06-S-review-request.json");
+        byte[] reviewRequestBytes = L03BEvidenceProtocol.CreateBlindReviewRequest(blindOrder.Select(item => item.Code).ToArray());
+        WriteAtomic(reviewRequestPath, reviewRequestBytes);
+        blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, reviewRequestPath), L03BTestSupport.Sha256(reviewRequestBytes)));
         byte[] fixturesBytes = L03BEvidenceProtocol.ReadVerifiedGitBlob(repository, fixturesBlob);
         FixtureCorpus fixtureCorpus = FixtureCorpus.Load(fixturesBytes);
         IReadOnlyList<int> calibrationSeeds = fixtureCorpus.CalibrationSeeds;
@@ -336,23 +336,7 @@ public sealed class EvidenceArtifactTests
                 group.Where(item => !item.Trait.Passed).Select(item => item.Seed).Order().ToArray()))
             .ToArray();
 
-        // The complete mapping is materialized only after every corpus item and
-        // campaign assertion has completed.  It is not written until all terminal
-        // payloads have also serialized successfully below.
-        byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            schemaVersion = 2,
-            instruction = "Do not open until a completed identification+confidence response copied from blind/T03-06-S-review-form.json has been timestamped and hashed.",
-            runId = Path.GetFileName(output),
-            nonce,
-            attributionCommitments = new
-            {
-                path = L03BEvidenceProtocol.CommitmentsArtifactPath,
-                sha256 = L03BTestSupport.Sha256(commitmentsBytes),
-            },
-            entries = blindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
-        }, JsonOptions);
-
+        byte[]? keyBytes = null;
         try
         {
             object report = new
@@ -408,15 +392,17 @@ public sealed class EvidenceArtifactTests
                         viewGeometryAndTransitionMasks = new { path = RelativeArtifactPath(output, viewsPath), sha256 = L03BTestSupport.Sha256(viewsBytes) },
                         reviewProtocol = new
                         {
-                            path = RelativeArtifactPath(output, reviewFormPath),
-                            sha256 = L03BTestSupport.Sha256(reviewFormBytes),
+                            requestPath = RelativeArtifactPath(output, reviewRequestPath),
+                            requestSha256 = L03BTestSupport.Sha256(reviewRequestBytes),
                             requiredPrerevealFields = new[] { "identifiedFamilyBeforeReveal", "confidence0To100BeforeReveal", "morphologyObservations" },
+                            reviewerCommand = "New-L03BBlindReviewReceipt.ps1 -BlindDirectory <blind-copy> -AnswersPath <answers.json> -ReviewDirectory <new-review-directory>",
+                            controllerCommand = "Open-L03BBlindReview.ps1 -EvidenceDirectory <terminal> -ReviewDirectory <review-directory> -ExpectedReceiptSha256 <reviewer-reported-sha256>",
+                            trustBoundary = "The reviewer receives only blind/. The controller retains sealed/ and the reveal tool rejects absent, changed, replayed, or mismatched receipts before parsing the key.",
                         },
                         separateKey = new
                         {
                             path = RelativeArtifactPath(output, keyPath),
-                            sha256 = L03BTestSupport.Sha256(keyBytes),
-                            instruction = "Reviewer must inspect neutral-code artifacts before opening the key.",
+                            instruction = "Do not read directly. Only Open-L03BBlindReview.ps1 may parse this key after verifying a durable prereveal receipt.",
                         },
                         attributionCommitments = new
                         {
@@ -456,6 +442,31 @@ public sealed class EvidenceArtifactTests
                 testAssemblyHash,
                 coreAssemblyHash,
                 blindArtifacts);
+
+            // The complete mapping is materialized only after every corpus item,
+            // campaign assertion, report and final blind manifest have completed.
+            // It binds the exact manifest that the external reviewer must hash.
+            keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schemaVersion = 3,
+                status = "SEALED_AWAITING_VERIFIED_RECEIPT",
+                protocol = L03BEvidenceProtocol.BlindReviewReceiptScheme,
+                binding = new
+                {
+                    runId = Path.GetFileName(output),
+                    commit,
+                    tree,
+                    fixturesBlob,
+                    configuration,
+                    testAssemblySha256 = testAssemblyHash,
+                    coreAssemblySha256 = coreAssemblyHash,
+                },
+                blindManifestSha256 = L03BTestSupport.Sha256(blindManifestBytes),
+                attributionCommitmentsSha256 = L03BTestSupport.Sha256(commitmentsBytes),
+                nonce,
+                entries = blindOrder.OrderBy(item => item.Code, StringComparer.Ordinal)
+                    .Select(item => new { item.Code, family = item.Family.ToString() }),
+            }, JsonOptions);
             byte[] successMarkerBytes = L03BEvidenceProtocol.CreateSuccessMarker(
                 Path.GetFileName(output),
                 commit,
@@ -477,7 +488,7 @@ public sealed class EvidenceArtifactTests
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(keyBytes);
+            if (keyBytes is not null) CryptographicOperations.ZeroMemory(keyBytes);
         }
     }
 

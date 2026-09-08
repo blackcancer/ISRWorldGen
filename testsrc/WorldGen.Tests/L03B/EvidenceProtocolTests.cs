@@ -96,24 +96,65 @@ public sealed class EvidenceProtocolTests
     }
 
     [TestMethod]
-    public void BlindReviewFormRequiresIdentificationAndConfidenceBeforeKeyReveal()
+    public void BlindReviewRequestDefinesExternalReceiptFlowWithoutPretendingAnswersExist()
     {
-        byte[] formBytes = L03BEvidenceProtocol.CreateBlindReviewForm(["S03", "S01", "S02"]);
+        byte[] formBytes = L03BEvidenceProtocol.CreateBlindReviewRequest(["S03", "S01", "S02"]);
         using JsonDocument form = JsonDocument.Parse(formBytes);
-        Assert.AreEqual("AWAITING_BLIND_REVIEW", form.RootElement.GetProperty("status").GetString());
-        JsonElement[] entries = form.RootElement.GetProperty("entries").EnumerateArray().ToArray();
+        Assert.AreEqual("READY_FOR_EXTERNAL_BLIND_REVIEW", form.RootElement.GetProperty("status").GetString());
         CollectionAssert.AreEqual(new[] { "S03", "S01", "S02" },
-            entries.Select(entry => entry.GetProperty("code").GetString()).ToArray());
-        Assert.IsTrue(entries.All(entry =>
-            entry.GetProperty("identifiedFamilyBeforeReveal").ValueKind == JsonValueKind.Null &&
-            entry.GetProperty("confidence0To100BeforeReveal").ValueKind == JsonValueKind.Null &&
-            entry.GetProperty("morphologyObservations").ValueKind == JsonValueKind.Null));
+            form.RootElement.GetProperty("codes").EnumerateArray().Select(entry => entry.GetString()).ToArray());
+        Assert.IsFalse(form.RootElement.TryGetProperty("entries", out _),
+            "A request must not masquerade as a durable prereveal receipt with null answers.");
         string instructions = string.Join(' ', form.RootElement.GetProperty("instructions")
             .EnumerateArray().Select(item => item.GetString()));
-        StringAssert.Contains(instructions, "answer key remains unopened");
-        StringAssert.Contains(instructions, "Hash and timestamp the completed response before requesting reveal");
-        Assert.ThrowsExactly<ArgumentException>(() => L03BEvidenceProtocol.CreateBlindReviewForm(["S01", "S01"]));
-        Assert.ThrowsExactly<ArgumentException>(() => L03BEvidenceProtocol.CreateBlindReviewForm(["family"]));
+        StringAssert.Contains(instructions, "New-L03BBlindReviewReceipt.ps1");
+        StringAssert.Contains(instructions, "Only Open-L03BBlindReview.ps1 may reveal");
+        Assert.ThrowsExactly<ArgumentException>(() => L03BEvidenceProtocol.CreateBlindReviewRequest(["S01", "S01"]));
+        Assert.ThrowsExactly<ArgumentException>(() => L03BEvidenceProtocol.CreateBlindReviewRequest(["family"]));
+    }
+
+    [TestMethod]
+    public void BlindReviewReceiptBindsCompletePrerevealAnswersToTheExactBlindRun()
+    {
+        byte[] commitments = Commitments(RunId, Nonce);
+        byte[] request = L03BEvidenceProtocol.CreateBlindReviewRequest(BlindOrder.Select(item => item.Code).ToArray());
+        L03BBlindArtifact[] artifacts =
+        [
+            new(L03BEvidenceProtocol.CommitmentsArtifactPath, L03BTestSupport.Sha256(commitments)),
+            new(L03BEvidenceProtocol.ReviewRequestArtifactPath, L03BTestSupport.Sha256(request)),
+        ];
+        byte[] manifest = Manifest(1, "PASS", "REVIEW_REQUIRED", "REVIEW_REQUIRED",
+            Commit, Tree, FixturesBlob, "Release", TestHash, CoreHash, artifacts);
+        DateTimeOffset recordedUtc = new(2026, 9, 8, 12, 34, 56, TimeSpan.Zero);
+        L03BBlindReviewEntry[] entries = BlindOrder.Select((item, index) => new L03BBlindReviewEntry(
+            item.Code,
+            item.Family.ToString(),
+            55 + index,
+            $"Prereveal morphology observation {index + 1}.")).ToArray();
+
+        byte[] receipt = L03BEvidenceProtocol.CreateBlindReviewReceipt(manifest, commitments, entries, recordedUtc);
+        L03BVerifiedReviewReceipt verified = L03BEvidenceProtocol.VerifyBlindReviewReceipt(manifest, commitments, receipt);
+        Assert.AreEqual(RunId, verified.RunId);
+        Assert.AreEqual(recordedUtc, verified.RecordedUtc);
+        CollectionAssert.AreEqual(BlindOrder.Select(item => item.Code).ToArray(), verified.Entries.Select(item => item.Code).ToArray());
+        string receiptText = Encoding.UTF8.GetString(receipt);
+        Assert.IsFalse(receiptText.Contains(Nonce, StringComparison.Ordinal));
+        Assert.IsFalse(receiptText.Contains("opening", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(receiptText.Contains("revealedFamily", StringComparison.Ordinal));
+        Assert.IsFalse(receiptText.Contains("reviewKey", StringComparison.Ordinal));
+
+        JsonObject changedAnswer = JsonNode.Parse(receipt)!.AsObject();
+        changedAnswer["entries"]![0]!["confidence0To100BeforeReveal"] = 100;
+        Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceProtocol.VerifyBlindReviewReceipt(
+            manifest, commitments, JsonSerializer.SerializeToUtf8Bytes(changedAnswer)));
+        JsonObject extraField = JsonNode.Parse(receipt)!.AsObject();
+        extraField["nonce"] = Nonce;
+        Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceProtocol.VerifyBlindReviewReceipt(
+            manifest, commitments, JsonSerializer.SerializeToUtf8Bytes(extraField)));
+
+        byte[] otherCommitments = Commitments(RunId + "-other", Nonce);
+        Assert.ThrowsExactly<InvalidDataException>(() =>
+            L03BEvidenceProtocol.VerifyBlindReviewReceipt(manifest, otherCommitments, receipt));
     }
 
     [TestMethod]
@@ -229,13 +270,15 @@ public sealed class EvidenceProtocolTests
         string evidenceSource = File.ReadAllText(Path.Combine(L03BTestSupport.FindRepositoryRoot(),
             "testsrc", "WorldGen.Tests", "L03B", "EvidenceArtifactTests.cs"));
         int corpusComplete = evidenceSource.IndexOf("Assert.HasCount(256, corpus)", StringComparison.Ordinal);
-        int keyMaterialized = evidenceSource.IndexOf("byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes", StringComparison.Ordinal);
+        int manifestMaterialized = evidenceSource.IndexOf("byte[] blindManifestBytes = L03BEvidenceProtocol.CreateBlindManifest", StringComparison.Ordinal);
+        int keyMaterialized = evidenceSource.IndexOf("keyBytes = JsonSerializer.SerializeToUtf8Bytes", StringComparison.Ordinal);
         int markerWritten = evidenceSource.IndexOf("WriteAtomic(successMarkerPath, successMarkerBytes)", StringComparison.Ordinal);
         const string keyWrite = "WriteAtomic(keyPath, keyBytes)";
         int keyWritten = evidenceSource.IndexOf(keyWrite, StringComparison.Ordinal);
 
-        Assert.IsTrue(corpusComplete >= 0 && keyMaterialized > corpusComplete && markerWritten > keyMaterialized && keyWritten > markerWritten,
-            "Corpus assertions and COMPLETE marker must precede the only complete review-key write.");
+        Assert.IsTrue(corpusComplete >= 0 && manifestMaterialized > corpusComplete && keyMaterialized > manifestMaterialized &&
+            markerWritten > keyMaterialized && keyWritten > markerWritten,
+            "Corpus assertions, final blind manifest and COMPLETE marker must precede the only complete review-key write.");
         Assert.AreEqual(keyWritten, evidenceSource.LastIndexOf(keyWrite, StringComparison.Ordinal),
             "No early or alternate review-key write is permitted.");
         StringAssert.Contains(evidenceSource, "TryDeleteSensitiveArtifact(keyPath)");
@@ -243,6 +286,225 @@ public sealed class EvidenceProtocolTests
     }
 
     [TestMethod]
+    [DoNotParallelize]
+    public void ExternalReviewerAndControllerCliEnforceAtomicReceiptBeforeReveal()
+    {
+        string repository = L03BTestSupport.FindRepositoryRoot();
+        string submitScript = Path.Combine(repository, "testsrc", "WorldGen.Tests", "L03B", "New-L03BBlindReviewReceipt.ps1");
+        string revealScript = Path.Combine(repository, "testsrc", "WorldGen.Tests", "L03B", "Open-L03BBlindReview.ps1");
+        string temporaryRoot = Path.Combine(Path.GetTempPath(), "isr-l03b-blind-review-" + Guid.NewGuid().ToString("N"));
+        string evidence = Path.Combine(temporaryRoot, "terminal");
+        string blind = Path.Combine(evidence, "blind");
+        string sealedDirectory = Path.Combine(evidence, "sealed");
+        string answersPath = Path.Combine(temporaryRoot, "answers.json");
+        string reviewDirectory = Path.Combine(temporaryRoot, "durable-review");
+        string revealDirectory = evidence + "-review-reveal";
+        try
+        {
+            Directory.CreateDirectory(blind);
+            Directory.CreateDirectory(sealedDirectory);
+            byte[] commitments = Commitments(RunId, Nonce);
+            byte[] request = L03BEvidenceProtocol.CreateBlindReviewRequest(BlindOrder.Select(item => item.Code).ToArray());
+            byte[] map = Encoding.ASCII.GetBytes("synthetic-blind-map-without-family-labels");
+            File.WriteAllBytes(Path.Combine(blind, "T03-06-S-attribution-commitments.json"), commitments);
+            File.WriteAllBytes(Path.Combine(blind, "T03-06-S-review-request.json"), request);
+            File.WriteAllBytes(Path.Combine(blind, "T03-06-S01.bmp"), map);
+            L03BBlindArtifact[] blindArtifacts =
+            [
+                new(L03BEvidenceProtocol.CommitmentsArtifactPath, L03BTestSupport.Sha256(commitments)),
+                new(L03BEvidenceProtocol.ReviewRequestArtifactPath, L03BTestSupport.Sha256(request)),
+                new("blind/T03-06-S01.bmp", L03BTestSupport.Sha256(map)),
+            ];
+            byte[] manifest = Manifest(1, "PASS", "REVIEW_REQUIRED", "REVIEW_REQUIRED",
+                Commit, Tree, FixturesBlob, "Release", TestHash, CoreHash, blindArtifacts);
+            File.WriteAllBytes(Path.Combine(blind, "T03-06-S-manifest.json"), manifest);
+            string absentReview = Path.Combine(temporaryRoot, "absent-review");
+            Directory.CreateDirectory(absentReview);
+            ProcessResult noReceipt = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidence, "-ReviewDirectory", absentReview,
+                "-ExpectedReceiptSha256", new string('0', 64));
+            Assert.AreNotEqual(0, noReceipt.ExitCode);
+            StringAssert.Contains(noReceipt.StandardError, "exactly one atomic receipt");
+            Assert.IsFalse(noReceipt.StandardError.Contains("Sealed review key", StringComparison.Ordinal),
+                "The controller must refuse an absent receipt before attempting any key parse.");
+            byte[] answers = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schemaVersion = 1,
+                entries = BlindOrder.Reverse().Select((item, index) => new
+                {
+                    code = item.Code,
+                    identifiedFamilyBeforeReveal = item.Family.ToString(),
+                    confidence0To100BeforeReveal = 70 + index,
+                    morphologyObservations = $"Observed prereveal shape for {item.Code}.",
+                }),
+            });
+            File.WriteAllBytes(answersPath, answers);
+
+            ProcessResult submitted = RunPowerShell(submitScript,
+                "-BlindDirectory", blind, "-AnswersPath", answersPath, "-ReviewDirectory", reviewDirectory);
+            Assert.AreEqual(0, submitted.ExitCode, submitted.Diagnostic);
+            string receiptPath = Path.Combine(reviewDirectory, L03BEvidenceProtocol.ReviewReceiptFileName);
+            Assert.IsTrue(File.Exists(receiptPath));
+            CollectionAssert.AreEqual(new[] { L03BEvidenceProtocol.ReviewReceiptFileName },
+                Directory.GetFiles(reviewDirectory).Select(Path.GetFileName).ToArray());
+            Assert.IsFalse(Directory.GetDirectories(temporaryRoot)
+                .Any(path => Path.GetFileName(path).StartsWith("durable-review-publishing-", StringComparison.Ordinal)),
+                "Atomic receipt publication must not leave a partial sibling.");
+            byte[] receipt = File.ReadAllBytes(receiptPath);
+            string receiptFileSha256 = L03BTestSupport.Sha256(receipt);
+            L03BVerifiedReviewReceipt verified = L03BEvidenceProtocol.VerifyBlindReviewReceipt(manifest, commitments, receipt);
+            Assert.AreEqual(RunId, verified.RunId);
+
+            byte[] report = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                automatedStatus = "PASS",
+                qualitativeReviewStatus = "REVIEW_REQUIRED",
+                overallStatus = "REVIEW_REQUIRED",
+            });
+            byte[] trx = Encoding.UTF8.GetBytes("<TestRun><ResultSummary><Counters total=\"1\" executed=\"1\" passed=\"1\" failed=\"0\" /></ResultSummary></TestRun>");
+            byte[] progress = Encoding.UTF8.GetBytes("{\"status\":\"COMPLETE\"}");
+            byte[] key = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schemaVersion = 3,
+                status = "SEALED_AWAITING_VERIFIED_RECEIPT",
+                protocol = L03BEvidenceProtocol.BlindReviewReceiptScheme,
+                binding = new
+                {
+                    runId = RunId,
+                    commit = Commit,
+                    tree = Tree,
+                    fixturesBlob = FixturesBlob,
+                    configuration = "Release",
+                    testAssemblySha256 = TestHash,
+                    coreAssemblySha256 = CoreHash,
+                },
+                blindManifestSha256 = L03BTestSupport.Sha256(manifest),
+                attributionCommitmentsSha256 = L03BTestSupport.Sha256(commitments),
+                nonce = Nonce,
+                entries = BlindOrder.Select(item => new { code = item.Code, family = item.Family.ToString() }),
+            });
+            string reportPath = Path.Combine(sealedDirectory, "T03-05-06-S.json");
+            string trxPath = Path.Combine(sealedDirectory, "T03-05-06-S.trx");
+            string progressPath = Path.Combine(sealedDirectory, "T03-06-S-progress.json");
+            string keyPath = Path.Combine(sealedDirectory, "T03-06-S-review-key.json");
+            File.WriteAllBytes(reportPath, report);
+            File.WriteAllBytes(trxPath, trx);
+            File.WriteAllBytes(progressPath, progress);
+            File.WriteAllBytes(keyPath, key);
+            byte[] marker = L03BEvidenceProtocol.CreateSuccessMarker(
+                RunId, Commit, Tree, FixturesBlob, TestHash, CoreHash,
+                L03BTestSupport.Sha256(report), L03BTestSupport.Sha256(manifest),
+                L03BTestSupport.Sha256(key), L03BTestSupport.Sha256(commitments));
+            string markerPath = Path.Combine(sealedDirectory, "T03-06-S-success.json");
+            File.WriteAllBytes(markerPath, marker);
+            L03BBlindArtifact[] sealedArtifacts =
+            [
+                new("blind/T03-06-S-manifest.json", L03BTestSupport.Sha256(manifest)),
+                new(L03BEvidenceProtocol.CommitmentsArtifactPath, L03BTestSupport.Sha256(commitments)),
+                new("sealed/T03-05-06-S.json", L03BTestSupport.Sha256(report)),
+                new(L03BEvidenceProtocol.TrxArtifactPath, L03BTestSupport.Sha256(trx)),
+                new("sealed/T03-06-S-progress.json", L03BTestSupport.Sha256(progress)),
+                new("sealed/T03-06-S-review-key.json", L03BTestSupport.Sha256(key)),
+                new(L03BEvidenceProtocol.SuccessMarkerArtifactPath, L03BTestSupport.Sha256(marker)),
+            ];
+            byte[] sealedManifest = Manifest(1, "PASS", "REVIEW_REQUIRED", "REVIEW_REQUIRED",
+                Commit, Tree, FixturesBlob, "Release", TestHash, CoreHash, sealedArtifacts);
+            File.WriteAllBytes(Path.Combine(sealedDirectory, "T03-05-06-S-manifest.json"), sealedManifest);
+
+            string tamperedReview = Path.Combine(temporaryRoot, "tampered-review");
+            Directory.CreateDirectory(tamperedReview);
+            JsonObject tamperedReceipt = JsonNode.Parse(receipt)!.AsObject();
+            tamperedReceipt["entries"]![0]!["confidence0To100BeforeReveal"] = 1;
+            File.WriteAllBytes(Path.Combine(tamperedReview, L03BEvidenceProtocol.ReviewReceiptFileName),
+                JsonSerializer.SerializeToUtf8Bytes(tamperedReceipt));
+            File.SetLastWriteTimeUtc(Path.Combine(tamperedReview, L03BEvidenceProtocol.ReviewReceiptFileName),
+                verified.RecordedUtc.UtcDateTime);
+            const string invalidKeySentinel = "INVALID-KEY-MUST-NOT-BE-PARSED-BEFORE-RECEIPT";
+            File.WriteAllText(keyPath, invalidKeySentinel);
+            string tamperedReceiptHash = L03BTestSupport.Sha256(File.ReadAllBytes(
+                Path.Combine(tamperedReview, L03BEvidenceProtocol.ReviewReceiptFileName)));
+            ProcessResult replacedBeforeReveal = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidence, "-ReviewDirectory", tamperedReview,
+                "-ExpectedReceiptSha256", receiptFileSha256);
+            Assert.AreNotEqual(0, replacedBeforeReveal.ExitCode);
+            StringAssert.Contains(replacedBeforeReveal.StandardError, "Expected blind review receipt SHA-256 mismatch");
+            Assert.IsFalse(replacedBeforeReveal.StandardError.Contains("Sealed review key", StringComparison.Ordinal));
+            ProcessResult modifiedBeforeReveal = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidence, "-ReviewDirectory", tamperedReview,
+                "-ExpectedReceiptSha256", tamperedReceiptHash);
+            Assert.AreNotEqual(0, modifiedBeforeReveal.ExitCode);
+            StringAssert.Contains(modifiedBeforeReveal.StandardError, "receipt ID mismatch");
+            Assert.IsFalse(modifiedBeforeReveal.StandardError.Contains("Sealed review key", StringComparison.Ordinal),
+                "A modified receipt must be rejected before attempting any key parse.");
+            Assert.IsFalse(modifiedBeforeReveal.StandardError.Contains(invalidKeySentinel, StringComparison.Ordinal));
+            File.WriteAllBytes(keyPath, key);
+
+            ProcessResult revealed = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidence, "-ReviewDirectory", reviewDirectory,
+                "-ExpectedReceiptSha256", receiptFileSha256);
+            Assert.AreEqual(0, revealed.ExitCode, revealed.Diagnostic);
+            string revealPath = Path.Combine(revealDirectory, "T03-06-S-review-reveal.json");
+            using JsonDocument reveal = JsonDocument.Parse(File.ReadAllBytes(revealPath));
+            Assert.AreEqual("REVEALED_AFTER_VERIFIED_RECEIPT", reveal.RootElement.GetProperty("status").GetString());
+            Assert.AreEqual(6, reveal.RootElement.GetProperty("correctIdentifications").GetInt32());
+            Assert.AreEqual(verified.ReceiptId, reveal.RootElement.GetProperty("receipt").GetProperty("receiptId").GetString());
+            Assert.IsFalse(File.Exists(evidence + "-review-controller.lock"));
+            Assert.IsFalse(Directory.GetDirectories(temporaryRoot)
+                .Any(path => Path.GetFileName(path).StartsWith("terminal-review-reveal-publishing-", StringComparison.Ordinal)),
+                "Atomic reveal publication must not leave a partial sibling.");
+
+            ProcessResult repeatedReveal = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidence, "-ReviewDirectory", reviewDirectory,
+                "-ExpectedReceiptSha256", receiptFileSha256);
+            Assert.AreNotEqual(0, repeatedReveal.ExitCode);
+            StringAssert.Contains(repeatedReveal.StandardError, "cannot be repeated");
+
+            File.WriteAllBytes(receiptPath, receipt.Concat(new byte[] { (byte)'\n' }).ToArray());
+            ProcessResult modifiedAfterReveal = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidence, "-ReviewDirectory", reviewDirectory,
+                "-ExpectedReceiptSha256", receiptFileSha256);
+            Assert.AreNotEqual(0, modifiedAfterReveal.ExitCode);
+            StringAssert.Contains(modifiedAfterReveal.StandardError, "modified or replaced after reveal");
+            ProcessResult repeatedReview = RunPowerShell(submitScript,
+                "-BlindDirectory", blind, "-AnswersPath", answersPath, "-ReviewDirectory", reviewDirectory);
+            Assert.AreNotEqual(0, repeatedReview.ExitCode);
+            StringAssert.Contains(repeatedReview.StandardError, "cannot be modified, replaced, or resubmitted");
+
+            string otherEvidence = Path.Combine(temporaryRoot, "other-terminal");
+            string otherBlind = Path.Combine(otherEvidence, "blind");
+            Directory.CreateDirectory(otherBlind);
+            byte[] otherCommitments = Commitments(RunId + "-other", Nonce);
+            File.WriteAllBytes(Path.Combine(otherBlind, "T03-06-S-attribution-commitments.json"), otherCommitments);
+            File.WriteAllBytes(Path.Combine(otherBlind, "T03-06-S-review-request.json"), request);
+            File.WriteAllBytes(Path.Combine(otherBlind, "T03-06-S01.bmp"), map);
+            L03BBlindArtifact[] otherArtifacts =
+            [
+                new(L03BEvidenceProtocol.CommitmentsArtifactPath, L03BTestSupport.Sha256(otherCommitments)),
+                new(L03BEvidenceProtocol.ReviewRequestArtifactPath, L03BTestSupport.Sha256(request)),
+                new("blind/T03-06-S01.bmp", L03BTestSupport.Sha256(map)),
+            ];
+            byte[] otherManifest = Manifest(1, "PASS", "REVIEW_REQUIRED", "REVIEW_REQUIRED",
+                Commit, Tree, FixturesBlob, "Release", TestHash, CoreHash, otherArtifacts);
+            File.WriteAllBytes(Path.Combine(otherBlind, "T03-06-S-manifest.json"), otherManifest);
+            string replayReview = Path.Combine(temporaryRoot, "replay-review");
+            Directory.CreateDirectory(replayReview);
+            File.WriteAllBytes(Path.Combine(replayReview, L03BEvidenceProtocol.ReviewReceiptFileName), receipt);
+            ProcessResult replay = RunPowerShell(revealScript,
+                "-EvidenceDirectory", otherEvidence, "-ReviewDirectory", replayReview,
+                "-ExpectedReceiptSha256", receiptFileSha256);
+            Assert.AreNotEqual(0, replay.ExitCode);
+            StringAssert.Contains(replay.StandardError, "binding mismatch");
+            Assert.IsFalse(replay.StandardError.Contains("Sealed review key", StringComparison.Ordinal),
+                "A mismatched receipt must be rejected before any key parse is attempted.");
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
     public void FailurePublisherReconcilesPostKeyTimeoutWithoutLeakingPartialOrSecretFiles()
     {
         string repository = L03BTestSupport.FindRepositoryRoot();
@@ -473,6 +735,34 @@ public sealed class EvidenceProtocolTests
         Assert.IsFalse(failurePublisher.Contains("Move-Item -LiteralPath $StagingPath", StringComparison.Ordinal));
     }
 
+    [TestMethod]
+    public void ReviewerCliHasNoSealedCapabilityAndControllerCrossesRevealBoundaryAfterVerification()
+    {
+        string l03b = Path.Combine(L03BTestSupport.FindRepositoryRoot(), "testsrc", "WorldGen.Tests", "L03B");
+        string submit = File.ReadAllText(Path.Combine(l03b, "New-L03BBlindReviewReceipt.ps1"));
+        string module = File.ReadAllText(Path.Combine(l03b, "L03BBlindReviewProtocol.psm1"));
+        string controller = File.ReadAllText(Path.Combine(l03b, "Open-L03BBlindReview.ps1"));
+
+        Assert.IsFalse(submit.Contains("sealed/", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(submit.Contains("review-key", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(submit.Contains("nonce", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(module.Contains("sealed/", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(module.Contains("review-key", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(module.Contains("nonce", StringComparison.OrdinalIgnoreCase));
+
+        int receiptHeld = controller.IndexOf("Read-HeldReceiptBytes", StringComparison.Ordinal);
+        int receiptVerified = controller.LastIndexOf("Read-L03BVerifiedReviewReceiptBytes", StringComparison.Ordinal);
+        int keyBoundary = controller.LastIndexOf("$keyRows = Read-VerifiedReviewKey", StringComparison.Ordinal);
+        Assert.IsTrue(receiptHeld >= 0 && receiptVerified > receiptHeld && keyBoundary > receiptVerified,
+            "The controller must hold and verify the durable receipt before crossing the only key-content boundary.");
+        Assert.AreEqual(controller.IndexOf("$keyRows = Read-VerifiedReviewKey", StringComparison.Ordinal), keyBoundary,
+            "The controller must have a single explicit key-content boundary.");
+        StringAssert.Contains(controller, "[IO.FileShare]::Read");
+        StringAssert.Contains(controller, "[IO.FileOptions]::DeleteOnClose");
+        StringAssert.Contains(controller, "receipt was modified or replaced after reveal");
+        StringAssert.Contains(controller, "Reveal publication already exists");
+    }
+
     private static byte[] Commitments(string runId, string nonce) =>
         L03BEvidenceProtocol.CreateAttributionCommitments(
             runId,
@@ -504,5 +794,38 @@ public sealed class EvidenceProtocolTests
     {
         using JsonDocument document = JsonDocument.Parse(manifest);
         return document.RootElement.GetProperty("bundleSignature").GetString()!;
+    }
+
+    private static ProcessResult RunPowerShell(string script, params string[] arguments)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo("pwsh")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            },
+        };
+        process.StartInfo.ArgumentList.Add("-NoProfile");
+        process.StartInfo.ArgumentList.Add("-NonInteractive");
+        process.StartInfo.ArgumentList.Add("-File");
+        process.StartInfo.ArgumentList.Add(script);
+        foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
+        process.Start();
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new AssertFailedException("Blind review CLI exceeded its bounded integration timeout.");
+        }
+        return new ProcessResult(process.ExitCode, stdout.GetAwaiter().GetResult(), stderr.GetAwaiter().GetResult());
+    }
+
+    private sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError)
+    {
+        public string Diagnostic => $"stdout=[{StandardOutput}] stderr=[{StandardError}]";
     }
 }

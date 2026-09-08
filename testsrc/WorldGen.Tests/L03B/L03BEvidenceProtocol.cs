@@ -8,6 +8,23 @@ namespace ISRWorldGen.Tests.L03B;
 
 internal sealed record L03BBlindArtifact(string Path, string Sha256);
 
+internal sealed record L03BBlindReviewEntry(
+    string Code,
+    string IdentifiedFamilyBeforeReveal,
+    int Confidence0To100BeforeReveal,
+    string MorphologyObservations);
+
+internal sealed record L03BVerifiedReviewReceipt(
+    string ReceiptId,
+    DateTimeOffset RecordedUtc,
+    string RunId,
+    string Commit,
+    string Tree,
+    string FixturesBlob,
+    string BlindManifestSha256,
+    string CommitmentsSha256,
+    IReadOnlyList<L03BBlindReviewEntry> Entries);
+
 internal static class L03BEvidenceProtocol
 {
     private const int MaximumGitBlobBytes = 1024 * 1024;
@@ -15,7 +32,10 @@ internal static class L03BEvidenceProtocol
     internal const int ManifestSchemaVersion = 1;
     internal const string BlindSignatureScheme = "sha256-canonical-json-v1";
     internal const string FailureAttributionScheme = "sha256-run-bound-selective-opening-v1";
+    internal const string BlindReviewReceiptScheme = "sha256-run-bound-blind-review-receipt-v1";
     internal const string CommitmentsArtifactPath = "blind/T03-06-S-attribution-commitments.json";
+    internal const string ReviewRequestArtifactPath = "blind/T03-06-S-review-request.json";
+    internal const string ReviewReceiptFileName = "T03-06-S-review-receipt.json";
     internal const string FailureAttributionArtifactPath = "sealed/T03-06-S-failure-attribution.json";
     internal const string TrxArtifactPath = "sealed/T03-05-06-S.trx";
     internal const string SuccessMarkerArtifactPath = "sealed/T03-06-S-success.json";
@@ -322,7 +342,7 @@ internal static class L03BEvidenceProtocol
         }
     }
 
-    internal static byte[] CreateBlindReviewForm(IReadOnlyList<string> codes)
+    internal static byte[] CreateBlindReviewRequest(IReadOnlyList<string> codes)
     {
         ArgumentNullException.ThrowIfNull(codes);
         if (codes.Count == 0 || codes.Distinct(StringComparer.Ordinal).Count() != codes.Count ||
@@ -333,25 +353,118 @@ internal static class L03BEvidenceProtocol
 
         return JsonSerializer.SerializeToUtf8Bytes(new
         {
-            schemaVersion = 1,
-            status = "AWAITING_BLIND_REVIEW",
+            schemaVersion = 2,
+            status = "READY_FOR_EXTERNAL_BLIND_REVIEW",
+            trustBoundary = "The reviewer receives only a copy of the blind directory. The campaign controller retains sealed artifacts and must not read the answer key directly.",
             instructions = new[]
             {
-                "Copy this template outside the immutable evidence bundle.",
-                "For every code, record exactly one identifiedFamilyBeforeReveal, confidence from 0 to 100, and morphology observations while the sealed answer key remains unopened.",
-                "Hash and timestamp the completed response before requesting reveal of sealed/T03-06-S-review-key.json.",
-                "After reveal, append identifiedCorrectly for every entry; do not rewrite the prereveal identification or confidence.",
+                "Inspect only the immutable blind package and prepare a separate JSON answers file.",
+                "For every code, record exactly one identifiedFamilyBeforeReveal, an integer confidence0To100BeforeReveal from 0 to 100, and non-empty morphologyObservations.",
+                "Run New-L03BBlindReviewReceipt.ps1 against the copied blind directory. It verifies every blind hash and atomically publishes a timestamped, self-hashed receipt without reading any sealed artifact.",
+                "Return the complete review directory and its printed receiptFileSha256 to the controller. Only Open-L03BBlindReview.ps1 may reveal the mapping after it validates that exact expected hash.",
             },
             allowedFamilies = Enum.GetValues<LandscapeFamily>().Select(family => family.ToString()),
-            entries = codes.Select(code => new
-            {
-                code,
-                identifiedFamilyBeforeReveal = (string?)null,
-                confidence0To100BeforeReveal = (int?)null,
-                morphologyObservations = (string?)null,
-                identifiedCorrectlyAfterReveal = (bool?)null,
-            }),
+            codes,
         }, ManifestJsonOptions);
+    }
+
+    internal static byte[] CreateBlindReviewReceipt(
+        byte[] blindManifestBytes,
+        byte[] commitmentsBytes,
+        IReadOnlyList<L03BBlindReviewEntry> entries,
+        DateTimeOffset recordedUtc)
+    {
+        BlindManifest manifest = ParseAndValidateBlindManifest(blindManifestBytes, requireReviewablePass: true);
+        AttributionCommitments commitments = ParseAndValidateCommitments(commitmentsBytes);
+        ValidateReviewBinding(manifest, commitments, blindManifestBytes, commitmentsBytes);
+        L03BBlindReviewEntry[] orderedEntries = ValidateReviewEntries(entries);
+        string canonicalUtc = recordedUtc.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var payload = new BlindReviewReceiptPayload(
+            1,
+            ["R03-06"],
+            "RECORDED_BEFORE_REVEAL",
+            BlindReviewReceiptScheme,
+            canonicalUtc,
+            commitments.Binding,
+            new BoundDocument("blind/T03-06-S-manifest.json", L03BTestSupport.Sha256(blindManifestBytes), manifest.BundleSignature),
+            new BoundDocument(CommitmentsArtifactPath, L03BTestSupport.Sha256(commitmentsBytes), commitments.BundleSignature),
+            orderedEntries);
+        byte[] canonicalPayload = JsonSerializer.SerializeToUtf8Bytes(payload, CanonicalJsonOptions);
+        var receipt = new BlindReviewReceipt(
+            payload.SchemaVersion,
+            payload.RequirementIds,
+            payload.Status,
+            payload.Protocol,
+            payload.RecordedUtc,
+            payload.Binding,
+            payload.BlindManifest,
+            payload.AttributionCommitments,
+            payload.Entries,
+            L03BTestSupport.Sha256(canonicalPayload));
+        return JsonSerializer.SerializeToUtf8Bytes(receipt, ManifestJsonOptions);
+    }
+
+    internal static L03BVerifiedReviewReceipt VerifyBlindReviewReceipt(
+        byte[] blindManifestBytes,
+        byte[] commitmentsBytes,
+        byte[] receiptBytes)
+    {
+        ArgumentNullException.ThrowIfNull(receiptBytes);
+        BlindManifest manifest = ParseAndValidateBlindManifest(blindManifestBytes, requireReviewablePass: true);
+        AttributionCommitments commitments = ParseAndValidateCommitments(commitmentsBytes);
+        ValidateReviewBinding(manifest, commitments, blindManifestBytes, commitmentsBytes);
+        AssertClosedReviewReceiptSchema(receiptBytes);
+        BlindReviewReceipt receipt = JsonSerializer.Deserialize<BlindReviewReceipt>(receiptBytes, ManifestJsonOptions) ??
+            throw new InvalidDataException("Blind review receipt is empty.");
+        if (receipt.RequirementIds is null || receipt.Binding is null || receipt.BlindManifest is null ||
+            receipt.AttributionCommitments is null || receipt.Entries is null || receipt.SchemaVersion != 1 ||
+            !receipt.RequirementIds.SequenceEqual(["R03-06"], StringComparer.Ordinal) ||
+            receipt.Status != "RECORDED_BEFORE_REVEAL" || receipt.Protocol != BlindReviewReceiptScheme ||
+            receipt.Binding != commitments.Binding ||
+            receipt.BlindManifest != new BoundDocument("blind/T03-06-S-manifest.json", L03BTestSupport.Sha256(blindManifestBytes), manifest.BundleSignature) ||
+            receipt.AttributionCommitments != new BoundDocument(CommitmentsArtifactPath, L03BTestSupport.Sha256(commitmentsBytes), commitments.BundleSignature) ||
+            !DateTimeOffset.TryParseExact(receipt.RecordedUtc, "O", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out DateTimeOffset recordedUtc) ||
+            recordedUtc.Offset != TimeSpan.Zero)
+        {
+            throw new InvalidDataException("Blind review receipt is malformed or belongs to another evidence run.");
+        }
+
+        L03BBlindReviewEntry[] orderedEntries;
+        try
+        {
+            orderedEntries = ValidateReviewEntries(receipt.Entries);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidDataException("Blind review receipt entries are invalid.", exception);
+        }
+        var payload = new BlindReviewReceiptPayload(
+            receipt.SchemaVersion,
+            receipt.RequirementIds,
+            receipt.Status,
+            receipt.Protocol,
+            receipt.RecordedUtc,
+            receipt.Binding,
+            receipt.BlindManifest,
+            receipt.AttributionCommitments,
+            orderedEntries);
+        string expectedReceiptId = L03BTestSupport.Sha256(JsonSerializer.SerializeToUtf8Bytes(payload, CanonicalJsonOptions));
+        if (!FixedTimeEquals(receipt.ReceiptId, expectedReceiptId))
+        {
+            throw new InvalidDataException("Blind review receipt was modified after it was recorded.");
+        }
+
+        return new L03BVerifiedReviewReceipt(
+            receipt.ReceiptId,
+            recordedUtc,
+            receipt.Binding.RunId,
+            receipt.Binding.Commit,
+            receipt.Binding.Tree,
+            receipt.Binding.FixturesBlob,
+            receipt.BlindManifest.Sha256,
+            receipt.AttributionCommitments.Sha256,
+            orderedEntries);
     }
 
     private static AttributionBinding ValidateAttributionInputs(
@@ -407,6 +520,124 @@ internal static class L03BEvidenceProtocol
             throw new InvalidDataException("Attribution commitment bundle signature is invalid.");
         }
         return commitments;
+    }
+
+    private static BlindManifest ParseAndValidateBlindManifest(byte[] manifestBytes, bool requireReviewablePass)
+    {
+        ArgumentNullException.ThrowIfNull(manifestBytes);
+        BlindManifest manifest = JsonSerializer.Deserialize<BlindManifest>(manifestBytes, ManifestJsonOptions) ??
+            throw new InvalidDataException("Blind manifest is empty.");
+        if (manifest.RequirementIds is null || manifest.Artifacts is null || manifest.SchemaVersion != ManifestSchemaVersion ||
+            !manifest.RequirementIds.SequenceEqual(["R03-05", "R03-06"], StringComparer.Ordinal) ||
+            manifest.SignatureScheme != BlindSignatureScheme || !IsLowerHex(manifest.Commit, 40) ||
+            !IsLowerHex(manifest.Tree, 40) || !IsLowerHex(manifest.FixturesBlob, 40) ||
+            manifest.Configuration != "Release" || !IsLowerHex(manifest.TestAssemblySha256, 64) ||
+            !IsLowerHex(manifest.CoreAssemblySha256, 64) || manifest.Artifacts.Length == 0 ||
+            manifest.Artifacts.Select(item => item.Path).Distinct(StringComparer.Ordinal).Count() != manifest.Artifacts.Length ||
+            !manifest.Artifacts.SequenceEqual(manifest.Artifacts.OrderBy(item => item.Path, StringComparer.Ordinal)) ||
+            manifest.Artifacts.Any(item => !IsCanonicalBlindArtifact(item)) ||
+            (requireReviewablePass && (manifest.AutomatedStatus != "PASS" ||
+                manifest.QualitativeReviewStatus != "REVIEW_REQUIRED" || manifest.OverallStatus != "REVIEW_REQUIRED")))
+        {
+            throw new InvalidDataException("Blind manifest is malformed or is not a reviewable PASS campaign.");
+        }
+
+        var payload = new BlindManifestPayload(
+            manifest.SchemaVersion,
+            manifest.RequirementIds,
+            manifest.AutomatedStatus,
+            manifest.QualitativeReviewStatus,
+            manifest.OverallStatus,
+            manifest.Commit,
+            manifest.Tree,
+            manifest.FixturesBlob,
+            manifest.Configuration,
+            manifest.TestAssemblySha256,
+            manifest.CoreAssemblySha256,
+            manifest.SignatureScheme,
+            manifest.Artifacts);
+        string expectedSignature = L03BTestSupport.Sha256(JsonSerializer.SerializeToUtf8Bytes(payload, CanonicalJsonOptions));
+        if (!FixedTimeEquals(manifest.BundleSignature, expectedSignature))
+        {
+            throw new InvalidDataException("Blind manifest signature is invalid.");
+        }
+        return manifest;
+    }
+
+    private static void ValidateReviewBinding(
+        BlindManifest manifest,
+        AttributionCommitments commitments,
+        byte[] manifestBytes,
+        byte[] commitmentsBytes)
+    {
+        AttributionBinding manifestBinding = new(
+            commitments.Binding.RunId,
+            manifest.Commit,
+            manifest.Tree,
+            manifest.FixturesBlob,
+            manifest.Configuration,
+            manifest.TestAssemblySha256,
+            manifest.CoreAssemblySha256);
+        L03BBlindArtifact? commitmentArtifact = manifest.Artifacts.SingleOrDefault(
+            item => item.Path == CommitmentsArtifactPath);
+        if (manifestBinding != commitments.Binding || commitmentArtifact is null ||
+            !FixedTimeEquals(commitmentArtifact.Sha256, L03BTestSupport.Sha256(commitmentsBytes)) ||
+            !IsLowerHex(L03BTestSupport.Sha256(manifestBytes), 64))
+        {
+            throw new InvalidDataException("Blind manifest and attribution commitments do not bind the same evidence run.");
+        }
+    }
+
+    private static L03BBlindReviewEntry[] ValidateReviewEntries(IReadOnlyList<L03BBlindReviewEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        L03BBlindReviewEntry[] ordered = entries.OrderBy(item => item.Code, StringComparer.Ordinal).ToArray();
+        if (ordered.Length != ExpectedNeutralCodes.Length ||
+            !ordered.Select(item => item.Code).SequenceEqual(ExpectedNeutralCodes, StringComparer.Ordinal) ||
+            ordered.Select(item => item.Code).Distinct(StringComparer.Ordinal).Count() != ordered.Length ||
+            ordered.Any(item =>
+                !Enum.TryParse(item.IdentifiedFamilyBeforeReveal, ignoreCase: false, out LandscapeFamily identified) ||
+                !Enum.IsDefined(identified) || item.Confidence0To100BeforeReveal is < 0 or > 100 ||
+                string.IsNullOrWhiteSpace(item.MorphologyObservations) ||
+                item.MorphologyObservations.Length > 4096 ||
+                item.MorphologyObservations != item.MorphologyObservations.Trim()))
+        {
+            throw new ArgumentException("Blind review requires exactly six valid, complete prereveal entries.", nameof(entries));
+        }
+        return ordered;
+    }
+
+    private static bool IsCanonicalBlindArtifact(L03BBlindArtifact artifact) =>
+        artifact.Path.StartsWith("blind/", StringComparison.Ordinal) &&
+        !artifact.Path.Contains('\\') && !artifact.Path.Contains("..", StringComparison.Ordinal) &&
+        !Path.IsPathRooted(artifact.Path) && IsLowerHex(artifact.Sha256, 64);
+
+    private static void AssertClosedReviewReceiptSchema(byte[] receiptBytes)
+    {
+        using JsonDocument document = JsonDocument.Parse(receiptBytes);
+        JsonElement root = document.RootElement;
+        AssertExactProperties(root,
+            "schemaVersion", "requirementIds", "status", "protocol", "recordedUtc", "binding",
+            "blindManifest", "attributionCommitments", "entries", "receiptId");
+        AssertExactProperties(root.GetProperty("binding"),
+            "runId", "commit", "tree", "fixturesBlob", "configuration", "testAssemblySha256", "coreAssemblySha256");
+        AssertExactProperties(root.GetProperty("blindManifest"), "path", "sha256", "bundleSignature");
+        AssertExactProperties(root.GetProperty("attributionCommitments"), "path", "sha256", "bundleSignature");
+        foreach (JsonElement entry in root.GetProperty("entries").EnumerateArray())
+        {
+            AssertExactProperties(entry,
+                "code", "identifiedFamilyBeforeReveal", "confidence0To100BeforeReveal", "morphologyObservations");
+        }
+    }
+
+    private static void AssertExactProperties(JsonElement element, params string[] expected)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal)
+                .SequenceEqual(expected.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+        {
+            throw new InvalidDataException("Evidence JSON contains missing or unexpected fields.");
+        }
     }
 
     private static string DeriveOpening(AttributionBinding binding, string code, string masterNonce)
@@ -596,6 +827,31 @@ internal static class L03BEvidenceProtocol
         string Code,
         string Family,
         string Opening);
+
+    private sealed record BoundDocument(string Path, string Sha256, string BundleSignature);
+
+    private sealed record BlindReviewReceiptPayload(
+        int SchemaVersion,
+        string[] RequirementIds,
+        string Status,
+        string Protocol,
+        string RecordedUtc,
+        AttributionBinding Binding,
+        BoundDocument BlindManifest,
+        BoundDocument AttributionCommitments,
+        L03BBlindReviewEntry[] Entries);
+
+    private sealed record BlindReviewReceipt(
+        int SchemaVersion,
+        string[] RequirementIds,
+        string Status,
+        string Protocol,
+        string RecordedUtc,
+        AttributionBinding Binding,
+        BoundDocument BlindManifest,
+        BoundDocument AttributionCommitments,
+        L03BBlindReviewEntry[] Entries,
+        string ReceiptId);
 
     private sealed record FailureAttribution(
         int SchemaVersion,
