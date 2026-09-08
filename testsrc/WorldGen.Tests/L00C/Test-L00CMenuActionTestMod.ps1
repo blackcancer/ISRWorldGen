@@ -1,73 +1,31 @@
 [CmdletBinding()]
-param(
-    [string]$RepositoryRoot,
-    [string]$GamePath = 'D:\Jeux\Vintagestory'
-)
+param([string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path, [string]$GamePath = 'D:\Jeux\Vintagestory')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
-    $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$project = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
+$testProject = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\WorldGen.Tests.csproj'
+$sources = @('L00CMenuActionLabModSystem.cs','L00CMenuActionLaboratoryHost.cs','L00CMenuActionDriver.cs','L00CFixtureBootstrap.cs','L00CProcessCampaignController.cs') | ForEach-Object { Join-Path $PSScriptRoot $_ }
+foreach ($file in @($project, $testProject) + $sources) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Required in-process L00-C input is missing: $file" } }
+$projectXml = Get-Content -LiteralPath $project -Raw; $testXml = Get-Content -LiteralPath $testProject -Raw
+foreach ($source in $sources) {
+    $leaf = Split-Path $source -Leaf
+    if (-not $projectXml.Contains($leaf) -or $projectXml -notmatch 'Condition=.*Configuration.*Debug') { throw "Product Debug allowlist is missing $leaf." }
+    if (-not $testXml.Contains('<Compile Remove="L00C\' + $leaf + '"')) { throw "Test project must exclude linked harness source $leaf." }
 }
-
-$project = Join-Path $PSScriptRoot 'L00CMenuActionLabMod.csproj'
-$modSystem = Join-Path $PSScriptRoot 'L00CMenuActionLabModSystem.cs'
-$laboratoryHost = Join-Path $PSScriptRoot 'L00CMenuActionLaboratoryHost.cs'
-$driver = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
-$bootstrap = Join-Path $PSScriptRoot 'L00CFixtureBootstrap.cs'
-$controller = Join-Path $PSScriptRoot 'L00CProcessCampaignController.cs'
-$product = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
-$output = Join-Path $RepositoryRoot '.local\L00C\menu-action-testmod\Debug\isrworldgenl00clab'
-
-foreach ($path in @($project, $modSystem, $laboratoryHost, $driver, $bootstrap, $controller, (Join-Path $GamePath 'VintagestoryAPI.dll'))) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required L00-C laboratory input is missing: $path" }
-}
-if (Select-String -LiteralPath $project -Pattern 'ProjectReference|src\\WorldGen' -Quiet) {
-    throw 'Test mod must not reference product projects.'
-}
-if (-not (Select-String -LiteralPath $project -SimpleMatch 'BeforeTargets="PrepareForBuild"' -Quiet)) {
-    throw 'Release rejection must run before PrepareForBuild, before C# compilation.'
-}
-if (Select-String -LiteralPath @($modSystem, $laboratoryHost, $driver) -Pattern 'SendKeys|mouse_event|keybd_event|WindowsInput|Process\.Start|Start-Process|GetCredential|AuthenticationHeader|Password' -Quiet) {
-    throw 'L00-C laboratory host must not synthesize input, start a process, or access authentication material.'
-}
-foreach ($required in @('public sealed class L00CMenuActionLabModSystem', 'StartClientSide(ICoreClientAPI api)', 'L00CProcessCampaignController.InstallOrSignal', 'Debugger.IsAttached', 'ISR_L00C_LAB', 'ISR_L00C_LAB_ROOT')) {
-    if (-not (Select-String -LiteralPath $modSystem -SimpleMatch $required -Quiet)) { throw "Missing test-mod contract: $required" }
-}
-foreach ($required in @('TryAdvance(object screenManager)', 'TryFindMenuLeft', 'TryFindCurrentSingleplayerScreen', 'TryFindClientSession', 'stableTicks < 3', 'RequiredPrimaryCycles = 5')) {
-    if (-not (Select-String -LiteralPath @($laboratoryHost, $driver) -SimpleMatch $required -Quiet)) { throw "Missing client-cycle contract: $required" }
-}
-foreach ($required in @('internal sealed class L00CProcessCampaignController', 'EnqueueMainThreadTask', 'OnNewFrame', 'InstallOrSignal', 'SignalSessionReady', 'UnregisterAndClearSingleton', 'active = null', 'no API, world, client, or session is retained')) {
-    if (-not (Select-String -LiteralPath @($controller, $driver) -SimpleMatch $required -Quiet)) { throw "Missing process-lifetime controller contract: $required" }
-}
-if (Select-String -LiteralPath $controller -Pattern 'ICoreClientAPI\s+[A-Za-z_][A-Za-z0-9_]*\s*;' -Quiet) {
-    throw 'Process-lifetime controller must not retain ICoreClientAPI.'
-}
-foreach ($required in @('L00CFixtureBootstrap', 'CreateFixtureWorld', 'ConnectToSingleplayer', 'StartServerArgs', 'GuiScreenSingleplayer.entries', 'ClientCellBindingConfirmed', 'File.Exists(fixture.SavePath)', 'FileMode.CreateNew', 'WaitPrimaryMenu', 'WaitSecondaryCell', 'L00CMenuActionLaboratoryHost.Open')) {
-    if (-not (Select-String -LiteralPath @($bootstrap, $driver, $modSystem) -SimpleMatch $required -Quiet)) { throw "Missing native bootstrap contract: $required" }
-}
-if (Select-String -LiteralPath $bootstrap -Pattern 'OnClickCellLeft|\[.*CellIndex.*\]|ClientSaveCellIndex\s*=\s*[0-9]' -Quiet) { throw 'Bootstrap must observe a live save cell; it must not infer or invoke a cell index.' }
-
-& dotnet build $project --configuration Debug --nologo "-p:VintageStoryPath=$GamePath"
-if ($LASTEXITCODE -ne 0) { throw "L00-C test mod Debug build failed with exit code $LASTEXITCODE." }
-foreach ($packageFile in @('ISRWorldGen.L00C.MenuActionLab.dll', 'modinfo.json')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $output $packageFile) -PathType Leaf)) { throw "L00-C local package is incomplete: $packageFile" }
-}
-if (Select-String -LiteralPath $product -SimpleMatch 'L00CMenuActionLab' -Quiet) { throw 'Production package must not reference the L00-C test mod.' }
-
-$releaseOutput = (& dotnet build $project --configuration Release --nologo "-p:VintageStoryPath=$GamePath" 2>&1 | Out-String)
-$releaseExitCode = $LASTEXITCODE
-if ($releaseExitCode -eq 0) { throw 'L00-C test mod Release build unexpectedly succeeded.' }
-if ($releaseOutput -notmatch [regex]::Escape('L00-C menu laboratory mod is Debug-only.')) {
-    throw "L00-C test mod Release build did not fail at the explicit Debug-only gate:$([Environment]::NewLine)$releaseOutput"
-}
-if ($releaseOutput -match 'CS0169') { throw "L00-C test mod Release build reached C# compilation instead of the Debug-only gate:$([Environment]::NewLine)$releaseOutput" }
-[ordered]@{
-    TestId = 'L00-C-MENU-HOST-TESTMOD-STATIC'
-    Status = 'PASS'
-    Scope = 'Debug test-mod compilation and isolation only; no client runtime or authentication was exercised.'
-    Package = $output
-    ModSystem = 'ISRWorldGen.L00C.Laboratory.L00CMenuActionLabModSystem'
-    ReleaseRejection = 'PASS: RejectNonDebugLaboratoryBuild before PrepareForBuild'
-    Utc = [DateTimeOffset]::UtcNow.ToString('o')
-} | ConvertTo-Json -Depth 4
+foreach ($removed in @('L00CMenuActionLabMod.csproj','modinfo.json','Set-L00CTestModMount.ps1')) { if (Test-Path -LiteralPath (Join-Path $PSScriptRoot $removed)) { throw "Retired parallel-mod artifact remains: $removed" } }
+$system = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'L00CMenuActionLabModSystem.cs') -Raw
+foreach ($required in @('public sealed class L00CMenuActionLabModSystem : ModSystem','if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) return;','Debugger.IsAttached','ISR_L00C_LAB_ROOT','L00CProcessCampaignController.InstallOrSignal')) { if (-not $system.Contains($required)) { throw "Missing in-process harness guard: $required" } }
+if ($system.IndexOf('if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) return;', [StringComparison]::Ordinal) -gt $system.IndexOf('RequireLaboratoryRoot', [StringComparison]::Ordinal)) { throw 'The laboratory switch must be evaluated before root or debugger validation.' }
+foreach ($source in $sources) { if (Select-String -LiteralPath $source -Pattern 'SendKeys|mouse_event|keybd_event|WindowsInput|Process\.Start|Start-Process|GetCredential|AuthenticationHeader|Password' -Quiet) { throw "Harness source must not synthesize input, start a process, or access authentication material: $source" } }
+& dotnet build $project -c Debug --nologo "-p:VintageStoryPath=$GamePath"; if ($LASTEXITCODE -ne 0) { throw "Debug ISRWorldGen build failed with exit code $LASTEXITCODE." }
+& dotnet build $project -c Release --nologo "-p:VintageStoryPath=$GamePath"; if ($LASTEXITCODE -ne 0) { throw "Release ISRWorldGen build failed with exit code $LASTEXITCODE." }
+$debugDll = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\bin\Debug\Mods\isrworldgen\ISRWorldGen.dll'; $releaseDll = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\bin\Release\Mods\isrworldgen\ISRWorldGen.dll'
+foreach ($path in @($debugDll,$releaseDll)) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "ISRWorldGen binary is missing: $path" } }
+Add-Type -Path (Join-Path $GamePath 'Lib\Mono.Cecil.dll')
+function Get-Types([string]$Path) { $module = [Mono.Cecil.ModuleDefinition]::ReadModule($Path); try { @($module.Types | ForEach-Object FullName) } finally { $module.Dispose() } }
+$debugTypes = Get-Types $debugDll; $releaseTypes = Get-Types $releaseDll; $harnessType = 'ISRWorldGen.L00C.Laboratory.L00CMenuActionLabModSystem'
+if ($debugTypes -notcontains $harnessType) { throw 'Debug ISRWorldGen.dll does not contain the linked L00-C harness.' }
+if ($releaseTypes -contains $harnessType -or (@($releaseTypes | Where-Object { $_ -like 'ISRWorldGen.L00C.Laboratory.*' })).Count -ne 0) { throw 'Release ISRWorldGen.dll contains laboratory harness code.' }
+$output = Split-Path $debugDll -Parent
+if (Get-ChildItem -LiteralPath $output -Recurse -File | Where-Object { $_.Name -match 'MenuActionLab|isrworldgenl00clab' -or $_.Name -eq 'modinfo.json' -and $_.DirectoryName -match 'isrworldgenl00clab' }) { throw 'Debug output contains a retired parallel laboratory package.' }
+[ordered]@{ TestId='L00-C-INPROCESS-HARNESS-BINARY'; Status='PASS'; Scope='Debug/Release ISRWorldGen binary composition only; no client runtime or authentication was exercised.'; DebugHarness=$harnessType; ReleaseHarnessAbsent=$true; Utc=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json -Compress

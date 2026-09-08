@@ -16,6 +16,17 @@
     </Reference>
   </ItemGroup>
 
+  <!-- The L00-C client harness stays owned by the test tree.  It is linked
+       into the existing mod only for Debug builds so Vintage Story loads no
+       second package and Release cannot ship laboratory code. -->
+  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+    <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CMenuActionLabModSystem.cs" Link="L00C\L00CMenuActionLabModSystem.cs" />
+    <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CMenuActionLaboratoryHost.cs" Link="L00C\L00CMenuActionLaboratoryHost.cs" />
+    <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CMenuActionDriver.cs" Link="L00C\L00CMenuActionDriver.cs" />
+    <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CFixtureBootstrap.cs" Link="L00C\L00CFixtureBootstrap.cs" />
+    <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CProcessCampaignController.cs" Link="L00C\L00CProcessCampaignController.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="worldconfig.json" CopyToOutputDirectory="PreserveNewest" />

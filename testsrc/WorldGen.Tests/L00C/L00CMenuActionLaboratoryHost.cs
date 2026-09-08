@@ -9,6 +9,7 @@ using System.Globalization;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
+/// <summary>Strict, debug-only sequence controller for the L00-C client recipe.</summary>
 public sealed class L00CMenuActionLaboratoryHost
 {
     private const int RequiredPrimaryCycles = 5;
@@ -23,6 +24,7 @@ public sealed class L00CMenuActionLaboratoryHost
     private L00CMenuActionLaboratoryHost(string evidenceDirectory, L00CMarkedSaveCell primary, L00CMarkedSaveCell secondary)
     { this.evidenceDirectory = evidenceDirectory; this.primary = primary; this.secondary = secondary; }
 
+    /// <summary>Creates a controller bound to two observed laboratory save cells.</summary>
     public static L00CMenuActionLaboratoryHost Open(string laboratoryRoot, string evidenceDirectory, string primarySave, string secondarySave)
     {
         RequireDebugLaboratory();
@@ -41,6 +43,7 @@ public sealed class L00CMenuActionLaboratoryHost
         return host;
     }
 
+    /// <summary>Requests the audited singleplayer menu action.</summary>
     public void EnterSingleplayerMenu(object mainMenuLeft)
     {
         RequireDebugLaboratory();
@@ -51,6 +54,7 @@ public sealed class L00CMenuActionLaboratoryHost
     }
 
     // No index is accepted from a caller: only the marker-confirmed cell may be invoked.
+    /// <summary>Opens the marker-confirmed primary save cell.</summary>
     public void OpenPrimary(object singleplayerScreen)
     {
         RequireDebugLaboratory();
@@ -60,6 +64,7 @@ public sealed class L00CMenuActionLaboratoryHost
         Record(receipt.Action, primary, receipt.TargetMethod); WriteReceipt("primary-open-" + primaryCycles);
     }
 
+    /// <summary>Opens the marker-confirmed secondary save cell.</summary>
     public void OpenSecondary(object singleplayerScreen)
     {
         RequireDebugLaboratory();
@@ -69,6 +74,7 @@ public sealed class L00CMenuActionLaboratoryHost
         Record("open-secondary-world", secondary, receipt.TargetMethod); WriteReceipt("secondary-open");
     }
 
+    /// <summary>Returns from the active laboratory world through audited client actions.</summary>
     public void ReturnToMainMenu(object clientMain, object screenManager)
     {
         RequireDebugLaboratory();
@@ -81,6 +87,7 @@ public sealed class L00CMenuActionLaboratoryHost
         Record(receipt.Action, target, receipt.TargetMethod); WriteReceipt("returned-main-menu");
     }
 
+    /// <summary>Records successful completion after the mandated literal sequence.</summary>
     public void Complete()
     {
         RequireDebugLaboratory();

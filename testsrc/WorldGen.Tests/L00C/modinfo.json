@@ -1,9 +1,0 @@
-{
-  "type": "code",
-  "modid": "isrworldgenl00clab",
-  "name": "ISRWorldGen L00-C Menu Laboratory",
-  "authors": [ "InitSysRev" ],
-  "description": "Debug-only, local-only L00-C client menu-cycle laboratory host.",
-  "version": "0.0.0-lab",
-  "dependencies": { "game": "1.22.7" }
-}
