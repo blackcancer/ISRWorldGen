@@ -307,12 +307,26 @@ public sealed class MaterialExposure
     public bool TryGetExposedSolidBelow(long x, long z, int removedBottomExclusiveY, out int exposedY, out MaterialSample sample)
     {
         int lowestY = snapshot.Layers[^1].BottomInclusiveY;
-        for (int y = checked(removedBottomExclusiveY - 1); y >= lowestY; y--)
+        if (removedBottomExclusiveY <= lowestY)
+        {
+            exposedY = default;
+            sample = default;
+            return false;
+        }
+
+        int highestY = snapshot.Layers[0].TopExclusiveY - 1;
+        int firstCandidateY = Math.Min(removedBottomExclusiveY - 1, highestY);
+        for (int y = firstCandidateY; ; y--)
         {
             if (TryQuerySolid(x, y, z, out sample))
             {
                 exposedY = y;
                 return true;
+            }
+
+            if (y == lowestY)
+            {
+                break;
             }
         }
 

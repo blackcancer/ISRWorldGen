@@ -1,3 +1,4 @@
+using ISRWorldGen.Core.Contracts;
 using ISRWorldGen.Core.Foundation;
 using ISRWorldGen.Core.Geology.Materials;
 
@@ -102,6 +103,94 @@ public sealed class MaterialSnapshotTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new FractureZone(Id(14), 0, 0, 1_000_001, 0, 1, 0.5));
     }
 
+    [TestMethod]
+    public void T03_03_CatalogIsExhaustiveImmutableAndChecksumIgnoresInputPermutation()
+    {
+        KeyValuePair<GeologicalMaterialCode, MaterialProperties>[] source = CatalogPairs();
+        MaterialCatalog forward = new(source);
+        MaterialCatalog reversed = new(source.Reverse());
+
+        source[0] = Pair(GeologicalMaterialCode.Sandstone, 0, 0, 0);
+        Assert.AreEqual(forward.ContentChecksum, reversed.ContentChecksum);
+        Assert.HasCount(Enum.GetValues<GeologicalMaterialCode>().Length, forward.Properties);
+        foreach (GeologicalMaterialCode code in Enum.GetValues<GeologicalMaterialCode>())
+        {
+            Assert.IsTrue(forward.Properties.ContainsKey(code));
+            MaterialProperties properties = forward.Get(code);
+            Assert.AreNotEqual(default, properties);
+        }
+
+        Assert.ThrowsExactly<NotSupportedException>(() => ((IDictionary<GeologicalMaterialCode, MaterialProperties>)forward.Properties).Add(GeologicalMaterialCode.Sandstone, default));
+        Assert.ThrowsExactly<ArgumentException>(() => new MaterialCatalog(CatalogPairs().Take(4)));
+        Assert.ThrowsExactly<ArgumentException>(() => new MaterialCatalog([.. CatalogPairs(), CatalogPairs()[0]]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new MaterialCatalog([.. CatalogPairs(), Pair((GeologicalMaterialCode)255, 0.1, 0.1, 0.1)]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new MaterialProperties(double.NaN, 0.1, 0.1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new MaterialProperties(0.1, double.PositiveInfinity, 0.1));
+    }
+
+    [TestMethod]
+    public void T03_03_StrataAndFracturesHaveStableSemiOpenBoundariesAndComposedPermeability()
+    {
+        MaterialSnapshot snapshot = SyntheticSnapshot();
+        MaterialSnapshot overlapping = new(Catalog(), snapshot.Layers,
+        [
+            new FractureZone(Id(20), 0, 0, 1, 0, 2, 0.4),
+            new FractureZone(Id(21), 0, 0, 0, 1, 2, 0.9),
+        ]);
+
+        Assert.AreEqual(GeologicalMaterialCode.Basalt, snapshot.Query(7, 19, 7).MaterialCode);
+        Assert.AreEqual(GeologicalMaterialCode.Limestone, snapshot.Query(7, 20, 7).MaterialCode);
+        Assert.AreEqual(GeologicalMaterialCode.Limestone, snapshot.Query(7, 59, 7).MaterialCode);
+        Assert.AreEqual(GeologicalMaterialCode.Sandstone, snapshot.Query(7, 60, 7).MaterialCode);
+        Assert.IsTrue(overlapping.Query(2, 45, 2).IsFractured);
+        Assert.AreEqual(0.9, overlapping.Query(2, 45, 2).Properties.PermeabilityNormalized, 1e-15);
+        Assert.IsFalse(overlapping.Query(3, 45, 3).IsFractured);
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => snapshot.Query(0, -1, 0));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => snapshot.Query(0, 90, 0));
+        Assert.ThrowsExactly<ArgumentException>(() => new MaterialSnapshot(Catalog(), [Layer(1, 0, 20, GeologicalMaterialCode.Basalt), Layer(1, 20, 40, GeologicalMaterialCode.Limestone)], []));
+        Assert.ThrowsExactly<ArgumentException>(() => new MaterialSnapshot(Catalog(), snapshot.Layers, [new FractureZone(Id(1), 0, 0, 1, 0, 1, 0.1), new FractureZone(Id(1), 0, 0, 0, 1, 1, 0.1)]));
+    }
+
+    [TestMethod]
+    public void T03_04_RemovalVolumesRemainSemiOpenAcrossOverlapsAndVerticalExtremes()
+    {
+        MaterialSnapshot snapshot = SyntheticSnapshot();
+        RockRemovalVolume valley = new(RockRemovalKind.Valley, long.MinValue, 1, 20, 60, long.MinValue, 1);
+        RockRemovalVolume cavern = new(RockRemovalKind.Cavern, -1, 1, 0, 20, -1, 1);
+        MaterialExposure exposure = new(snapshot, [cavern, valley]);
+
+        Assert.IsFalse(exposure.TryQuerySolid(0, 20, 0, out _));
+        Assert.IsTrue(exposure.TryQuerySolid(1, 20, 0, out MaterialSample atExclusiveX));
+        Assert.AreEqual(GeologicalMaterialCode.Limestone, atExclusiveX.MaterialCode);
+        Assert.IsTrue(exposure.TryQuerySolid(0, 60, 0, out MaterialSample atExclusiveY));
+        Assert.AreEqual(GeologicalMaterialCode.Sandstone, atExclusiveY.MaterialCode);
+        Assert.IsTrue(exposure.TryGetExposedSolidBelow(0, 0, int.MaxValue, out int topExposedY, out MaterialSample topExposed));
+        Assert.AreEqual(89, topExposedY);
+        Assert.AreEqual(snapshot.Query(0, topExposedY, 0), topExposed);
+        Assert.IsFalse(exposure.TryGetExposedSolidBelow(0, 0, int.MinValue, out _, out _));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new RockRemovalVolume((RockRemovalKind)255, 0, 1, 0, 1, 0, 1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new RockRemovalVolume(RockRemovalKind.Valley, 0, 0, 0, 1, 0, 1));
+    }
+
+    [TestMethod]
+    public void SnapshotCopiesInputCollectionsAndDeliveryRejectsMissingEndpoints()
+    {
+        StratigraphicLayer[] layers = SyntheticSnapshot().Layers.ToArray();
+        FractureZone[] fractures = SyntheticSnapshot().Fractures.ToArray();
+        MaterialSnapshot snapshot = new(Catalog(), layers, fractures);
+        Hash256 checksum = snapshot.ContentChecksum;
+        layers[0] = Layer(99, 0, 90, GeologicalMaterialCode.Granite);
+        fractures[0] = new FractureZone(Id(99), 100, 100, 1, 0, 1, 0.1);
+
+        Assert.AreEqual(checksum, snapshot.ContentChecksum);
+        Assert.AreEqual(GeologicalMaterialCode.Limestone, snapshot.Query(0, 45, 1).MaterialCode);
+        Assert.ThrowsExactly<NotSupportedException>(() => ((IList<StratigraphicLayer>)snapshot.Layers).Add(Layer(100, 90, 100, GeologicalMaterialCode.Granite)));
+        Assert.ThrowsExactly<ArgumentNullException>(() => MaterialQueryDelivery.Deliver(null!, 0, 0, 0, new RecordingConsumer()));
+        Assert.ThrowsExactly<ArgumentNullException>(() => MaterialQueryDelivery.Deliver(snapshot, 0, 0, 0, null!));
+        Assert.ThrowsExactly<ArgumentNullException>(() => new MaterialExposure(null!, []));
+        Assert.ThrowsExactly<ArgumentNullException>(() => new MaterialExposure(snapshot, null!));
+    }
+
     private static MaterialSnapshot SyntheticSnapshot() => new(
         Catalog(),
         [
@@ -111,14 +200,16 @@ public sealed class MaterialSnapshotTests
         ],
         [new FractureZone(Id(10), 0, 0, 1, 0, 2, 0.9)]);
 
-    private static MaterialCatalog Catalog() => new(
+    private static MaterialCatalog Catalog() => new(CatalogPairs());
+
+    private static KeyValuePair<GeologicalMaterialCode, MaterialProperties>[] CatalogPairs() =>
     [
         Pair(GeologicalMaterialCode.Sandstone, 0.45, 0.1, 0.55),
         Pair(GeologicalMaterialCode.Shale, 0.25, 0.05, 0.2),
         Pair(GeologicalMaterialCode.Limestone, 0.6, 0.95, 0.35),
         Pair(GeologicalMaterialCode.Basalt, 0.9, 0.02, 0.08),
         Pair(GeologicalMaterialCode.Granite, 0.85, 0.01, 0.04),
-    ]);
+    ];
 
     private static KeyValuePair<GeologicalMaterialCode, MaterialProperties> Pair(GeologicalMaterialCode code, double erosion, double solubility, double permeability) => new(code, new MaterialProperties(erosion, solubility, permeability));
 
