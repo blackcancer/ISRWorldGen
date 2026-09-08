@@ -25,14 +25,15 @@ function New-Fixture([string]$Name, [string]$Arguments = '--tracelog') {
     $launch = Join-Path $properties 'launchSettings.json'; [IO.File]::WriteAllText($launch, $json, [Text.UTF8Encoding]::new($false)); [pscustomobject]@{ Root = $root; Lab = $lab; Package = $package; Launch = $launch }
 }
 try {
-    $good = New-Fixture good; $before = [IO.File]::ReadAllBytes($good.Launch)
+    $good = New-Fixture good; $before = [IO.File]::ReadAllBytes($good.Launch); $modPath = [IO.Path]::GetFullPath((Join-Path $good.Lab 'menu-action-testmod\Debug'))
+    if ([IO.Path]::GetFullPath((Join-Path $modPath 'isrworldgenl00clab')) -cne $good.Package -or -not (Test-Path -LiteralPath (Join-Path $good.Package 'modinfo.json') -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $good.Package 'ISRWorldGen.L00C.MenuActionLab.dll') -PathType Leaf)) { throw 'Fixture package must be a complete direct child of the Debug addModPath container.' }
     $beforeDocument = Get-Content -LiteralPath $good.Launch -Raw | ConvertFrom-Json
     $beforeTrailingProfiles = @($beforeDocument.profiles.PSObject.Properties | Select-Object -Skip 1 | ForEach-Object { $_.Name + ':' + ($_.Value | ConvertTo-Json -Depth 16 -Compress) })
     $receipt = & $helper -Action Prepare -SyntheticFixtureRoot $good.Root | ConvertFrom-Json
     $after = Get-Content -LiteralPath $good.Launch -Raw | ConvertFrom-Json
     $profiles = @($after.profiles.PSObject.Properties); $first = $profiles[0].Value; $second = $profiles[1].Value
     $afterTrailingProfiles = @($after.profiles.PSObject.Properties | Select-Object -Skip 1 | ForEach-Object { $_.Name + ':' + ($_.Value | ConvertTo-Json -Depth 16 -Compress) })
-    if ($first.commandLineArgs -notmatch [regex]::Escape($good.Package) -or $first.commandLineArgs -match '(?i)--dataPath' -or $first.environmentVariables.ISR_L00C_LAB -ne '1' -or $first.environmentVariables.ISR_L00C_LAB_ROOT -ne $good.Lab -or -not (Test-StringArrayEqual $beforeTrailingProfiles $afterTrailingProfiles)) { throw 'Prepare must alter only the first profile and preserve its no-dataPath contract.' }
+    if ($first.commandLineArgs -notmatch ('--addModPath "' + [regex]::Escape($modPath) + '"') -or $first.commandLineArgs -match ('--addModPath "' + [regex]::Escape($good.Package) + '"') -or $first.commandLineArgs -match '(?i)--dataPath' -or $first.environmentVariables.ISR_L00C_LAB -ne '1' -or $first.environmentVariables.ISR_L00C_LAB_ROOT -ne $good.Lab -or -not (Test-StringArrayEqual $beforeTrailingProfiles $afterTrailingProfiles)) { throw 'Prepare must alter only the first profile, with the package container as addModPath, and preserve its no-dataPath contract.' }
     & $helper -Action Restore -SyntheticFixtureRoot $good.Root -BackupDirectory $receipt.BackupDirectory | Out-Null
     if (-not [Linq.Enumerable]::SequenceEqual[byte]($before, [IO.File]::ReadAllBytes($good.Launch))) { throw 'Restore did not reinstate strict original bytes.' }
     foreach ($indicator in @('login', 'token', 'credential', 'password')) {

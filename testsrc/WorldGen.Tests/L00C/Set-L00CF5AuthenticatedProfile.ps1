@@ -58,6 +58,8 @@ if ($Action -eq 'Restore') {
 foreach ($required in @($laboratory, (Join-Path $laboratory '.isrworldgen-lab'))) { if (-not (Test-Path -LiteralPath $required)) { throw "Required L00-C laboratory root input is missing: $required" } }
 $package = Get-CanonicalPath (Join-Path $laboratory 'menu-action-testmod\Debug\isrworldgenl00clab')
 foreach ($required in @((Join-Path $package 'modinfo.json'), (Join-Path $package 'ISRWorldGen.L00C.MenuActionLab.dll'))) { if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required L00-C test-mod package input is missing: $required" } }
+$modPath = Get-CanonicalPath (Join-Path $laboratory 'menu-action-testmod\Debug')
+if ([IO.Path]::GetFullPath((Join-Path $modPath 'isrworldgenl00clab')) -cne $package) { throw 'Test-mod package must be the expected direct child of its addModPath container.' }
 
 $lock = [IO.File]::Open($launchSettings, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
 try { $original = New-Object byte[] $lock.Length; [void]$lock.Read($original, 0, $original.Length) } finally { $lock.Dispose() }
@@ -66,7 +68,7 @@ $profiles = @($document.profiles.PSObject.Properties)
 if ($profiles.Count -lt 1) { throw 'launchSettings.json contains no profile.' }
 $first = $profiles[0]
 if ($first.Name -ne 'ISRWorldGen Client (authenticated user data)' -or $first.Value.commandName -ne 'Executable' -or [IO.Path]::GetFileName([string]$first.Value.executablePath) -ne 'Vintagestory.exe' -or [string]$first.Value.commandLineArgs -match '(?i)--dataPath(?:\s|=|$)' -or (Test-SensitiveProfile $first.Value)) { throw 'First F5 profile is not the conforming authenticated client profile, or it requests credential material.' }
-$profile = $first.Value; $profile.commandLineArgs = ([string]$profile.commandLineArgs).TrimEnd() + ' --addModPath "' + $package + '"'
+$profile = $first.Value; $profile.commandLineArgs = ([string]$profile.commandLineArgs).TrimEnd() + ' --addModPath "' + $modPath + '"'
 if ($null -eq $profile.PSObject.Properties['environmentVariables']) { $profile | Add-Member -NotePropertyName environmentVariables -NotePropertyValue ([pscustomobject]@{}) }
 $profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB -NotePropertyValue '1' -Force
 $profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB_ROOT -NotePropertyValue $laboratory -Force
