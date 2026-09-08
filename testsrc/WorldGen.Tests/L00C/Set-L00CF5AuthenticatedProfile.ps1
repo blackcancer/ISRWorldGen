@@ -37,6 +37,7 @@ else {
 }
 $launchSettings = Get-CanonicalPath (Join-Path $repository 'src\WorldGen.VintageStory\Properties\launchSettings.json')
 $laboratory = Get-CanonicalPath (Join-Path $repository '.local\L00C')
+$mountHelper = Join-Path $PSScriptRoot 'Set-L00CTestModMount.ps1'
 
 if ($Action -eq 'Restore') {
     if ([string]::IsNullOrWhiteSpace($BackupDirectory)) { throw 'Restore requires -BackupDirectory returned by Prepare.' }
@@ -50,16 +51,14 @@ if ($Action -eq 'Restore') {
     if ((Get-Sha256 $current) -ne $metadata.ModifiedSha256) { throw 'Refusing restore: launchSettings.json changed after Prepare.' }
     $original = [IO.File]::ReadAllBytes($originalPath)
     if ((Get-Sha256 $original) -ne $metadata.OriginalSha256) { throw 'Backup hash does not match its preparation receipt.' }
+    & $mountHelper -Action Restore -SyntheticFixtureRoot $SyntheticFixtureRoot -BackupDirectory $metadata.MountBackupDirectory | Out-Null
     Replace-Atomically $launchSettings $original
     if ((Get-Sha256 ([IO.File]::ReadAllBytes($launchSettings))) -ne $metadata.OriginalSha256) { throw 'Atomic restore verification failed.' }
     [ordered]@{ Status = 'RESTORED'; BackupDirectory = $backup; Sha256 = $metadata.OriginalSha256 } | ConvertTo-Json -Compress; return
 }
 
 foreach ($required in @($laboratory, (Join-Path $laboratory '.isrworldgen-lab'))) { if (-not (Test-Path -LiteralPath $required)) { throw "Required L00-C laboratory root input is missing: $required" } }
-$package = Get-CanonicalPath (Join-Path $laboratory 'menu-action-testmod\Debug\isrworldgenl00clab')
-foreach ($required in @((Join-Path $package 'modinfo.json'), (Join-Path $package 'ISRWorldGen.L00C.MenuActionLab.dll'))) { if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required L00-C test-mod package input is missing: $required" } }
-$modPath = Get-CanonicalPath (Join-Path $laboratory 'menu-action-testmod\Debug')
-if ([IO.Path]::GetFullPath((Join-Path $modPath 'isrworldgenl00clab')) -cne $package) { throw 'Test-mod package must be the expected direct child of its addModPath container.' }
+$modsProfileArgument = '--addModPath "$(ProjectDir)bin\$(Configuration)\Mods"'
 
 $lock = [IO.File]::Open($launchSettings, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
 try { $original = New-Object byte[] $lock.Length; [void]$lock.Read($original, 0, $original.Length) } finally { $lock.Dispose() }
@@ -67,17 +66,27 @@ $originalHash = Get-Sha256 $original; $document = ([Text.Encoding]::UTF8.GetStri
 $profiles = @($document.profiles.PSObject.Properties)
 if ($profiles.Count -lt 1) { throw 'launchSettings.json contains no profile.' }
 $first = $profiles[0]
-if ($first.Name -ne 'ISRWorldGen Client (authenticated user data)' -or $first.Value.commandName -ne 'Executable' -or [IO.Path]::GetFileName([string]$first.Value.executablePath) -ne 'Vintagestory.exe' -or [string]$first.Value.commandLineArgs -match '(?i)--dataPath(?:\s|=|$)' -or (Test-SensitiveProfile $first.Value)) { throw 'First F5 profile is not the conforming authenticated client profile, or it requests credential material.' }
-$profile = $first.Value; $profile.commandLineArgs = ([string]$profile.commandLineArgs).TrimEnd() + ' --addModPath "' + $modPath + '"'
-if ($null -eq $profile.PSObject.Properties['environmentVariables']) { $profile | Add-Member -NotePropertyName environmentVariables -NotePropertyValue ([pscustomobject]@{}) }
-$profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB -NotePropertyValue '1' -Force
-$profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB_ROOT -NotePropertyValue $laboratory -Force
-$modified = [Text.Encoding]::UTF8.GetBytes(($document | ConvertTo-Json -Depth 16)); $modifiedHash = Get-Sha256 $modified
-$backupParent = Join-Path $laboratory 'f5-profile-backups'; [void](New-Item -ItemType Directory -Path $backupParent -Force)
-$backup = Join-Path $backupParent ('f5-' + [Guid]::NewGuid().ToString('N')); [void](New-Item -ItemType Directory -Path $backup -ErrorAction Stop)
-$owner = (Get-Acl -LiteralPath $backup).Owner; Write-NewBytes (Join-Path $backup 'launchSettings.original.json') $original
-$metadata = [ordered]@{ Owner = $owner; LaunchSettingsPath = $launchSettings; FirstProfile = $first.Name; OriginalSha256 = $originalHash; ModifiedSha256 = $modifiedHash; PreparedUtc = [DateTimeOffset]::UtcNow.ToString('o') }
-Write-NewBytes (Join-Path $backup 'metadata.json') ([Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Depth 4)))
-Replace-Atomically $launchSettings $modified
-if ((Get-Sha256 ([IO.File]::ReadAllBytes($launchSettings))) -ne $modifiedHash) { throw 'Atomic preparation verification failed.' }
-[ordered]@{ Status = 'PREPARED'; BackupDirectory = $backup; FirstProfile = $first.Name; Sha256 = $modifiedHash } | ConvertTo-Json -Compress
+$addModPathCount = [regex]::Matches([string]$first.Value.commandLineArgs, '(?i)(?:^|\s)--addModPath(?:\s|=)').Count
+if ($first.Name -ne 'ISRWorldGen Client (authenticated user data)' -or $first.Value.commandName -ne 'Executable' -or [IO.Path]::GetFileName([string]$first.Value.executablePath) -ne 'Vintagestory.exe' -or $addModPathCount -ne 1 -or [string]$first.Value.commandLineArgs -notmatch [regex]::Escape($modsProfileArgument) -or [string]$first.Value.commandLineArgs -match '(?i)--dataPath(?:\s|=|$)' -or (Test-SensitiveProfile $first.Value)) { throw 'First F5 profile is not the conforming authenticated client profile with exactly its existing production Mods path, or it requests credential material.' }
+$mountReceipt = & $mountHelper -Action Prepare -SyntheticFixtureRoot $SyntheticFixtureRoot | ConvertFrom-Json
+$modifiedHash = $null
+try {
+    $profile = $first.Value
+    if ($null -eq $profile.PSObject.Properties['environmentVariables']) { $profile | Add-Member -NotePropertyName environmentVariables -NotePropertyValue ([pscustomobject]@{}) }
+    $profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB -NotePropertyValue '1' -Force
+    $profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB_ROOT -NotePropertyValue $laboratory -Force
+    $modified = [Text.Encoding]::UTF8.GetBytes(($document | ConvertTo-Json -Depth 16)); $modifiedHash = Get-Sha256 $modified
+    $backupParent = Join-Path $laboratory 'f5-profile-backups'; [void](New-Item -ItemType Directory -Path $backupParent -Force)
+    $backup = Join-Path $backupParent ('f5-' + [Guid]::NewGuid().ToString('N')); [void](New-Item -ItemType Directory -Path $backup -ErrorAction Stop)
+    $owner = (Get-Acl -LiteralPath $backup).Owner; Write-NewBytes (Join-Path $backup 'launchSettings.original.json') $original
+    $metadata = [ordered]@{ Owner = $owner; LaunchSettingsPath = $launchSettings; FirstProfile = $first.Name; OriginalSha256 = $originalHash; ModifiedSha256 = $modifiedHash; MountBackupDirectory = $mountReceipt.BackupDirectory; MountedPackage = $mountReceipt.MountedPackage; PreparedUtc = [DateTimeOffset]::UtcNow.ToString('o') }
+    Write-NewBytes (Join-Path $backup 'metadata.json') ([Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Depth 4)))
+    Replace-Atomically $launchSettings $modified
+    if ((Get-Sha256 ([IO.File]::ReadAllBytes($launchSettings))) -ne $modifiedHash) { throw 'Atomic preparation verification failed.' }
+    [ordered]@{ Status = 'PREPARED'; BackupDirectory = $backup; FirstProfile = $first.Name; Sha256 = $modifiedHash } | ConvertTo-Json -Compress
+}
+catch {
+    if ($null -ne $modifiedHash -and (Test-Path -LiteralPath $launchSettings -PathType Leaf) -and (Get-Sha256 ([IO.File]::ReadAllBytes($launchSettings))) -eq $modifiedHash) { Replace-Atomically $launchSettings $original }
+    & $mountHelper -Action Restore -SyntheticFixtureRoot $SyntheticFixtureRoot -BackupDirectory $mountReceipt.BackupDirectory | Out-Null
+    throw
+}
