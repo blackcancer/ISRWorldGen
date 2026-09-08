@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-08T08:05:17.8033278Z",
-  "integrated_commit": "70e74117194764762e117d6c1ef6615b09c4e100",
+  "updated_utc": "2026-09-08T08:30:00Z",
+  "integrated_commit": "211309d2bf4ea3ec3a6468bf6418492c55f44f82",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -269,11 +269,19 @@
       "blocker": null
     },
     "L05-B": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
-      "evidence": [],
+      "status": "DONE",
+      "owner": "integrator:l05-b",
+      "branch": "agent/l05-b",
+      "base_commit": "c94a5547e1a1867c91e0449c7dbb39f0590e4109",
+      "evidence": [
+        "worklogs/L05-B.md",
+        "commit:da641d696b06fa74faf5f6234e4e175da8c0790b",
+        "commit:228b001fa7b9657d913c884992c2456a1fb6c5ae",
+        "commit:211309d2bf4ea3ec3a6468bf6418492c55f44f82",
+        "local:main Debug T05-03 5/5 PASS",
+        "local:main Release T05-03 5/5 PASS",
+        "local:main Release L04-C/L05-A/L05-B regression 20/20 PASS"
+      ],
       "blocker": null
     },
     "L05-C": {
