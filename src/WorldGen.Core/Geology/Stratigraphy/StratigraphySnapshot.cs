@@ -123,6 +123,41 @@ public readonly record struct GeologyRevisionIdentity(string GeologyRevision, st
 
 public interface IGeologyVolumeQuery { GeologyRevisionIdentity Identity { get; } GeologySample SampleRock(long x, int y, long z); }
 
+/// <summary>Known alluvial cover. It is distinct from the immutable bedrock queried below it.</summary>
+public sealed record AlluvialDeposit(string DepositKey, double Thickness, string Provenance)
+{
+    public string DepositKey { get; } = Token.Require(DepositKey, nameof(DepositKey));
+    public double Thickness { get; } = double.IsFinite(Thickness) && Thickness > 0d ? Thickness : throw new ArgumentOutOfRangeException(nameof(Thickness));
+    public string Provenance { get; } = Token.Require(Provenance, nameof(Provenance));
+}
+
+public readonly record struct SurfaceMaterialSample(GeologySample Bedrock, AlluvialDeposit? Deposit, long X, int ExposedY, long Z);
+
+/// <summary>Maps an incision's exposed coordinate directly back to the immutable geology volume.</summary>
+public sealed class StratigraphySurfaceSampler
+{
+    private readonly IGeologyVolumeQuery volume;
+    public StratigraphySurfaceSampler(IGeologyVolumeQuery volume) => this.volume = volume ?? throw new ArgumentNullException(nameof(volume));
+    public SurfaceMaterialSample SampleAfterIncision(long x, int exposedY, long z, AlluvialDeposit? deposit)
+    {
+        GeologySample bedrock = volume.SampleRock(x, exposedY, z);
+        if (bedrock.GeologyRevision != volume.Identity.GeologyRevision || bedrock.Fingerprint != volume.Identity.Fingerprint)
+            throw new InvalidOperationException("The sampled bedrock identity does not match its geology volume.");
+        return new SurfaceMaterialSample(bedrock, deposit, x, exposedY, z);
+    }
+}
+
+/// <summary>Core test/delivery port; future consumers must receive the published snapshot, not reconstructed samples.</summary>
+public interface IGeologySnapshotConsumer { void Consume(GeologyVolumeSnapshot snapshot); }
+public static class GeologySnapshotDelivery
+{
+    public static void Deliver(GeologyVolumeSnapshot snapshot, IGeologySnapshotConsumer consumer)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot); ArgumentNullException.ThrowIfNull(consumer);
+        consumer.Consume(snapshot);
+    }
+}
+
 public static class GeologyRevisionGate
 {
     public static void RequireSame(IGeologyVolumeQuery expected, IGeologyVolumeQuery supplied)
