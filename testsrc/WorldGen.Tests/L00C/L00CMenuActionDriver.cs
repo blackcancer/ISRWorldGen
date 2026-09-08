@@ -92,6 +92,33 @@ internal static class L00CMenuActionDriver
         return main && manager;
     }
 
+    // ScreenManager owns the process-wide main-thread queue.  This is deliberately
+    // separate from an ICoreClientAPI listener: DestroyGameSession disposes a
+    // session's mod systems, but OnNewFrame continues to drain this queue.
+    internal static void EnqueueMainThreadTask(Action action)
+    {
+        if (action is null) throw new ArgumentNullException(nameof(action));
+        GuardMainThreadPump();
+        MethodInfo enqueue = FindLoadedLib().GetType("Vintagestory.Client.ScreenManager", true)!
+            .GetMethod("EnqueueMainThreadTask", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                null, new[] { typeof(Action) }, null)
+            ?? throw new InvalidOperationException("L00-C menu POC refused: ScreenManager.EnqueueMainThreadTask(Action) drifted.");
+        InvokeMethod(null, enqueue, new object?[] { action });
+    }
+
+    internal static bool TryFindCurrentSingleplayerScreen(object screenManager, out object? screen)
+    {
+        RequireDebugLab();
+        GuardTarget(screenManager, "Vintagestory.Client.ScreenManager", "StartMainMenu", Type.EmptyTypes);
+        Type managerType = screenManager.GetType();
+        FieldInfo current = managerType.GetField("CurrentScreen", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("L00-C menu POC refused: ScreenManager.CurrentScreen drifted.");
+        object? candidate = current.GetValue(screenManager);
+        Type expected = FindLoadedLib().GetType("Vintagestory.Client.GuiScreenSingleplayer", true)!;
+        if (candidate is not null && expected.IsInstanceOfType(candidate)) { screen = candidate; return true; }
+        screen = null; return false;
+    }
+
     private static L00CMenuActionReceipt Invoke(object target, string name, object?[] arguments, string action, bool expectTrue)
     {
         RequireDebugLab();
@@ -141,6 +168,31 @@ internal static class L00CMenuActionDriver
         if (!Debugger.IsAttached) throw new InvalidOperationException("L00-C menu POC requires a debugger to be attached; debugger origin is not inferred.");
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal))
             throw new InvalidOperationException("L00-C menu POC requires ISR_L00C_LAB=1 in addition to an attached debugger.");
+    }
+
+    private static void GuardMainThreadPump()
+    {
+        RequireDebugLab();
+        Assembly lib = FindLoadedLib();
+        if (lib.GetName().Version?.ToString() != RequiredLibVersion || Hash(lib.Location) != RequiredLibSha256)
+            throw new InvalidOperationException("L00-C menu POC refused: VintagestoryLib version or SHA-256 drifted from the audited target.");
+        Type manager = lib.GetType("Vintagestory.Client.ScreenManager", true)!;
+        GuardIl(manager, "EnqueueMainThreadTask", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+            new[] { typeof(Action) }, "2D0E0FEC4E3D47E083F2BEF081D24672E8CC03051C47BDBDAEC8CFB37FA7E977");
+        GuardIl(manager, "OnNewFrame", PrivateInstance, new[] { typeof(float) },
+            "EEFC023F05EF3E3E1FAA5F06D3EB6C1996812827854F67532E5AA34CEB1B389E");
+    }
+
+    private static void GuardIl(Type type, string methodName, BindingFlags flags, Type[] arguments, string expectedSha256)
+    {
+        MethodInfo method = type.GetMethod(methodName, flags, null, arguments, null)
+            ?? throw new InvalidOperationException("L00-C menu POC refused: " + type.FullName + "." + methodName + " drifted.");
+        byte[]? il = method.GetMethodBody()?.GetILAsByteArray();
+        if (il is null) throw new InvalidOperationException("L00-C menu POC refused: " + type.FullName + "." + methodName + " has no auditable IL.");
+        using SHA256 sha = SHA256.Create();
+        string actual = BitConverter.ToString(sha.ComputeHash(il)).Replace("-", string.Empty);
+        if (!string.Equals(actual, expectedSha256, StringComparison.Ordinal))
+            throw new InvalidOperationException("L00-C menu POC refused: " + type.FullName + "." + methodName + " IL drifted.");
     }
 
     private static Type RequireStartServerArgsType()
@@ -199,7 +251,7 @@ internal static class L00CMenuActionDriver
     private static MethodInfo FindExact(Type type, string name, Type[] types) => type.GetMethod(name, PrivateInstance, null, types, null)
         ?? throw new InvalidOperationException($"L00-C menu POC refused: {type.FullName}.{name} has drifted.");
     private static object? InvokeExact(object target, string name, object?[] arguments) => InvokeMethod(target, FindExact(target.GetType(), name, arguments.Select(a => a!.GetType()).ToArray()), arguments);
-    private static object? InvokeMethod(object target, MethodInfo method, object?[] arguments)
+    private static object? InvokeMethod(object? target, MethodInfo method, object?[] arguments)
     {
         try { return method.Invoke(target, arguments); }
         catch (TargetInvocationException ex) { throw new InvalidOperationException($"L00-C menu POC action {method.Name} failed.", ex.InnerException ?? ex); }

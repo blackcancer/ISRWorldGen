@@ -17,6 +17,7 @@ internal sealed class L00CFixtureBootstrap
     private readonly Fixture primary;
     private readonly Fixture secondary;
     private int stableTicks;
+    private bool bindingMenuRequested;
     private State state = State.WaitPrimaryMenu;
 
     internal L00CFixtureBootstrap(string laboratoryRoot, string evidenceDirectory)
@@ -35,28 +36,30 @@ internal sealed class L00CFixtureBootstrap
         Receipt("bootstrap-open", null, "ready");
     }
 
-    internal bool TryAdvance(object api, out L00CMenuActionLaboratoryHost? completedHost)
+    // Called only by the process-global ScreenManager pump.  It deliberately
+    // receives no ICoreClientAPI and retains no per-session object.
+    internal bool TryAdvance(object screenManager, out L00CMenuActionLaboratoryHost? completedHost)
     {
         RequireDebugLaboratory(); completedHost = null;
         switch (state)
         {
             case State.WaitPrimaryMenu:
-                if (!StableMenu(api)) return false;
-                Create(api, primary); state = State.WaitPrimaryWorld; return false;
+                if (!StableMenu(screenManager)) return false;
+                Create(screenManager, primary); state = State.WaitPrimaryWorld; return false;
             case State.WaitPrimaryWorld:
-                if (!StableSession(api, out object? main, out object? manager)) return false;
-                L00CMenuActionDriver.ReturnToMainMenu(main!, manager!); Receipt("primary-created-returned", primary, "return-main-menu"); state = State.WaitPrimaryCell; return false;
+                if (!StableSession(screenManager, out object? main)) return false;
+                L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("primary-created-returned", primary, "return-main-menu"); state = State.WaitPrimaryCell; return false;
             case State.WaitPrimaryCell:
-                if (!TryBind(api, primary)) return false;
+                if (!TryBind(screenManager, primary)) return false;
                 Publish(primary); Receipt("primary-cell-confirmed", primary, "GuiScreenSingleplayer.entries"); state = State.WaitSecondaryMenu; return false;
             case State.WaitSecondaryMenu:
-                if (!StableMenu(api)) return false;
-                Create(api, secondary); state = State.WaitSecondaryWorld; return false;
+                if (!StableMenu(screenManager)) return false;
+                Create(screenManager, secondary); state = State.WaitSecondaryWorld; return false;
             case State.WaitSecondaryWorld:
-                if (!StableSession(api, out main, out manager)) return false;
-                L00CMenuActionDriver.ReturnToMainMenu(main!, manager!); Receipt("secondary-created-returned", secondary, "return-main-menu"); state = State.WaitSecondaryCell; return false;
+                if (!StableSession(screenManager, out main)) return false;
+                L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("secondary-created-returned", secondary, "return-main-menu"); state = State.WaitSecondaryCell; return false;
             case State.WaitSecondaryCell:
-                if (!TryBind(api, secondary)) return false;
+                if (!TryBind(screenManager, secondary)) return false;
                 Publish(secondary); Receipt("secondary-cell-confirmed", secondary, "GuiScreenSingleplayer.entries");
                 completedHost = L00CMenuActionLaboratoryHost.Open(root, Path.Combine(evidence, "campaign"), primary.SavePath, secondary.SavePath);
                 state = State.Completed; Receipt("bootstrap-complete", null, "host-open"); return true;
@@ -65,27 +68,36 @@ internal sealed class L00CFixtureBootstrap
         }
     }
 
-    private void Create(object api, Fixture fixture)
+    private void Create(object screenManager, Fixture fixture)
     {
-        if (!L00CMenuActionDriver.TryFindClientSession(api, out _, out object? manager) || manager is null) throw new InvalidOperationException("L00-C bootstrap cannot reach the audited ScreenManager.");
-        L00CMenuActionReceipt receipt = L00CMenuActionDriver.CreateFixtureWorld(manager, fixture.Role, fixture.SavePath);
+        L00CMenuActionReceipt receipt = L00CMenuActionDriver.CreateFixtureWorld(screenManager, fixture.Role, fixture.SavePath);
         Receipt(receipt.Action, fixture, receipt.TargetMethod);
     }
-    private bool StableMenu(object api)
+    private bool StableMenu(object screenManager)
     {
-        if (!L00CMenuActionDriver.TryFindMenuLeft(api, out object? menu) || menu is null) { stableTicks = 0; return false; }
+        if (!L00CMenuActionDriver.TryFindMenuLeft(screenManager, out object? menu) || menu is null) { stableTicks = 0; return false; }
         return ++stableTicks >= 3 && ResetStable();
     }
-    private bool StableSession(object api, out object? main, out object? manager)
+    private bool StableSession(object screenManager, out object? main)
     {
-        if (!L00CMenuActionDriver.TryFindClientSession(api, out main, out manager) || main is null || manager is null) { stableTicks = 0; return false; }
+        if (!L00CMenuActionDriver.TryFindClientSession(screenManager, out main, out _) || main is null) { stableTicks = 0; return false; }
         return ++stableTicks >= 3 && ResetStable();
     }
-    private bool TryBind(object api, Fixture fixture)
+    private bool TryBind(object screenManager, Fixture fixture)
     {
-        if (!File.Exists(fixture.SavePath) || !L00CMenuActionDriver.TryFindSingleplayerScreen(api, out object? screen) || screen is null) { stableTicks = 0; return false; }
+        if (!File.Exists(fixture.SavePath)) { stableTicks = 0; return false; }
+        if (!L00CMenuActionDriver.TryFindCurrentSingleplayerScreen(screenManager, out object? screen) || screen is null)
+        {
+            stableTicks = 0;
+            if (!bindingMenuRequested && L00CMenuActionDriver.TryFindMenuLeft(screenManager, out object? menu) && menu is not null)
+            {
+                L00CMenuActionDriver.EnterSingleplayerMenu(menu);
+                bindingMenuRequested = true;
+            }
+            return false;
+        }
         if (++stableTicks < 3) return false;
-        stableTicks = 0; fixture.CellIndex = ReadUniqueSaveCell(screen, fixture.SavePath); return true;
+        stableTicks = 0; bindingMenuRequested = false; fixture.CellIndex = ReadUniqueSaveCell(screen, fixture.SavePath); return true;
     }
     private bool ResetStable() { stableTicks = 0; return true; }
     private static int ReadUniqueSaveCell(object screen, string savePath)

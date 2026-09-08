@@ -15,10 +15,11 @@ $modSystem = Join-Path $PSScriptRoot 'L00CMenuActionLabModSystem.cs'
 $laboratoryHost = Join-Path $PSScriptRoot 'L00CMenuActionLaboratoryHost.cs'
 $driver = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
 $bootstrap = Join-Path $PSScriptRoot 'L00CFixtureBootstrap.cs'
+$controller = Join-Path $PSScriptRoot 'L00CProcessCampaignController.cs'
 $product = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
 $output = Join-Path $RepositoryRoot '.local\L00C\menu-action-testmod\Debug\isrworldgenl00clab'
 
-foreach ($path in @($project, $modSystem, $laboratoryHost, $driver, $bootstrap, (Join-Path $GamePath 'VintagestoryAPI.dll'))) {
+foreach ($path in @($project, $modSystem, $laboratoryHost, $driver, $bootstrap, $controller, (Join-Path $GamePath 'VintagestoryAPI.dll'))) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required L00-C laboratory input is missing: $path" }
 }
 if (Select-String -LiteralPath $project -Pattern 'ProjectReference|src\\WorldGen' -Quiet) {
@@ -30,11 +31,17 @@ if (-not (Select-String -LiteralPath $project -SimpleMatch 'BeforeTargets="Prepa
 if (Select-String -LiteralPath @($modSystem, $laboratoryHost, $driver) -Pattern 'SendKeys|mouse_event|keybd_event|WindowsInput|Process\.Start|Start-Process|GetCredential|AuthenticationHeader|Token|Password' -Quiet) {
     throw 'L00-C laboratory host must not synthesize input, start a process, or access authentication material.'
 }
-foreach ($required in @('public sealed class L00CMenuActionLabModSystem', 'StartClientSide(ICoreClientAPI api)', 'RegisterGameTickListener', 'Debugger.IsAttached', 'ISR_L00C_LAB', 'ISR_L00C_LAB_ROOT', 'TryAdvance(api)')) {
+foreach ($required in @('public sealed class L00CMenuActionLabModSystem', 'StartClientSide(ICoreClientAPI api)', 'L00CProcessCampaignController.InstallOrSignal', 'Debugger.IsAttached', 'ISR_L00C_LAB', 'ISR_L00C_LAB_ROOT')) {
     if (-not (Select-String -LiteralPath $modSystem -SimpleMatch $required -Quiet)) { throw "Missing test-mod contract: $required" }
 }
-foreach ($required in @('TryAdvance(object api)', 'TryFindMenuLeft', 'TryFindSingleplayerScreen', 'TryFindClientSession', 'stableTicks < 3', 'RequiredPrimaryCycles = 5')) {
+foreach ($required in @('TryAdvance(object screenManager)', 'TryFindMenuLeft', 'TryFindCurrentSingleplayerScreen', 'TryFindClientSession', 'stableTicks < 3', 'RequiredPrimaryCycles = 5')) {
     if (-not (Select-String -LiteralPath @($laboratoryHost, $driver) -SimpleMatch $required -Quiet)) { throw "Missing client-cycle contract: $required" }
+}
+foreach ($required in @('internal sealed class L00CProcessCampaignController', 'EnqueueMainThreadTask', 'OnNewFrame', 'InstallOrSignal', 'SignalSessionReady', 'UnregisterAndClearSingleton', 'active = null', 'no API, world, client, or session is retained')) {
+    if (-not (Select-String -LiteralPath @($controller, $driver) -SimpleMatch $required -Quiet)) { throw "Missing process-lifetime controller contract: $required" }
+}
+if (Select-String -LiteralPath $controller -Pattern 'ICoreClientAPI\s+[A-Za-z_][A-Za-z0-9_]*\s*;' -Quiet) {
+    throw 'Process-lifetime controller must not retain ICoreClientAPI.'
 }
 foreach ($required in @('L00CFixtureBootstrap', 'CreateFixtureWorld', 'ConnectToSingleplayer', 'StartServerArgs', 'GuiScreenSingleplayer.entries', 'ClientCellBindingConfirmed', 'File.Exists(fixture.SavePath)', 'FileMode.CreateNew', 'WaitPrimaryMenu', 'WaitSecondaryCell', 'L00CMenuActionLaboratoryHost.Open')) {
     if (-not (Select-String -LiteralPath @($bootstrap, $driver, $modSystem) -SimpleMatch $required -Quiet)) { throw "Missing native bootstrap contract: $required" }

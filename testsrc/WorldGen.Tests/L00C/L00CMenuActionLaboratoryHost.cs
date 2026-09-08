@@ -89,24 +89,24 @@ public sealed class L00CMenuActionLaboratoryHost
     }
 
     /// <summary>
-    /// Advances only after the actual client exposes the expected, audited menu object
-    /// for three game ticks.  It does not send input, authenticate, or launch a process.
+    /// Advances from the process-global ScreenManager pump.  It retains no client API,
+    /// world, session or ClientMain after an action returns.
     /// </summary>
-    public bool TryAdvance(object api)
+    public bool TryAdvance(object screenManager)
     {
         RequireDebugLaboratory();
-        if (api is null) throw new ArgumentNullException(nameof(api));
+        if (screenManager is null) throw new ArgumentNullException(nameof(screenManager));
 
         switch (state)
         {
             case State.ExpectPrimaryMenu:
             case State.ExpectSecondaryMenu:
-                if (!L00CMenuActionDriver.TryFindMenuLeft(api, out object? menuLeft) || menuLeft is null) { stableTicks = 0; return false; }
+                if (!L00CMenuActionDriver.TryFindMenuLeft(screenManager, out object? menuLeft) || menuLeft is null) { stableTicks = 0; return false; }
                 if (++stableTicks < 3) return false;
                 stableTicks = 0; EnterSingleplayerMenu(menuLeft); return false;
             case State.PrimaryMenuOpen:
             case State.SecondaryMenuOpen:
-                if (!L00CMenuActionDriver.TryFindSingleplayerScreen(api, out object? singleplayer) || singleplayer is null) { stableTicks = 0; return false; }
+                if (!L00CMenuActionDriver.TryFindCurrentSingleplayerScreen(screenManager, out object? singleplayer) || singleplayer is null) { stableTicks = 0; return false; }
                 if (++stableTicks < 3) return false;
                 stableTicks = 0;
                 if (state == State.PrimaryMenuOpen) OpenPrimary(singleplayer); else OpenSecondary(singleplayer);
@@ -115,7 +115,7 @@ public sealed class L00CMenuActionLaboratoryHost
             case State.SecondaryWorldOpen:
                 // This callback is public API lifecycle evidence that the client is ticking.
                 // Three ticks prevent a same-frame menu mutation after ConnectToSingleplayer.
-                if (++stableTicks < 3 || !L00CMenuActionDriver.TryFindClientSession(api, out object? clientMain, out object? screenManager) || clientMain is null || screenManager is null) return false;
+                if (++stableTicks < 3 || !L00CMenuActionDriver.TryFindClientSession(screenManager, out object? clientMain, out _) || clientMain is null) return false;
                 stableTicks = 0; ReturnToMainMenu(clientMain, screenManager); return false;
             case State.ReadyToComplete:
                 Complete(); return true;
