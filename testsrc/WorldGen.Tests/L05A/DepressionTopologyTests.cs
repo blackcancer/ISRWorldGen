@@ -47,6 +47,20 @@ public sealed class DepressionTopologyTests
     }
 
     [TestMethod]
+    public void T05_01_AdjacentFlatBottomCellsFormOneAnalyticalCupDespiteIdTieBreak()
+    {
+        DrainageTopology topology = DepressionTopologyBuilder.Build([
+            Cell(0, 0, [1], DrainageTerminalKind.Ocean), Cell(1, 8, [0, 2]),
+            Cell(2, 2, [1, 3]), Cell(3, 2, [2, 4]), Cell(4, 5, [3])]);
+
+        Depression cup = topology.Depressions.Single(item => item.CellIds.SequenceEqual(new long[] { 2, 3 }));
+        Assert.AreEqual(5d, cup.SpillElevation);
+        Assert.AreEqual(6d, cup.Capacity);
+        Assert.AreEqual(2L, topology.Cells.Single(cell => cell.Id == 3).ReceiverId,
+            "ID may orient a flat receiver chain, but must not split its analytical water body.");
+    }
+
+    [TestMethod]
     public void InvalidGraphIsRejectedBeforeRouting()
     {
         Assert.ThrowsExactly<ArgumentException>(() => DepressionTopologyBuilder.Build([Cell(1, 1, [2]), Cell(2, 1, [])]));

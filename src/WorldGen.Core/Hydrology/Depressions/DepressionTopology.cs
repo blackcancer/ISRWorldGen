@@ -149,26 +149,54 @@ public static class DepressionTopologyBuilder
             // Retain local cups under their common routed component. The parent is
             // analytical (and may overlap its children), as in Fill-Spill-Merge:
             // it does not rewrite physical cells or turn a lake into a cell exception.
-            foreach (long minimum in component.Where(id => IsStableLocalMinimum(id, component, original)).OrderBy(id => id))
+            foreach (long[] minimumPlateau in FindLocalMinimumPlateaus(component, original))
             {
-                double localSpill = original[minimum].Neighbours
-                    .Where(neighbour => original[neighbour].PhysicalElevation > original[minimum].PhysicalElevation)
+                double elevation = original[minimumPlateau[0]].PhysicalElevation;
+                double localSpill = minimumPlateau
+                    .SelectMany(id => original[id].Neighbours)
+                    .Where(neighbour => original[neighbour].PhysicalElevation > elevation)
                     .Select(neighbour => original[neighbour].PhysicalElevation)
                     .DefaultIfEmpty(spill)
                     .Min();
                 localSpill = Math.Min(localSpill, spill);
                 yield return new Depression(
                     nextId++,
-                    Array.AsReadOnly(new[] { minimum }),
+                    Array.AsReadOnly(minimumPlateau),
                     localSpill,
-                    localSpill - original[minimum].PhysicalElevation,
+                    (localSpill - elevation) * minimumPlateau.Length,
                     rootId);
             }
         }
     }
 
-    private static bool IsStableLocalMinimum(long id, IReadOnlyCollection<long> component, IReadOnlyDictionary<long, DrainageCell> original) =>
-        original[id].Neighbours.Where(component.Contains).All(neighbour =>
-            original[id].PhysicalElevation < original[neighbour].PhysicalElevation ||
-            (original[id].PhysicalElevation == original[neighbour].PhysicalElevation && id < neighbour));
+    private static IEnumerable<long[]> FindLocalMinimumPlateaus(
+        IReadOnlyCollection<long> component,
+        IReadOnlyDictionary<long, DrainageCell> original)
+    {
+        var unseen = new HashSet<long>(component);
+        while (unseen.Count > 0)
+        {
+            long start = unseen.Min();
+            double elevation = original[start].PhysicalElevation;
+            var plateau = new List<long>();
+            var pending = new Queue<long>();
+            unseen.Remove(start); pending.Enqueue(start);
+            while (pending.Count > 0)
+            {
+                long id = pending.Dequeue(); plateau.Add(id);
+                foreach (long neighbour in original[id].Neighbours.Where(candidate =>
+                    unseen.Contains(candidate) && original[candidate].PhysicalElevation == elevation).OrderBy(candidate => candidate))
+                {
+                    unseen.Remove(neighbour); pending.Enqueue(neighbour);
+                }
+            }
+
+            plateau.Sort();
+            if (plateau.All(id => original[id].Neighbours.Where(component.Contains)
+                .All(neighbour => original[neighbour].PhysicalElevation >= elevation)))
+            {
+                yield return plateau.ToArray();
+            }
+        }
+    }
 }
