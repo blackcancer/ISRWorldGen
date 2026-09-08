@@ -1,90 +1,138 @@
-# Traçabilité exigences → tâches → tests
+# Traçabilité des exigences — 1.2
 
-Les 84 exigences possèdent des scénarios d’acceptation explicites. Cette couverture documentaire ne constitue pas une couverture de code mesurée ni une réussite des tests. Les changements d’exigence doivent être répercutés dans le manifeste.
+Les identifiants historiques sont conservés. Les nouveaux cas ajoutent des obligations, pas des résultats.
 
-| Exigence | Spécification | Responsable de développement | Cas principaux |
-|---|---|---|---|
-| R00-01 | [S00](../specs/S00.md) | L00-A | T00-01 |
-| R00-02 | [S00](../specs/S00.md) | L00-A | T00-02 |
-| R00-03 | [S00](../specs/S00.md) | L00-B | T00-03 |
-| R00-04 | [S00](../specs/S00.md) | L00-C | T00-04 |
-| R00-05 | [S00](../specs/S00.md) | L00-C | T00-05 |
-| R00-06 | [S00](../specs/S00.md) | L00-C | T00-06 |
-| R01-01 | [S01](../specs/S01.md) | L01-A | T01-01 |
-| R01-02 | [S01](../specs/S01.md) | L01-A | T01-02 |
-| R01-03 | [S01](../specs/S01.md) | L01-B | T01-03 |
-| R01-04 | [S01](../specs/S01.md) | L01-B | T01-04 |
-| R01-05 | [S01](../specs/S01.md) | L01-C | T01-05 |
-| R01-06 | [S01](../specs/S01.md) | L01-C | T01-06 |
-| R02-01 | [S02](../specs/S02.md) | L02-A | T02-01 |
-| R02-02 | [S02](../specs/S02.md) | L02-A | T02-02 |
-| R02-03 | [S02](../specs/S02.md) | L02-B | T02-03 |
-| R02-04 | [S02](../specs/S02.md) | L02-B | T02-04 |
-| R02-05 | [S02](../specs/S02.md) | L02-C | T02-05 |
-| R02-06 | [S02](../specs/S02.md) | L02-C | T02-06 |
-| R03-01 | [S03](../specs/S03.md) | L03-A | T03-01 |
-| R03-02 | [S03](../specs/S03.md) | L03-A | T03-02 |
-| R03-03 | [S03](../specs/S03.md) | L03-C | T03-03 |
-| R03-04 | [S03](../specs/S03.md) | L03-C | T03-04 |
-| R03-05 | [S03](../specs/S03.md) | L03-B | T03-05 |
-| R03-06 | [S03](../specs/S03.md) | L03-B | T03-06 |
-| R04-01 | [S04](../specs/S04.md) | L04-A | T04-01 |
-| R04-02 | [S04](../specs/S04.md) | L04-A | T04-02 |
-| R04-03 | [S04](../specs/S04.md) | L04-B | T04-03 |
-| R04-04 | [S04](../specs/S04.md) | L04-B | T04-04 |
-| R04-05 | [S04](../specs/S04.md) | L04-C | T04-05 |
-| R04-06 | [S04](../specs/S04.md) | L04-C | T04-06 |
-| R05-01 | [S05](../specs/S05.md) | L05-A | T05-01 |
-| R05-02 | [S05](../specs/S05.md) | L05-A | T05-02 |
-| R05-03 | [S05](../specs/S05.md) | L05-B | T05-03 |
-| R05-04 | [S05](../specs/S05.md) | L05-A | T05-04 |
-| R05-05 | [S05](../specs/S05.md) | L05-C | T05-05 |
-| R05-06 | [S05](../specs/S05.md) | L05-C | T05-06 |
-| R06-01 | [S06](../specs/S06.md) | L06-A | T06-01 |
-| R06-02 | [S06](../specs/S06.md) | L06-B | T06-02 |
-| R06-03 | [S06](../specs/S06.md) | L06-A | T06-03 |
-| R06-04 | [S06](../specs/S06.md) | L06-B | T06-04 |
-| R06-05 | [S06](../specs/S06.md) | L06-C | T06-05 |
-| R06-06 | [S06](../specs/S06.md) | L06-C | T06-06 |
-| R07-01 | [S07](../specs/S07.md) | L07-A | T07-01 |
-| R07-02 | [S07](../specs/S07.md) | L07-A | T07-02 |
-| R07-03 | [S07](../specs/S07.md) | L07-B | T07-03 |
-| R07-04 | [S07](../specs/S07.md) | L07-B | T07-04 |
-| R07-05 | [S07](../specs/S07.md) | L07-B | T07-05 |
-| R07-06 | [S07](../specs/S07.md) | L07-C | T07-06 |
-| R08-01 | [S08](../specs/S08.md) | L08-A | T08-01 |
-| R08-02 | [S08](../specs/S08.md) | L08-B | T08-02 |
-| R08-03 | [S08](../specs/S08.md) | L08-A | T08-03 |
-| R08-04 | [S08](../specs/S08.md) | L08-C | T08-04 |
-| R08-05 | [S08](../specs/S08.md) | L08-C | T08-05 |
-| R08-06 | [S08](../specs/S08.md) | L08-B | T08-06 |
-| R09-01 | [S09](../specs/S09.md) | L09-B | T09-01 |
-| R09-02 | [S09](../specs/S09.md) | L09-A | T09-02 |
-| R09-03 | [S09](../specs/S09.md) | L09-A | T09-03 |
-| R09-04 | [S09](../specs/S09.md) | L09-C | T09-04 |
-| R09-05 | [S09](../specs/S09.md) | L09-C | T09-05 |
-| R09-06 | [S09](../specs/S09.md) | L09-B | T09-06 |
-| R10-01 | [S10](../specs/S10.md) | L10-A | T10-01 |
-| R10-02 | [S10](../specs/S10.md) | L10-A | T10-02 |
-| R10-03 | [S10](../specs/S10.md) | L10-C | T10-03 |
-| R10-04 | [S10](../specs/S10.md) | L10-B | T10-04 |
-| R10-05 | [S10](../specs/S10.md) | L10-B | T10-05 |
-| R10-06 | [S10](../specs/S10.md) | L10-C | T10-06 |
-| R11-01 | [S11](../specs/S11.md) | L11-A | T11-01 |
-| R11-02 | [S11](../specs/S11.md) | L11-A | T11-02 |
-| R11-03 | [S11](../specs/S11.md) | L11-B | T11-03 |
-| R11-04 | [S11](../specs/S11.md) | L11-C | T11-04 |
-| R11-05 | [S11](../specs/S11.md) | L11-C | T11-05 |
-| R11-06 | [S11](../specs/S11.md) | L11-C | T11-06 |
-| R12-01 | [S12](../specs/S12.md) | L12-A | T12-01 |
-| R12-02 | [S12](../specs/S12.md) | L12-B | T12-02 |
-| R12-03 | [S12](../specs/S12.md) | L12-B | T12-03 |
-| R12-04 | [S12](../specs/S12.md) | L12-C | T12-04 |
-| R12-05 | [S12](../specs/S12.md) | L12-C | T12-05 |
-| R12-06 | [S12](../specs/S12.md) | L12-C | T12-06 |
-| R13-01 | [S13](../specs/S13.md) | L13-A | T13-01 |
-| R13-02 | [S13](../specs/S13.md) | L13-A | T13-02 |
-| R13-03 | [S13](../specs/S13.md) | L13-B | T13-03 |
-| R13-04 | [S13](../specs/S13.md) | L13-B | T13-04 |
-| R13-05 | [S13](../specs/S13.md) | L13-C | T13-05 |
-| R13-06 | [S13](../specs/S13.md) | L13-C | T13-06 |
+| Exigence | Propriétaire(s) | Tests |
+|---|---|---|
+| [R00-01](../specs/S00.md) | L00-A | T00-01 |
+| [R00-02](../specs/S00.md) | L00-A | T00-02 |
+| [R00-03](../specs/S00.md) | L00-B | T00-03 |
+| [R00-04](../specs/S00.md) | L00-C | T00-04 |
+| [R00-05](../specs/S00.md) | L00-C | T00-05 |
+| [R00-06](../specs/S00.md) | L00-C | T00-06 |
+| [R01-01](../specs/S01.md) | L01-A | T01-01 |
+| [R01-02](../specs/S01.md) | L01-A | T01-02 |
+| [R01-03](../specs/S01.md) | L01-B | T01-03 |
+| [R01-04](../specs/S01.md) | L01-B | T01-04 |
+| [R01-05](../specs/S01.md) | L01-C | T01-05 |
+| [R01-06](../specs/S01.md) | L01-C | T01-06 |
+| [R02-01](../specs/S02.md) | L02-A | T02-01 |
+| [R02-02](../specs/S02.md) | L02-A | T02-02 |
+| [R02-03](../specs/S02.md) | L02-B | T02-03 |
+| [R02-04](../specs/S02.md) | L02-B | T02-04 |
+| [R02-05](../specs/S02.md) | L02-C | T02-05 |
+| [R02-06](../specs/S02.md) | L02-C | T02-06 |
+| [R03-01](../specs/S03.md) | L03-A | T03-01 |
+| [R03-02](../specs/S03.md) | L03-A | T03-02 |
+| [R03-03](../specs/S03.md) | L03-C | T03-03 |
+| [R03-04](../specs/S03.md) | L03-C | T03-04 |
+| [R03-05](../specs/S03.md) | L03-B | T03-05 |
+| [R03-06](../specs/S03.md) | L03-B | T03-06 |
+| [R04-01](../specs/S04.md) | L04-A | T04-01 |
+| [R04-02](../specs/S04.md) | L04-A | T04-02 |
+| [R04-03](../specs/S04.md) | L04-B | T04-03 |
+| [R04-04](../specs/S04.md) | L04-B | T04-04 |
+| [R04-05](../specs/S04.md) | L04-C | T04-05 |
+| [R04-06](../specs/S04.md) | L04-C | T04-06 |
+| [R05-01](../specs/S05.md) | L05-A | T05-01 |
+| [R05-02](../specs/S05.md) | L05-A | T05-02 |
+| [R05-03](../specs/S05.md) | L05-B | T05-03 |
+| [R05-04](../specs/S05.md) | L05-A | T05-04 |
+| [R05-05](../specs/S05.md) | L05-C | T05-05 |
+| [R05-06](../specs/S05.md) | L05-C | T05-06 |
+| [R06-01](../specs/S06.md) | L06-A | T06-01 |
+| [R06-02](../specs/S06.md) | L06-B | T06-02 |
+| [R06-03](../specs/S06.md) | L06-A | T06-03 |
+| [R06-04](../specs/S06.md) | L06-B | T06-04 |
+| [R06-05](../specs/S06.md) | L06-C | T06-05 |
+| [R06-06](../specs/S06.md) | L06-C | T06-06 |
+| [R07-01](../specs/S07.md) | L07-A | T07-01 |
+| [R07-02](../specs/S07.md) | L07-A | T07-02 |
+| [R07-03](../specs/S07.md) | L07-B | T07-03 |
+| [R07-04](../specs/S07.md) | L07-B | T07-04 |
+| [R07-05](../specs/S07.md) | L07-B | T07-05 |
+| [R07-06](../specs/S07.md) | L07-C | T07-06 |
+| [R08-01](../specs/S08.md) | L08-A | T08-01 |
+| [R08-02](../specs/S08.md) | L08-B | T08-02 |
+| [R08-03](../specs/S08.md) | L08-A | T08-03 |
+| [R08-04](../specs/S08.md) | L08-C | T08-04 |
+| [R08-05](../specs/S08.md) | L08-C | T08-05 |
+| [R08-06](../specs/S08.md) | L08-B | T08-06 |
+| [R09-01](../specs/S09.md) | L09-B | T09-01 |
+| [R09-02](../specs/S09.md) | L09-A | T09-02 |
+| [R09-03](../specs/S09.md) | L09-A | T09-03 |
+| [R09-04](../specs/S09.md) | L09-C | T09-04 |
+| [R09-05](../specs/S09.md) | L09-C | T09-05 |
+| [R09-06](../specs/S09.md) | L09-B | T09-06 |
+| [R10-01](../specs/S10.md) | L10-A | T10-01 |
+| [R10-02](../specs/S10.md) | L10-A | T10-02 |
+| [R10-03](../specs/S10.md) | L10-C | T10-03 |
+| [R10-04](../specs/S10.md) | L10-B | T10-04 |
+| [R10-05](../specs/S10.md) | L10-B | T10-05 |
+| [R10-06](../specs/S10.md) | L10-C | T10-06 |
+| [R11-01](../specs/S11.md) | L11-A | T11-01 |
+| [R11-02](../specs/S11.md) | L11-A | T11-02 |
+| [R11-03](../specs/S11.md) | L11-B | T11-03 |
+| [R11-04](../specs/S11.md) | L11-C | T11-04 |
+| [R11-05](../specs/S11.md) | L11-C | T11-05 |
+| [R11-06](../specs/S11.md) | L11-C | T11-06 |
+| [R12-01](../specs/S12.md) | L12-A | T12-01 |
+| [R12-02](../specs/S12.md) | L12-B | T12-02 |
+| [R12-03](../specs/S12.md) | L12-B | T12-03 |
+| [R12-04](../specs/S12.md) | L12-C | T12-04 |
+| [R12-05](../specs/S12.md) | L12-C | T12-05 |
+| [R12-06](../specs/S12.md) | L12-C | T12-06 |
+| [R13-01](../specs/S13.md) | L13-A | T13-01 |
+| [R13-02](../specs/S13.md) | L13-A | T13-02 |
+| [R13-03](../specs/S13.md) | L13-B | T13-03 |
+| [R13-04](../specs/S13.md) | L13-B | T13-04 |
+| [R13-05](../specs/S13.md) | L13-C | T13-05 |
+| [R13-06](../specs/S13.md) | L13-C | T13-06 |
+| [R14-01](../specs/S14.md) | L14-A | T14-01 |
+| [R14-02](../specs/S14.md) | L14-B | T14-02 |
+| [R14-03](../specs/S14.md) | L14-B | T14-03 |
+| [R14-04](../specs/S14.md) | L14-B | T14-04 |
+| [R14-05](../specs/S14.md) | L14-B | T14-05 |
+| [R14-06](../specs/S14.md) | L14-C | T14-06 |
+| [R14-07](../specs/S14.md) | L16-D | T14-07 |
+| [R14-08](../specs/S14.md) | L14-C | T14-08 |
+| [R15-01](../specs/S15.md) | L15-A | T15-01 |
+| [R15-02](../specs/S15.md) | L15-A | T15-02 |
+| [R15-03](../specs/S15.md) | L15-C | T15-03 |
+| [R15-04](../specs/S15.md) | L15-C | T15-04 |
+| [R15-05](../specs/S15.md) | L15-C | T15-05 |
+| [R15-06](../specs/S15.md) | L15-C | T15-06 |
+| [R15-07](../specs/S15.md) | L15-C | T15-07 |
+| [R16-01](../specs/S16.md) | L16-A | T16-01 |
+| [R16-02](../specs/S16.md) | L16-A | T16-02 |
+| [R16-03](../specs/S16.md) | L16-B | T16-03 |
+| [R16-04](../specs/S16.md) | L16-B | T16-04 |
+| [R16-05](../specs/S16.md) | L16-D | T16-05 |
+| [R16-06](../specs/S16.md) | L16-C | T16-06 |
+| [R16-07](../specs/S16.md) | L16-C | T16-07 |
+| [R16-08](../specs/S16.md) | L16-D | T16-08 |
+| [R16-09](../specs/S16.md) | L16-D | T16-09 |
+| [R17-01](../specs/S17.md) | L17-A | T17-01 |
+| [R17-02](../specs/S17.md) | L17-A | T17-02 |
+| [R17-03](../specs/S17.md) | L17-B | T17-03 |
+| [R17-04](../specs/S17.md) | L17-B | T17-04 |
+| [R17-05](../specs/S17.md) | L17-D | T17-05 |
+| [R17-06](../specs/S17.md) | L17-D | T17-06 |
+| [R17-07](../specs/S17.md) | L17-C | T17-07 |
+| [R17-08](../specs/S17.md) | L17-D | T17-08 |
+| [R17-09](../specs/S17.md) | L17-D | T17-09 |
+| [R18-01](../specs/S18.md) | L18-A | T18-01 |
+| [R18-02](../specs/S18.md) | L18-A | T18-02 |
+| [R18-03](../specs/S18.md) | L18-A | T18-03 |
+| [R18-04](../specs/S18.md) | L18-B | T18-04 |
+| [R18-05](../specs/S18.md) | L18-B | T18-05 |
+| [R18-06](../specs/S18.md) | L18-C | T18-06 |
+| [R18-07](../specs/S18.md) | L18-C | T18-07 |
+| [R18-08](../specs/S18.md) | L18-D | T18-08 |
+| [R18-09](../specs/S18.md) | L18-D | T18-09 |
+| [R18-10](../specs/S18.md) | L18-D | T18-10 |
+| [R05U-01](../specs/S05U.md) | L05-D | T05U-01 |
+| [R05U-02](../specs/S05U.md) | L05-D | T05U-02 |
+| [R05U-03](../specs/S05U.md) | L05-D | T05U-03 |
+| [R15-08](../specs/S15.md) | L15-B | T15-08 |
+| [R17-10](../specs/S17.md) | L17-C | T17-10 |

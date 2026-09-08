@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "status": "PROPOSED_NOT_FROZEN",
+  "policy": "Les obligations structurelles ci-dessous sont fermes. Les seuils de distribution/performance se figent sur calibration avant holdout, avec approbation intégrateur et justification gameplay. Aucune valeur mesurée inventée.",
+  "hard_invariants": {
+    "silent_missing_asset_substitutions": 0,
+    "unauthorized_ore_host_violations": 0,
+    "double_generation_owners": 0,
+    "seasonal_reset_of_player_soil_or_vegetation": 0,
+    "saltwater_replaced_by_freshwater_on_thaw": 0,
+    "river_flow_metadata_lost_on_thaw": 0,
+    "regional_boundary_id_mismatch": 0,
+    "uncertified_fantastic_accesses": 0
+  },
+  "hydrology_tolerance": {
+    "absolute": 1e-09,
+    "relative": 1e-06,
+    "units": "C02/C03/C12 model units"
+  },
+  "to_freeze": [
+    {
+      "metric": "rock_family_share_and_required_host_access",
+      "owner": "L14-A",
+      "acceptance": "Bounds by profile and progression matrix before holdout",
+      "value": null
+    },
+    {
+      "metric": "soil_class_share_and_search_distance",
+      "owner": "L15-C",
+      "acceptance": "Ranges by climate and terrain profile; no universal high fertility at rivers",
+      "value": null
+    },
+    {
+      "metric": "mineral_abundance_exposed_accessible_and_search_cost",
+      "owner": "L16-D",
+      "acceptance": "Per resource and world profile; after final cavity masks",
+      "value": null
+    },
+    {
+      "metric": "stand_diversity_patch_sizes_and_pattern_detection",
+      "owner": "L17-B",
+      "acceptance": "Metrics plus human counter-review on independent seeds",
+      "value": null
+    },
+    {
+      "metric": "seasonal_convergence_tolerance_and_budget",
+      "owner": "L18-D",
+      "acceptance": "Controlled-date/weather loaded-vs-unloaded protocol, bounded convergence period",
+      "value": null
+    },
+    {
+      "metric": "cpu_memory_query_and_chunk_costs",
+      "owner": "L13-B",
+      "acceptance": "Reference hardware/profiles in quality-budgets plus new component breakdown",
+      "value": null
+    }
+  ],
+  "freeze_rule": "No required value may remain null at final qualification. Definition of Done for early catalog/model tasks does not itself certify the final corpus."
+}

@@ -1,24 +1,23 @@
-# Vérification de cette livraison documentaire
-**Dossier v1.0 · 6 septembre 2026 · portée : documentation et outils de lecture uniquement.**
+# Vérification de la livraison ISRWorldGen 1.2
+**8 septembre 2026 · portée : documentation et outils de préparation uniquement.**
 
-## Résultat vérifié
-Le dossier contient **14 lots, 42 sous-lots délégables, 84 exigences, 84 scénarios principaux de test, 8 contrats de données et 6 portes de validation**. Le registre de tâches est relié aux exigences, scénarios et dépendances. Le corpus contient 256 seeds distinctes, avec une partition calibration/holdout sans recouvrement.
+## Structure contrôlée
+Le plan comprend **19 lots, 61 sous-lots, 132 exigences, 132 scénarios principaux, 13 contrats et 6 gates**. Les 42 anciens identifiants sont conservés ; les 19 ajouts couvrent L05-D et les cinq lots spécialisés. Les 48 scénarios nouveaux s’ajoutent aux 84 historiques. Le corpus hérité garde 256 seeds, séparées entre calibration et holdout.
 
-Le validateur documentaire a été exécuté avec résultat **PASS** : identifiants, liens internes, présence des définitions, couverture exigences/tâches/tests, dépendances sans cycle, budget de lecture et partition du corpus. Un contrôle supplémentaire confirme que chaque tâche référence sa propre fiche et que ses tests couvrent les exigences qui lui sont affectées.
+Le validateur a contrôlé unicité/références des IDs, acyclicité du DAG, propriété de chaque exigence/test, rattachement aux gates, présence des documents, liens relatifs et budgets des capsules. Résultat : PASS, sans erreur. Voir [rapport JSON](../artifacts/spec-validation.json).
 
-Les **8 auto-tests** de l’outil de validation ont été exécutés et réussis. Ils contrôlent le cas conforme puis plusieurs défauts injectés : source manquante, cycle de dépendance, test inconnu, exigence sans tâche responsable, capsule trop volumineuse, lien cassé et seed dupliquée. Le rapport brut est conservé, pas remplacé par une appréciation de l’auteur.
+Les capsules calculées sont comprises entre 21503 et 45075 octets UTF-8, donc sous 48 Kio (49 152 octets). Ce budget concerne la documentation explicitement chargée, pas les fichiers C# et preuves qui restent à consulter de façon ciblée. Le script Windows a été étendu pour accepter les suffixes D ; son motif est testé statiquement contre les 61 IDs.
 
-## Lecture ciblée mesurée
-Les capsules déclarées incluent **6 à 9 fichiers sources** selon la tâche. Leur taille UTF-8 mesurée est comprise entre **20.9 et 33.3 Kio**, avec une médiane de **23.8 Kio**, en dessous du plafond de 48 Kio. Ces nombres concernent la documentation obligatoire seulement : le code, les sources API ciblées et les preuves nécessaires à une mission peuvent ajouter du contexte. Ce n’est pas une mesure en tokens.
+## Outils testés
+Les auto-tests du validateur couvrent le dossier cohérent, la source manquante, les cycles, les tests inconnus, les exigences sans propriétaire, le dépassement de contexte, les liens cassés, le corpus dupliqué et l’ignorance des sorties générées. Voir les sources [validate_spec.py](../tools/validate_spec.py) et [test_documentation_tools.py](../tools/test_documentation_tools.py).
 
-Trois capsules d’exemple sont fournies dans `artifacts/contexts/` : L00-A, L05-B et L09-C. Elles sont produites par l’outil Python équivalent ; le script PowerShell fourni n’a pas été exécuté dans l’environnement de préparation. Les générer à nouveau après toute modification documentaire, car les hashes inclus correspondent aux fichiers de cette livraison.
+Les **14 auto-tests de préparation de mise à jour** couvrent le dépôt actif inchangé, la conservation de l’état, les conflits Markdown, la sortie hors dépôt, les collisions d’ID et la séparation des preuves précoces/finales. Leur source est [test_plan_update.py](../tools/test_plan_update.py) ; les fixtures d’adoption sont synthétiques et ne décrivent pas le dépôt de l’utilisateur. Le script ne possède pas de mode d’application automatique.
 
-## Ce qui n’a pas été testé ici
-Aucun mod n’a été implémenté, compilé, chargé ou débogué dans Vintage Story dans cette livraison. Le poste Visual Studio Community 2026 de l’utilisateur et son MCP n’ont pas été pilotés. **Les 84 scénarios du mod sont tous NOT_RUN et les 42 tâches sont toutes BACKLOG.** La seule tâche prête selon les dépendances initiales est L00-A.
+## Ce qui n’a pas été exécuté
+Aucun C# du mod n’a été compilé ou exécuté pour cette livraison. Aucune session Visual Studio/MCP ni partie Vintage Story n’a été pilotée. Les **48 nouveaux scénarios du mod restent NOT_RUN**. Les résultats historiques et états réels des 42 anciennes tâches ne sont pas connus ici ; ils doivent être repris du dépôt et conservés.
 
-Les chiffres de performance, dimensions et rareté restent des propositions à qualifier et à geler ; ils ne sont ni des mesures du mod ni des garanties obtenues. La première étape vérifie l’installation réelle du jeu et le template avant de choisir la cible .NET et les références.
+L’indication L05-C vient de l’utilisateur, pas d’une inspection du commit de développement. Elle ne prouve ni la fin de cette tâche ni la clôture de toutes les branches précédentes. Aucun `registry/state.json` actif n’est fourni dans l’archive.
 
-## Preuves et reproduction
-[Rapport du validateur](../artifacts/spec-validation.json) · [Sortie des auto-tests](../artifacts/documentation-tool-tests.txt) · [Utilisation des outils](../tools/README.md).
+Les scripts Python utilisent la bibliothèque standard et ont été exécutés ici ; le script PowerShell a été contrôlé statiquement mais pas exécuté dans PowerShell sur Windows. Les sources API publiques ont été consultées ; leur conformité avec les DLL locales reste à vérifier sur le poste de développement.
 
-`SHA256SUMS.txt` inventorie les fichiers livrés, hors sa propre empreinte. L’archive est vérifiée pour son intégrité après création. Ne pas interpréter cette vérification d’archive comme une validation des fonctionnalités futures du jeu.
+Les budgets existants et spécifiques aux distributions restent à qualifier/geler. Les avertissements du validateur sur ces points sont volontaires et ne constituent pas une validation du jeu.

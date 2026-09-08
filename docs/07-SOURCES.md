@@ -108,3 +108,6 @@ Andrew Leach, mémoire fourni par l’utilisateur : <https://andrewlea.ch/honour
 SqueakySpacebar, Procedural Map Generation With Voronoi Diagrams : <https://squeakyspacebar.github.io/2017/07/12/Procedural-Map-Generation-With-Voronoi-Diagrams.html>
 
 Un agent qui réutilise un code d’exemple doit examiner sa licence et ses hypothèses. Les algorithmes et idées peuvent inspirer notre implémentation ; l’accès public à un dépôt/article ne vaut pas permission de redistribuer ses assets ou tout son code sans respecter la licence.
+
+## Complément distributions 1.2
+Les sources DIST-01 à DIST-13 sont consignées dans [l’audit ciblé](12-VERIFICATION-DISTRIBUTIONS-API.md) et registry/distribution-sources.json. Les bibliographies sont des ressources ciblées, non du contexte obligatoire pour tous les agents.

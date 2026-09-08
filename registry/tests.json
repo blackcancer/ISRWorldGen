@@ -10,7 +10,8 @@
       ],
       "level": "Audit + compilation",
       "state": "NOT_RUN",
-      "source": "tests/T00.md"
+      "source": "tests/T00.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T00-02",
@@ -21,7 +22,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T00.md"
+      "source": "tests/T00.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T00-03",
@@ -32,7 +34,8 @@
       ],
       "level": "Débogage réel",
       "state": "NOT_RUN",
-      "source": "tests/T00.md"
+      "source": "tests/T00.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T00-04",
@@ -43,7 +46,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T00.md"
+      "source": "tests/T00.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T00-05",
@@ -54,7 +58,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T00.md"
+      "source": "tests/T00.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T00-06",
@@ -65,7 +70,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T00.md"
+      "source": "tests/T00.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T01-01",
@@ -76,7 +82,8 @@
       ],
       "level": "Unitaire + propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T01.md"
+      "source": "tests/T01.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T01-02",
@@ -87,7 +94,8 @@
       ],
       "level": "Unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T01.md"
+      "source": "tests/T01.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T01-03",
@@ -98,7 +106,8 @@
       ],
       "level": "Unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T01.md"
+      "source": "tests/T01.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T01-04",
@@ -109,7 +118,8 @@
       ],
       "level": "Propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T01.md"
+      "source": "tests/T01.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T01-05",
@@ -120,7 +130,8 @@
       ],
       "level": "Architecture + unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T01.md"
+      "source": "tests/T01.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T01-06",
@@ -131,7 +142,8 @@
       ],
       "level": "Injection de fautes",
       "state": "NOT_RUN",
-      "source": "tests/T01.md"
+      "source": "tests/T01.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T02-01",
@@ -142,7 +154,8 @@
       ],
       "level": "Unitaire + propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T02.md"
+      "source": "tests/T02.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T02-02",
@@ -153,7 +166,8 @@
       ],
       "level": "Unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T02.md"
+      "source": "tests/T02.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T02-03",
@@ -164,7 +178,8 @@
       ],
       "level": "Performance + architecture",
       "state": "NOT_RUN",
-      "source": "tests/T02.md"
+      "source": "tests/T02.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T02-04",
@@ -175,7 +190,8 @@
       ],
       "level": "Unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T02.md"
+      "source": "tests/T02.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T02-05",
@@ -186,7 +202,8 @@
       ],
       "level": "Unitaire + intégration",
       "state": "NOT_RUN",
-      "source": "tests/T02.md"
+      "source": "tests/T02.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T02-06",
@@ -197,7 +214,8 @@
       ],
       "level": "Analyse + revue",
       "state": "NOT_RUN",
-      "source": "tests/T02.md"
+      "source": "tests/T02.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T03-01",
@@ -208,7 +226,8 @@
       ],
       "level": "Unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T03.md"
+      "source": "tests/T03.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T03-02",
@@ -219,7 +238,8 @@
       ],
       "level": "Propriétés + revue",
       "state": "NOT_RUN",
-      "source": "tests/T03.md"
+      "source": "tests/T03.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T03-03",
@@ -230,7 +250,8 @@
       ],
       "level": "Unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T03.md"
+      "source": "tests/T03.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T03-04",
@@ -241,7 +262,8 @@
       ],
       "level": "Intégration Core",
       "state": "NOT_RUN",
-      "source": "tests/T03.md"
+      "source": "tests/T03.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T03-05",
@@ -252,7 +274,8 @@
       ],
       "level": "Unitaire + propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T03.md"
+      "source": "tests/T03.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T03-06",
@@ -263,7 +286,8 @@
       ],
       "level": "Revue + mesures",
       "state": "NOT_RUN",
-      "source": "tests/T03.md"
+      "source": "tests/T03.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T04-01",
@@ -274,7 +298,8 @@
       ],
       "level": "Unitaire + intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T04.md"
+      "source": "tests/T04.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T04-02",
@@ -285,7 +310,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T04.md"
+      "source": "tests/T04.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T04-03",
@@ -296,7 +322,8 @@
       ],
       "level": "Métamorphique",
       "state": "NOT_RUN",
-      "source": "tests/T04.md"
+      "source": "tests/T04.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T04-04",
@@ -307,7 +334,8 @@
       ],
       "level": "Unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T04.md"
+      "source": "tests/T04.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T04-05",
@@ -318,7 +346,8 @@
       ],
       "level": "Unitaire + bilan",
       "state": "NOT_RUN",
-      "source": "tests/T04.md"
+      "source": "tests/T04.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T04-06",
@@ -329,7 +358,8 @@
       ],
       "level": "Intégration Core",
       "state": "NOT_RUN",
-      "source": "tests/T04.md"
+      "source": "tests/T04.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T05-01",
@@ -340,7 +370,8 @@
       ],
       "level": "Unitaire analytique",
       "state": "NOT_RUN",
-      "source": "tests/T05.md"
+      "source": "tests/T05.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T05-02",
@@ -351,7 +382,8 @@
       ],
       "level": "Propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T05.md"
+      "source": "tests/T05.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T05-03",
@@ -362,7 +394,8 @@
       ],
       "level": "Unitaire + bilan",
       "state": "NOT_RUN",
-      "source": "tests/T05.md"
+      "source": "tests/T05.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T05-04",
@@ -373,7 +406,8 @@
       ],
       "level": "Unitaire",
       "state": "NOT_RUN",
-      "source": "tests/T05.md"
+      "source": "tests/T05.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T05-05",
@@ -384,7 +418,8 @@
       ],
       "level": "Intégration Core",
       "state": "NOT_RUN",
-      "source": "tests/T05.md"
+      "source": "tests/T05.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T05-06",
@@ -395,7 +430,8 @@
       ],
       "level": "Métamorphique",
       "state": "NOT_RUN",
-      "source": "tests/T05.md"
+      "source": "tests/T05.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T06-01",
@@ -406,7 +442,8 @@
       ],
       "level": "Unitaire analytique",
       "state": "NOT_RUN",
-      "source": "tests/T06.md"
+      "source": "tests/T06.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T06-02",
@@ -417,7 +454,8 @@
       ],
       "level": "Bilan",
       "state": "NOT_RUN",
-      "source": "tests/T06.md"
+      "source": "tests/T06.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T06-03",
@@ -428,7 +466,8 @@
       ],
       "level": "Métamorphique",
       "state": "NOT_RUN",
-      "source": "tests/T06.md"
+      "source": "tests/T06.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T06-04",
@@ -439,7 +478,8 @@
       ],
       "level": "Intégration Core",
       "state": "NOT_RUN",
-      "source": "tests/T06.md"
+      "source": "tests/T06.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T06-05",
@@ -450,7 +490,8 @@
       ],
       "level": "Intégration Core",
       "state": "NOT_RUN",
-      "source": "tests/T06.md"
+      "source": "tests/T06.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T06-06",
@@ -461,7 +502,8 @@
       ],
       "level": "Propriétés + revue",
       "state": "NOT_RUN",
-      "source": "tests/T06.md"
+      "source": "tests/T06.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T07-01",
@@ -472,7 +514,8 @@
       ],
       "level": "Intégration Core + revue",
       "state": "NOT_RUN",
-      "source": "tests/T07.md"
+      "source": "tests/T07.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T07-02",
@@ -483,7 +526,8 @@
       ],
       "level": "Propriétés + intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T07.md"
+      "source": "tests/T07.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T07-03",
@@ -494,7 +538,8 @@
       ],
       "level": "Intégration",
       "state": "NOT_RUN",
-      "source": "tests/T07.md"
+      "source": "tests/T07.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T07-04",
@@ -505,7 +550,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T07.md"
+      "source": "tests/T07.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T07-05",
@@ -516,7 +562,8 @@
       ],
       "level": "Bilan + revue",
       "state": "NOT_RUN",
-      "source": "tests/T07.md"
+      "source": "tests/T07.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T07-06",
@@ -527,7 +574,8 @@
       ],
       "level": "Intégration VS longue",
       "state": "NOT_RUN",
-      "source": "tests/T07.md"
+      "source": "tests/T07.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T08-01",
@@ -538,7 +586,8 @@
       ],
       "level": "Unitaire + revue",
       "state": "NOT_RUN",
-      "source": "tests/T08.md"
+      "source": "tests/T08.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T08-02",
@@ -549,7 +598,8 @@
       ],
       "level": "Intégration Core",
       "state": "NOT_RUN",
-      "source": "tests/T08.md"
+      "source": "tests/T08.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T08-03",
@@ -560,7 +610,8 @@
       ],
       "level": "Propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T08.md"
+      "source": "tests/T08.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T08-04",
@@ -571,7 +622,8 @@
       ],
       "level": "Navigation + intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T08.md"
+      "source": "tests/T08.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T08-05",
@@ -582,7 +634,8 @@
       ],
       "level": "Bilan + intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T08.md"
+      "source": "tests/T08.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T08-06",
@@ -593,7 +646,8 @@
       ],
       "level": "Propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T08.md"
+      "source": "tests/T08.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T09-01",
@@ -604,7 +658,8 @@
       ],
       "level": "Intégration VS + revue",
       "state": "NOT_RUN",
-      "source": "tests/T09.md"
+      "source": "tests/T09.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T09-02",
@@ -615,7 +670,8 @@
       ],
       "level": "Statistique + propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T09.md"
+      "source": "tests/T09.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T09-03",
@@ -626,7 +682,8 @@
       ],
       "level": "Propriétés bloquantes",
       "state": "NOT_RUN",
-      "source": "tests/T09.md"
+      "source": "tests/T09.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T09-04",
@@ -637,7 +694,8 @@
       ],
       "level": "Navigation + intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T09.md"
+      "source": "tests/T09.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T09-05",
@@ -648,7 +706,8 @@
       ],
       "level": "Injection de contraintes",
       "state": "NOT_RUN",
-      "source": "tests/T09.md"
+      "source": "tests/T09.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T09-06",
@@ -659,7 +718,8 @@
       ],
       "level": "Revue de jeu",
       "state": "NOT_RUN",
-      "source": "tests/T09.md"
+      "source": "tests/T09.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T10-01",
@@ -670,7 +730,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T10.md"
+      "source": "tests/T10.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T10-02",
@@ -681,7 +742,8 @@
       ],
       "level": "Injection de fautes",
       "state": "NOT_RUN",
-      "source": "tests/T10.md"
+      "source": "tests/T10.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T10-03",
@@ -692,7 +754,8 @@
       ],
       "level": "Injection de crash",
       "state": "NOT_RUN",
-      "source": "tests/T10.md"
+      "source": "tests/T10.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T10-04",
@@ -703,7 +766,8 @@
       ],
       "level": "Stress + propriétés",
       "state": "NOT_RUN",
-      "source": "tests/T10.md"
+      "source": "tests/T10.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T10-05",
@@ -714,7 +778,8 @@
       ],
       "level": "Concurrence",
       "state": "NOT_RUN",
-      "source": "tests/T10.md"
+      "source": "tests/T10.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T10-06",
@@ -725,7 +790,8 @@
       ],
       "level": "Stress + intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T10.md"
+      "source": "tests/T10.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T11-01",
@@ -736,7 +802,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T11.md"
+      "source": "tests/T11.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T11-02",
@@ -747,7 +814,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T11.md"
+      "source": "tests/T11.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T11-03",
@@ -758,7 +826,8 @@
       ],
       "level": "Intégration VS",
       "state": "NOT_RUN",
-      "source": "tests/T11.md"
+      "source": "tests/T11.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T11-04",
@@ -769,7 +838,8 @@
       ],
       "level": "Intégration VS + revue",
       "state": "NOT_RUN",
-      "source": "tests/T11.md"
+      "source": "tests/T11.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T11-05",
@@ -780,7 +850,8 @@
       ],
       "level": "Intégration VS + jeu",
       "state": "NOT_RUN",
-      "source": "tests/T11.md"
+      "source": "tests/T11.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T11-06",
@@ -791,7 +862,8 @@
       ],
       "level": "Multijoueur",
       "state": "NOT_RUN",
-      "source": "tests/T11.md"
+      "source": "tests/T11.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T12-01",
@@ -802,7 +874,8 @@
       ],
       "level": "Intégration VS + audit",
       "state": "NOT_RUN",
-      "source": "tests/T12.md"
+      "source": "tests/T12.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T12-02",
@@ -813,7 +886,8 @@
       ],
       "level": "Intégration",
       "state": "NOT_RUN",
-      "source": "tests/T12.md"
+      "source": "tests/T12.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T12-03",
@@ -824,7 +898,8 @@
       ],
       "level": "Fonctionnel",
       "state": "NOT_RUN",
-      "source": "tests/T12.md"
+      "source": "tests/T12.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T12-04",
@@ -835,7 +910,8 @@
       ],
       "level": "Intégration",
       "state": "NOT_RUN",
-      "source": "tests/T12.md"
+      "source": "tests/T12.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T12-05",
@@ -846,7 +922,8 @@
       ],
       "level": "Observabilité",
       "state": "NOT_RUN",
-      "source": "tests/T12.md"
+      "source": "tests/T12.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T12-06",
@@ -857,7 +934,8 @@
       ],
       "level": "Sécurité fonctionnelle",
       "state": "NOT_RUN",
-      "source": "tests/T12.md"
+      "source": "tests/T12.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T13-01",
@@ -868,7 +946,8 @@
       ],
       "level": "Campagne automatique",
       "state": "NOT_RUN",
-      "source": "tests/T13.md"
+      "source": "tests/T13.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T13-02",
@@ -879,7 +958,8 @@
       ],
       "level": "Mesures + revue humaine",
       "state": "NOT_RUN",
-      "source": "tests/T13.md"
+      "source": "tests/T13.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T13-03",
@@ -890,7 +970,8 @@
       ],
       "level": "Performance + endurance",
       "state": "NOT_RUN",
-      "source": "tests/T13.md"
+      "source": "tests/T13.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T13-04",
@@ -901,7 +982,8 @@
       ],
       "level": "Jeu + multijoueur",
       "state": "NOT_RUN",
-      "source": "tests/T13.md"
+      "source": "tests/T13.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T13-05",
@@ -912,7 +994,8 @@
       ],
       "level": "Audit de release",
       "state": "NOT_RUN",
-      "source": "tests/T13.md"
+      "source": "tests/T13.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
     },
     {
       "id": "T13-06",
@@ -923,7 +1006,633 @@
       ],
       "level": "Packaging + intégration",
       "state": "NOT_RUN",
-      "source": "tests/T13.md"
+      "source": "tests/T13.md",
+      "execution_state_policy": "Definition only; preserve real reports. No success inferred in this delivery."
+    },
+    {
+      "id": "T14-01",
+      "module": "S14",
+      "title": "Inventaire effectif des roches",
+      "requirements": [
+        "R14-01"
+      ],
+      "level": "Audit assets + intégration",
+      "source": "tests/T14.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T14-02",
+      "module": "S14",
+      "title": "Coupes stratigraphiques analytiques",
+      "requirements": [
+        "R14-02"
+      ],
+      "level": "Unitaire analytique",
+      "source": "tests/T14.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T14-03",
+      "module": "S14",
+      "title": "Exposition après incision",
+      "requirements": [
+        "R14-03"
+      ],
+      "level": "Métamorphique Core",
+      "source": "tests/T14.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T14-04",
+      "module": "S14",
+      "title": "Continuité et sampling 3D",
+      "requirements": [
+        "R14-04"
+      ],
+      "level": "Propriétés",
+      "source": "tests/T14.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T14-05",
+      "module": "S14",
+      "title": "Consommateurs de géologie",
+      "requirements": [
+        "R14-05"
+      ],
+      "level": "Contrats + intégration Core",
+      "source": "tests/T14.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T14-06",
+      "module": "S14",
+      "title": "Colonnes natives et métadonnées",
+      "requirements": [
+        "R14-06"
+      ],
+      "level": "Intégration Vintage Story",
+      "source": "tests/T14.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T14-07",
+      "module": "S14",
+      "title": "Catalogue et ressources atteignables",
+      "requirements": [
+        "R14-07"
+      ],
+      "level": "Corpus + jouabilité",
+      "source": "tests/T14.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T14-08",
+      "module": "S14",
+      "title": "Persistance des formations",
+      "requirements": [
+        "R14-08"
+      ],
+      "level": "Sérialisation + intégration",
+      "source": "tests/T14.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T15-01",
+      "module": "S15",
+      "title": "Profils de sol sur topographie contrôlée",
+      "requirements": [
+        "R15-01"
+      ],
+      "level": "Unitaire + métamorphique",
+      "source": "tests/T15.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T15-02",
+      "module": "S15",
+      "title": "Projection vers variantes de sol",
+      "requirements": [
+        "R15-02"
+      ],
+      "level": "Contrats + audit assets",
+      "source": "tests/T15.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T15-03",
+      "module": "S15",
+      "title": "Sol après toutes les passes",
+      "requirements": [
+        "R15-03"
+      ],
+      "level": "Intégration Vintage Story",
+      "source": "tests/T15.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T15-04",
+      "module": "S15",
+      "title": "Houe et nutriments",
+      "requirements": [
+        "R15-04"
+      ],
+      "level": "Jeu + sauvegarde",
+      "source": "tests/T15.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T15-05",
+      "module": "S15",
+      "title": "Eau, sel et engrais",
+      "requirements": [
+        "R15-05"
+      ],
+      "level": "Jeu saisonnier",
+      "source": "tests/T15.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T15-06",
+      "module": "S15",
+      "title": "Distribution des terres agricoles",
+      "requirements": [
+        "R15-06"
+      ],
+      "level": "Statistiques + parcours",
+      "source": "tests/T15.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T15-07",
+      "module": "S15",
+      "title": "Conservation des sols joués",
+      "requirements": [
+        "R15-07"
+      ],
+      "level": "Intégration + persistance",
+      "source": "tests/T15.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-01",
+      "module": "S16",
+      "title": "Inventaire des dépôts et hôtes",
+      "requirements": [
+        "R16-01"
+      ],
+      "level": "Audit + contrat",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-02",
+      "module": "S16",
+      "title": "Répartition du potentiel",
+      "requirements": [
+        "R16-02"
+      ],
+      "level": "Core analytique + statistiques",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-03",
+      "module": "S16",
+      "title": "Formes, profondeurs et sous-gisements",
+      "requirements": [
+        "R16-03"
+      ],
+      "level": "Propriétés",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-04",
+      "module": "S16",
+      "title": "Continuité et exclusivité des occurrences",
+      "requirements": [
+        "R16-04"
+      ],
+      "level": "Intégration Core",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-05",
+      "module": "S16",
+      "title": "Minerais après cavernes et décor",
+      "requirements": [
+        "R16-05"
+      ],
+      "level": "Intégration de colonne",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-06",
+      "module": "S16",
+      "title": "Prospection de potentiel",
+      "requirements": [
+        "R16-06"
+      ],
+      "level": "Jeu + probe MCP",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-07",
+      "module": "S16",
+      "title": "Prospection locale et indices",
+      "requirements": [
+        "R16-07"
+      ],
+      "level": "Jeu + statistique",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-08",
+      "module": "S16",
+      "title": "Progression et abondance",
+      "requirements": [
+        "R16-08"
+      ],
+      "level": "Corpus + parcours",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T16-09",
+      "module": "S16",
+      "title": "Persistance et requêtes bornées",
+      "requirements": [
+        "R16-09"
+      ],
+      "level": "Persistance + performance",
+      "source": "tests/T16.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-01",
+      "module": "S17",
+      "title": "Catalogue végétal complet",
+      "requirements": [
+        "R17-01"
+      ],
+      "level": "Audit assets + contrats",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-02",
+      "module": "S17",
+      "title": "Admissibilité écologique",
+      "requirements": [
+        "R17-02"
+      ],
+      "level": "Core + intégration",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-03",
+      "module": "S17",
+      "title": "Peuplements et motifs",
+      "requirements": [
+        "R17-03"
+      ],
+      "level": "Statistiques + revue humaine",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-04",
+      "module": "S17",
+      "title": "Arbres à cheval sur frontières",
+      "requirements": [
+        "R17-04"
+      ],
+      "level": "Propriétés + jeu",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-05",
+      "module": "S17",
+      "title": "Sous-bois, sols et protections",
+      "requirements": [
+        "R17-05"
+      ],
+      "level": "Jeu intégré",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-06",
+      "module": "S17",
+      "title": "Ressources végétales et progression",
+      "requirements": [
+        "R17-06"
+      ],
+      "level": "Corpus + jeu",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-07",
+      "module": "S17",
+      "title": "Plantations et indépendance ISRTreeGen",
+      "requirements": [
+        "R17-07"
+      ],
+      "level": "Intégration comparative",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-08",
+      "module": "S17",
+      "title": "Saisons et végétation structurelle",
+      "requirements": [
+        "R17-08"
+      ],
+      "level": "Métamorphique + jeu",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-09",
+      "module": "S17",
+      "title": "Exploitation et performance",
+      "requirements": [
+        "R17-09"
+      ],
+      "level": "Endurance + persistance",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-01",
+      "module": "S18",
+      "title": "Séparation référence et date",
+      "requirements": [
+        "R18-01"
+      ],
+      "level": "Métamorphique",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-02",
+      "module": "S18",
+      "title": "Bilan neige-fonte",
+      "requirements": [
+        "R18-02"
+      ],
+      "level": "Analytique + contrat",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-03",
+      "module": "S18",
+      "title": "Latitude et altitude natives",
+      "requirements": [
+        "R18-03"
+      ],
+      "level": "Core + probe jeu",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-04",
+      "module": "S18",
+      "title": "Répartition durable",
+      "requirements": [
+        "R18-04"
+      ],
+      "level": "Core + revue",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-05",
+      "module": "S18",
+      "title": "Couverture initiale et supports",
+      "requirements": [
+        "R18-05"
+      ],
+      "level": "Jeu + vérification blocs",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-06",
+      "module": "S18",
+      "title": "Gel-dégel et casse",
+      "requirements": [
+        "R18-06"
+      ],
+      "level": "Jeu + sonde MCP",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-07",
+      "module": "S18",
+      "title": "Propriété des blocs et sauvegarde",
+      "requirements": [
+        "R18-07"
+      ],
+      "level": "Persistance + concurrence",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-08",
+      "module": "S18",
+      "title": "Cycle annuel et chargement tardif",
+      "requirements": [
+        "R18-08"
+      ],
+      "level": "Intégration solo/serveur",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-09",
+      "module": "S18",
+      "title": "Options, flore et accès",
+      "requirements": [
+        "R18-09"
+      ],
+      "level": "Jeu de régression",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T18-10",
+      "module": "S18",
+      "title": "Coûts et mutations natives",
+      "requirements": [
+        "R18-10"
+      ],
+      "level": "Endurance + profiling",
+      "source": "tests/T18.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T05U-01",
+      "module": "S05U",
+      "title": "Adoption sans perte",
+      "requirements": [
+        "R05U-01"
+      ],
+      "level": "Outils + revue",
+      "source": "tests/T05U.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T05U-02",
+      "module": "S05U",
+      "title": "Audit et requalification des contrats",
+      "requirements": [
+        "R05U-02"
+      ],
+      "level": "Revue architecture + tests de contrat",
+      "source": "tests/T05U.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T05U-03",
+      "module": "S05U",
+      "title": "Ordonnancement sans blocage circulaire",
+      "requirements": [
+        "R05U-03"
+      ],
+      "level": "Validation documentaire + revue intégrateur",
+      "source": "tests/T05U.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T15-08",
+      "module": "S15",
+      "title": "Probe native des couches de sol",
+      "requirements": [
+        "R15-08"
+      ],
+      "level": "Probe intégration Vintage Story",
+      "source": "tests/T15.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
+    },
+    {
+      "id": "T17-10",
+      "module": "S17",
+      "title": "Probe native des arbres et patches",
+      "requirements": [
+        "R17-10"
+      ],
+      "level": "Probe intégration Vintage Story",
+      "source": "tests/T17.md",
+      "introduced_in": "1.2",
+      "default_execution_state": "NOT_RUN",
+      "blocking": true
     }
-  ]
+  ],
+  "spec_version": "1.2"
 }

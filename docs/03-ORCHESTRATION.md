@@ -1,6 +1,8 @@
 # Orchestration Codex et agents
 ## Principe
-Le cahier des charges est divisé en 14 lots et 42 sous-lots. Un sous-lot constitue une mission délégable, pas un chunk de terrain. Il doit produire un résultat testable avec un périmètre d’écriture limité. L’ordre numérique aide à lire ; les dépendances de `registry/tasks.json` déterminent l’ordre d’exécution réel.
+Le cahier des charges est divisé en 19 lots et 61 sous-lots. Un sous-lot constitue une mission délégable, pas un chunk de terrain. Il doit produire un résultat testable avec un périmètre d’écriture limité. L’ordre numérique aide à lire ; les dépendances de `registry/tasks.json` déterminent l’ordre d’exécution réel.
+
+Le point d’entrée principal est [DEMARRAGE-CODEX](../prompts/DEMARRAGE-CODEX.md). L05-D est l’étape obligatoire d’adoption du plan 1.2 après L05-C réellement accepté : il préserve l’historique, ajoute les tâches L14–L18 et requalifie les sorties touchées. Les lots L14–L18 sont intercalés dans le DAG, pas reportés après L13.
 
 L’orchestrateur lit le plan, le registre et la fiche active. Un agent d’implémentation ne lit que AGENTS, le socle, sa fiche, la spécification du module, les contrats indiqués et ses tests. Un relecteur reçoit le diff, les mêmes exigences et les preuves pertinentes, non tous les journaux du projet. Les dépendances amont ne sont pas chargées récursivement : leurs contrats et leur statut intégré suffisent, sauf bug à investiguer.
 
@@ -33,6 +35,8 @@ Chaque agent travaille dans son worktree avec ses bin/obj, rapports et fixtures 
 
 Les écritures de `registry/state.json` appartiennent à l’intégrateur. Les agents écrivent uniquement leur rapport local `worklogs/Lxx-X.md`. Les rapports complets ne sont pas collés dans le fil principal : un résumé court renvoie aux artefacts et codes de test.
 
+L’intégrateur conserve aussi `registry/requalification-r12.json` et `worklogs/ORCHESTRATION.md` : une entrée `TO_ASSESS` n’est pas une réussite et les preuves historiques ne sont ni effacées ni implicitement requalifiées. Les nouvelles preuves du jeu suivent leurs lots, non un validateur documentaire.
+
 Les notifications qui modifient le suivi utilisent, après suppression des champs inutiles : `Tâche | Événement | Référence du code | Résultat ou blocage | Preuves | Décision attendue`. Les échanges locaux développeur–expert ou développeur–relecteur ne sont pas retransmis intégralement ; si la topologie des outils ne les permet pas, le relais de l’intégrateur reste compact et explicite.
 
 ## Reprise après interruption
@@ -40,3 +44,8 @@ Relire AGENTS, le statut de la tâche, sa capsule et son HANDOFF le plus récent
 
 ## Définition de terminé
 Code borné et documenté ; exigences affectées couvertes ; tests ciblés réellement exécutés ; preuve structurée ; aucun contrat modifié sans décision ; régression consommateur relancée après fusion ; état final et limites explicites. Ni une build seule, ni un screenshot, ni un raisonnement de l’agent ne suffit à valider l’ensemble du mod.
+
+## Revue aveugle locale sans élévation
+Lorsqu’une recette exige qu’un relecteur n’accède pas à `sealed/` sans session Windows secondaire autonome, le contrôleur crée un processus séparé avec `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE)`, le place à Low Integrity (`S-1-16-4096`) par `SetTokenInformation(TokenIntegrityLevel)`, puis le lance avec `CreateProcessAsUserW` et `bInheritHandles = false`. Le relecteur Low écrit uniquement son reçu dans un parent Low non héritable ; `blind/` et `sealed/` restent Medium. Ne pas installer de KVM ni traiter une station de fenêtres privée comme une frontière de confidentialité.
+
+Avant le reçu, prouver `IsTokenRestricted`, intégrité, PID, commande, code de sortie, restricting SIDs éventuels, privilèges restants, ACL/SDDL de `sealed/`, absence de handles hérités, lecture positive de `blind/` et refus `ERROR_ACCESS_DENIED` pour lecture, énumération et écriture dans `sealed/`. Préférer le mandatory label Medium hérité `S:(ML;OICI;NRNW;;;ME)` ; une ACE `DENY` ciblant un SID marqueur du jeton restreint n’est admise qu’en défense complémentaire. Conserver empreinte et horodatage du reçu avant toute révélation. Exécuter les scripts qui distinguent les types numériques JSON sous PowerShell 7 (`pwsh`), car Windows PowerShell 5.1 désérialise notamment `schemaVersion: 1` en `Int32` plutôt qu’en `Int64`. Le protocole technique ne valide pas seul la recette métier : un relecteur distinct contrôle encore campagne, reçu et ordre temporel avant `DONE`.

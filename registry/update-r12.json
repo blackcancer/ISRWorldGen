@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "from_document_package": "1.1",
+  "to_plan": "1.2",
+  "product": "ISRWorldGen",
+  "user_reported_checkpoint": "L05-C",
+  "report_interpretation": "Current development checkpoint, not proof of DONE or earlier parallel task completion.",
+  "new_tasks": [
+    "L05-D",
+    "L14-A",
+    "L14-B",
+    "L14-C",
+    "L18-A",
+    "L15-A",
+    "L15-B",
+    "L15-C",
+    "L16-A",
+    "L16-B",
+    "L16-C",
+    "L16-D",
+    "L17-A",
+    "L17-B",
+    "L17-C",
+    "L17-D",
+    "L18-B",
+    "L18-C",
+    "L18-D"
+  ],
+  "additional_dependencies": {
+    "L06-A": [
+      "L14-B",
+      "L18-A"
+    ],
+    "L08-A": [
+      "L14-B",
+      "L18-A"
+    ],
+    "L11-B": [
+      "L14-C",
+      "L15-B",
+      "L16-C",
+      "L17-C",
+      "L18-B",
+      "L18-C"
+    ],
+    "L11-C": [
+      "L15-C",
+      "L16-D",
+      "L17-D",
+      "L18-D"
+    ],
+    "L12-B": [
+      "L05-D"
+    ],
+    "L12-C": [
+      "L16-D",
+      "L17-D",
+      "L18-D"
+    ]
+  },
+  "preserve_existing_ids": true,
+  "preserve_active_state": true,
+  "active_repository_audited": false,
+  "reference_sources_date": "2026-09-08",
+  "apply_policy": "Review/merge only; never blanket-extract over active repository."
+}

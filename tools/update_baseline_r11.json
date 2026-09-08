@@ -1,0 +1,3078 @@
+{
+  "schema_version": 1,
+  "package": "1.1",
+  "sha256": {
+    "AGENTS.md": "0f235359312986e7f5de021662befb885271a2c8ac1db2249b4baa528b68aeae",
+    "README.md": "de9da098f6646b01911d181e62b74aba2e8434f37bc9a88acf701b3ec88d7e9d",
+    "tools/test_documentation_tools.py": "70004fa04c636170dd3b62ddfabeb89285593e526937742dd115d51f199b91fc",
+    "tools/Get-TaskContext.ps1": "262603af45bb699902e5d2c6cd11511a6e958d33ff692c5e3daa778608fbcbe8",
+    "tools/README.md": "05e42bfe599dd6f7d56d64dd79fc9a551f6dd8cccde36487c9b1198ac6ea6fd6",
+    "tools/validate_spec.py": "b0fe9958cc18f729e6073a0aeb53bf6f040e1c8e4201319b7c2cf64b247de9c5",
+    "tasks/INDEX.md": "b2e605c9e2b1d966b602b652500c3ed7fc9748781194ab3521fd204d3b4b5ea1",
+    "docs/07-SOURCES.md": "178d80031437605feb815c616faac9ae27e037f5d1f107ce486103fc124c2e22",
+    "docs/01-PLAN.md": "512c50c6a750d1c8982993b02c706c991d9cc291add974f2982a5573493ceabe",
+    "docs/08-DECISIONS-ET-RISQUES.md": "1e2098219288f0099b35bbf8a397722034d6fe01ca7caf436e4ff3403782944c",
+    "docs/03-ORCHESTRATION.md": "69bc712c1bfb940ac34c82e745053850f43e8b5428ad1e3a66db998a57184fb9",
+    "docs/09-VERIFICATION-DU-DOSSIER.md": "b6da4b22bc2361c50ebede176914e988ab0e5302580eee43dbf43d1b123303f7",
+    "docs/06-TRACABILITE.md": "01d6722b740bde9196e35b7f4eab70ae68a93c0b2acf3c03290966f7dfc59758",
+    "docs/02-SOCLE.md": "c4a39ae11ee293f02389a464f6dba28ed34b8520157b8f93c73731bfa551fa93",
+    "docs/05-VISUAL-STUDIO-MCP.md": "4deebb6e4a6c96a8351ad58c9a12915dbc571755ffd0d274710225dc37f77e9b",
+    "docs/04-AUDIT-API.md": "85581d18cfcbdfb54adfc3254d44f1d49ece6a561d3c8305ed6c85dd626a5b1f",
+    "docs/00-SYNTHESE.md": "18d153f20e7164cf510961199dc55a66946dd53978f22c943e4f3f7098c7dad6",
+    "templates/MCP-CAPABILITIES.md": "5bdb2c8f94848cb385d15a98f4431565ac2f4268860cfa21c14784a7aa8fce09",
+    "templates/RELEASE-REVIEW.md": "094ae44956794ffb61307702feeed420e83905ca961c01e23613ff3a4189eeec",
+    "templates/ADR.md": "4d42a459ce5311a10cefdb11a0d93c228b6a38fa18e136d073b66862f952d71e",
+    "templates/HANDOFF.md": "3b99e66c26cddb7de7e832503f68e8a9a755a8bb20c144e7c647346402bae976",
+    "templates/ENVIRONMENT.md": "512edd6cf83d1f9aa0f51ba672802ce85a32603a5e4e5129f49e9997fae36de5",
+    "specs/S07.md": "fad1c632acc2315848418a7077ade2f179eda6311539424368647dbff3e4ce28",
+    "specs/S11.md": "e825a199f94481d97ffe63717c2f77999288801a738bd544201d731da1c2e166",
+    "specs/S10.md": "87e0095bfeb550ee1915caaa2a48426e47b4653c7c2a828e806790ee3bb8920d",
+    "specs/S05.md": "e9419c5984dbf4c8d7b2318e76ac97b29f26c0848fb8972035ed9505a2b70924",
+    "specs/S12.md": "f2d9edda01e5dbf5fe594f7e2b765d556b6776205e671ae3d863b35113e469b5",
+    "specs/S13.md": "3bbb27b7fe0944f6f26351fcc125848f4512519a75e8d464b77a9bf6e8e04114",
+    "specs/S06.md": "dfbec3d4f9caa2ed806c20c05ab6d0afc20131cb309c2ebaa9d0bcab465fa354",
+    "specs/S00.md": "54f2c72008e75862a8894ce79f18c0814efe2859b2d664d57040715a5905394f",
+    "specs/S04.md": "b3b0c296b24939315e7f03068b0dfc4730b8511006535d0cda8030229fdac046",
+    "specs/S01.md": "10552f1421d34b4c09255f9257628ef64d1dfc3e924d9d6226c148e4e4eed75c",
+    "specs/S08.md": "1c80a3807aa4dfa2039bbd4668f0f2cbccd8063cd965ecabd45a238b46f8fcd7",
+    "specs/S09.md": "895bc2a2164df02058c6a540e96af26fe36269e3b30b3b9f37d5033d0a0b1cdb",
+    "specs/S02.md": "e02f2bd283d0cbe56f2d85ddaae9a0bade434bcc3b89024f66674f113785763b",
+    "specs/S03.md": "37409bbb60445e5be4efb58dd3f94aa4b13c3d90019beeb32cf0c1f52317f8ec",
+    "tests/T05.md": "0c8523e717c6a6b9a8e6a99c50dc1f201c6f5ccd3ab6369c14ce1848a2fe9ba5",
+    "tests/T08.md": "e8ac0eed01f27773a69924532b74992c16d41bdf22c4041e09712399df19284e",
+    "tests/T02.md": "e2d28eb671c6c27ee6402c3760c287313fc2dbbd5975c3cdde302d075871e5bc",
+    "tests/T06.md": "4a2aa3cd67ed7e250b9d46503141f703c6d7838cf95866571417e9a1f5fc09ba",
+    "tests/T03.md": "b9b7babc04136eb73af6a5c30647ca026bcc4f49637794a4af691d761f8df450",
+    "tests/T11.md": "f43168eed92a78ec7b3a734f13d0c5d4506207500bef625edf637b5c243ae885",
+    "tests/T12.md": "0f8c0e3bcf860751a929f8f20b4d4b8167ffafbfdb05af3142e7ab46f54283f8",
+    "tests/T01.md": "2412da18ab78fc279dd9fda9da3a7f681c43c99bc85bb27a59903ca6cacf4ec9",
+    "tests/T04.md": "1cfbf0e9743334ada54f98397293101dd185645c43d9626d5f525b975ec782eb",
+    "tests/00-RECETTE.md": "ef54825d3217fb661241f76e0c31c2acd982381ce0284296b400073433cc5fd8",
+    "tests/T10.md": "f02ba6b8073900684be7c51e5a7e2c8b2ebc5a058dd636de763ad6d8344d8e5f",
+    "tests/T07.md": "e4272a0b2e38f82ec4a6ad455af60cd74edcefc1ed5f70c123043ca58e6b2a10",
+    "tests/T00.md": "c7866a131851cfd44239b1f52a5a2912a2006b8f3dc5f4368ee953025b9efe89",
+    "tests/T09.md": "a910f2920ce9c2f99a5b48fce6a0e6b9c9301cfb8d4429410e69ba5670e1874a",
+    "tests/T13.md": "a687d447ed629e8b6454754508f60c282fb799db7fc6cfe95999e256837ce892",
+    "registry/tests.json": "a5ae9f1df05095f69e7a37e4a0d12de6ef5a94503c473601e77cce655b14fc97",
+    "registry/gates.json": "8da5df3d19d6d80cd6b4acb3950eb73f10b55837668c624c1b34c0fb48b9c6df",
+    "registry/tasks.json": "4532fb9c31d47ffdbe13730fd36a81f390ae46554a645325f5dc13009d43d39e",
+    "registry/requirements.json": "2d3baf3f1d76b6488e36e3266bb6ece2b18894a0bdfaaa4fc489b0bd432bba69",
+    "registry/sources.json": "ad41830906d4b6127928825bd6214c26f035fbf66686d721a2b70e6ddc2300bf",
+    "registry/quality-budgets.json": "5e50ca15efd57941422d92bada5e49d86464bef7d7ad0c5317f8ab80f2f74be3",
+    "registry/fixtures.json": "3f9b6ef6fdf2a74e8338f37631247d39ad216da6df043f3a9431c364763bbc95",
+    "prompts/REPRISE.md": "3c661befa0ec76ffba2721b56fca35ae2b0c1d080bd244359905cc7515188707",
+    "prompts/MISSION-L00-A-SOUS-AGENT.md": "d5183c59223232b5a762f68defbcf222e65674518a2050e95be6f213f8b6706f",
+    "prompts/DELEGUER-UN-SOUS-LOT.md": "6c7fffed2c1bea6eb4a117bdc9cffaca62712381cf9488a384ee802c335937e0",
+    "prompts/DIAGNOSTIC-MCP.md": "a75cbd9244f4bbea8709725a72a5b9aa97dba11f967b53ad72205298b622c789",
+    "prompts/RELECTURE.md": "556c16155d429aba33db1afef55020b575d61348ba8d77af6c57de069b6cad16",
+    "prompts/DEMARRAGE-CODEX.md": "ff15ede97431af997c24ce6dcab9bb676a8a627d0d92f70c42ae1d9f3e525844",
+    "contracts/C05.md": "34fcbcc7b4941ba0d03b4aec889780f776ebcc3a7517585a35333e3c377f0f3d",
+    "contracts/C02.md": "5bebddd6859fd09a821151f2bd499e778e910e144fb1644e384d50800a6ab4b5",
+    "contracts/C03.md": "b889260e5e72b50bac28523a912d0ea6496cf9c5f1b2f8ac3a5052ed58cc39ed",
+    "contracts/C06.md": "fe66c01adde6ffb78a6fee67273b06596e7c0dabbd1a988db03b1049bf6ac6a0",
+    "contracts/C07.md": "a8695b163a854213845d0fa7550b63597be8f470c80d0b6045b7867d79948806",
+    "contracts/C04.md": "f617ef193ff077c49fbc915166fbee96f1a2cc74bf29bd2a0d693b440f83665b",
+    "contracts/C00.md": "05ff21a2dcadce5f9d983132568a626aad9a182acb638fcd6aa6b061acf55a61",
+    "contracts/C01.md": "6b57c0e6a2d7764ebc11e7e529f22d047ab80de692710edb36718e4681e87e2a",
+    "tasks/L11/L11-B.md": "7bb1cb5d5c3e0e6df06967fc8252af1c826454b25d78b1e6bd4cd74d4b37398e",
+    "tasks/L11/L11-C.md": "6d45e246a78f5412f8e85b688f9c1ba957e034be0a2eeafdb53ced8466f16c43",
+    "tasks/L11/README.md": "af2a0bf864cd4ccef25a0f7ef23ea16625de2c056ab035c3d900c07cd0ec5609",
+    "tasks/L11/L11-A.md": "90102f4edc1a2238aee1c6ffa136b723870ad53e12baf2444097f37e5a9013d5",
+    "tasks/L00/L00-A.md": "aec7e210a63b9eff7fa1b0b31d4cf91be02d9c0fe37be94cd715e21dc9d0b34e",
+    "tasks/L00/L00-C.md": "1fcddd2550d4c40d94ca79c940a1d0e91a972e20fc88392c3cbf955dc6c5c2a6",
+    "tasks/L00/README.md": "98b46ab9196449adf1f56b7a2a1f342bb37be6fb28ae6dcd0502086385b61ceb",
+    "tasks/L00/L00-B.md": "9d69df887eacc6ce39a96885df2e0c6d2c93ff8d7f3ff7188c09b0e345274656",
+    "tasks/L08/L08-C.md": "61cf34cf4bb9894287acec233ea6dfeda36246a10ffc6a345f5d72d10ff0e90f",
+    "tasks/L08/L08-A.md": "29761909bf7d12b621df4dbb689c7e1060e92bc3bad766e720b2c25622875728",
+    "tasks/L08/README.md": "550dfd7de2031132b76425e3c95fa07419b6a24d1690fcfa4c4adae41b688588",
+    "tasks/L08/L08-B.md": "de559408ce3323aff8ddd20caeb75de9c4a93ae2936c896d6ab806fa8a2a2ca0",
+    "tasks/L10/L10-B.md": "494461548aeee61009794aea054b6aedf4b80e25729eb6dad3973a029be279e6",
+    "tasks/L10/README.md": "cc0877ceabbb40f2b9b53ec7fd176130f847c70f6a159f0d40bdca86387ee817",
+    "tasks/L10/L10-A.md": "ad90ed50226c56a7d69ca1de5f71916145164ba2eeccdcd1ddbc551b3a128190",
+    "tasks/L10/L10-C.md": "630969c1fc44b6e0201d9d412a8fef36dfa1ba0dad1c82af9730689f6c7f49df",
+    "tasks/L05/L05-C.md": "bb3bb637b8c316764cf0b804a2aae5b04c1953f35b8e030432eb8c5376b9d44e",
+    "tasks/L05/L05-B.md": "1e6056bd84f046dff3f4e39a98e83d73a29667194d484e58030b89955433b197",
+    "tasks/L05/README.md": "50a0c4fb0987c2fa1adc931bddedda89542e33f1339a6296758888dc2b4e77d0",
+    "tasks/L05/L05-A.md": "59ad5c6a6b2fd79de19258f96d25302f52d833fa2b7a9c5aea1c59a7db0abb30",
+    "tasks/L09/L09-A.md": "a13a8687809659eed95e762ee689ad5d936539053a4d882e438655ca97c94ed5",
+    "tasks/L09/README.md": "f52b607a8e0d6e8b5c8e7535218cb038545b596a3d0183d639f4f0adc9bc2de6",
+    "tasks/L09/L09-B.md": "5c5a8a1bdaeb4e6243dbd0302a7367c2e91a979d46d676ddb2b5a13759252fa9",
+    "tasks/L09/L09-C.md": "66d6c7987359c7856fcbadcf2db1738134c2ecaefb10ccb87756e9535cd8d0ef",
+    "tasks/L03/L03-C.md": "ab4a46a15b89a34ab7c7968f5ef8e32e1db80373ad5274f88fb30ce4273559c3",
+    "tasks/L03/L03-A.md": "321633a0fb70bada170bb8b9c2f8a15674888f172da83b4682709efea6082307",
+    "tasks/L03/L03-B.md": "405d04cbc729a095df31b58a808df9b53196b4dca7024927eac4be566a3f2da6",
+    "tasks/L03/README.md": "f7b423b5458063011e67990e3f0dfa831b1d80d3a266d2f5503d074225cd31e2",
+    "tasks/L06/L06-B.md": "6ed6e77f31c056091b3972436963c58274d4b3548d7f36fa2bac81b7911dad0b",
+    "tasks/L06/L06-A.md": "cb04af6dc92b03e93fc90c40c6c31dc1883dee69cfcbf779a25735e7e330bc8f",
+    "tasks/L06/L06-C.md": "2b1873406cb590569216b315a4f898f0a5dd3d981a04692c58879078d8a35ca1",
+    "tasks/L06/README.md": "a8cb58dc9f14315686c8659ec1fd3934ef10601f829b4c150b4d1d17154b099a",
+    "tasks/L12/L12-C.md": "b963c902927a377f47b7cc9724ef0f0b5ff535c2cfb508abaf727caccc8e6079",
+    "tasks/L12/README.md": "0ec920a807d6ff1fce23f86de1dc832b83ad7dfdff77429bbd24139f87a068f5",
+    "tasks/L12/L12-B.md": "075bb290198958223f9295d65e1c2b3b9c51a4ea17836f46f30610469f3c47b7",
+    "tasks/L12/L12-A.md": "7a250327184019ef9151eef99c785206629f8d48797c759c681a1d9449db23f5",
+    "tasks/L02/L02-B.md": "a38d5b1bab2cb0e16119e80932406961b801fd47e9b878739026d47ebcdefc85",
+    "tasks/L02/L02-C.md": "acf9565fc2759e2c88f13efc09724906d0520d08eec615bb7fdc663c3f4fbc90",
+    "tasks/L02/README.md": "3a26be3b215298a8f9cee36e9d51a88a363b2fe64039148f88c6b75ce6063d8d",
+    "tasks/L02/L02-A.md": "c86e5f94297a3ec28b1c986c946e594ee34fb70b5e54d96158e17e88ac834e10",
+    "tasks/L04/README.md": "569d4f6f6fec15a3bd8689586dd519bf96728d0a9482dcd123a94b10cf0a01b6",
+    "tasks/L04/L04-A.md": "39ee1be4880a438aa26852fe74ee08d944017ca01c902968685d87135bbaafe4",
+    "tasks/L04/L04-C.md": "e8fb5b84a5368fdea19b1a8fe0bcd21c99ca23715b0d2a3794799f5ad76cb69e",
+    "tasks/L04/L04-B.md": "6a8dffdd1a6a089babc53b3c3e96090ead0c3950d0f52c065d998332dc3f2704",
+    "tasks/L01/L01-B.md": "53932888546e635a44448abd64c9e504edb7e9d6ab7de9cd0688a807cc76ca7c",
+    "tasks/L01/README.md": "1942cd42abd98e7b3c8d2494e0d8d691576d62a93697cbb3d2ff33e7eca8c2b9",
+    "tasks/L01/L01-A.md": "32912f8e6d47e1bcf7956ce6ae4c636f3093eec9abae0d374fa4919dc014f499",
+    "tasks/L01/L01-C.md": "67c5c71f2fd5364661c360667ce2f6a5da26a81888e859f287e8624e138062f4",
+    "tasks/L13/L13-B.md": "7b9e550f984efab0de6d57f9056aa1e3c7d8793dc4f373a8aaf0e2026d2b129c",
+    "tasks/L13/README.md": "0f2e9ba89114c5ba4e9c776728d78a378e7523e43312d90820c16f511611245c",
+    "tasks/L13/L13-C.md": "082152e9c9becb9d8c23e26e97066a686f125074779543e263a6bfba68ba8ad9",
+    "tasks/L13/L13-A.md": "60c28c301c8a2c08b95856f9d14652a33281f69aa77356241f0a2745938410ea",
+    "tasks/L07/L07-A.md": "b0ece04c644895fa1b601150674f573bc7e97801c72363c722064fd5a34fe8b9",
+    "tasks/L07/README.md": "38d85dc5181cc72afbdf073ac408424f9888229be7a35381f15a1a1565a13c81",
+    "tasks/L07/L07-C.md": "7d18fc6a9c55f607cb6b806d7371ddb85357bb512cf461329454707859dffd57",
+    "tasks/L07/L07-B.md": "ba955c13e2549d454eaab0e5830aed3e0c8c196f8b8672b0e54286c4c448f269"
+  },
+  "registries": {
+    "registry/tasks.json": {
+      "schema_version": 1,
+      "spec_version": "1.0",
+      "tasks": [
+        {
+          "id": "L00-A",
+          "lot": "L00",
+          "title": "Auditer et verrouiller la cible locale",
+          "document": "tasks/L00/L00-A.md",
+          "depends_on": [],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L00/L00-A.md",
+            "specs/S00.md",
+            "contracts/C06.md",
+            "contracts/C07.md",
+            "tests/T00.md",
+            "docs/04-AUDIT-API.md",
+            "docs/05-VISUAL-STUDIO-MCP.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/Bootstrap/",
+            "testsrc/WorldGen.Tests/L00A/",
+            "worklogs/L00-A.md"
+          ],
+          "requirements": [
+            "R00-01",
+            "R00-02"
+          ],
+          "tests": [
+            "T00-01",
+            "T00-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L00-B",
+          "lot": "L00",
+          "title": "Prouver le débogage C# par le MCP",
+          "document": "tasks/L00/L00-B.md",
+          "depends_on": [
+            "L00-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L00/L00-B.md",
+            "specs/S00.md",
+            "contracts/C06.md",
+            "contracts/C07.md",
+            "tests/T00.md",
+            "docs/04-AUDIT-API.md",
+            "docs/05-VISUAL-STUDIO-MCP.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/DebugProbe/",
+            "testsrc/WorldGen.Tests/L00B/",
+            "worklogs/L00-B.md"
+          ],
+          "requirements": [
+            "R00-03"
+          ],
+          "tests": [
+            "T00-03"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L00-C",
+          "lot": "L00",
+          "title": "Valider un remplacement de terrain minimal",
+          "document": "tasks/L00/L00-C.md",
+          "depends_on": [
+            "L00-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L00/L00-C.md",
+            "specs/S00.md",
+            "contracts/C06.md",
+            "contracts/C07.md",
+            "tests/T00.md",
+            "docs/04-AUDIT-API.md",
+            "docs/05-VISUAL-STUDIO-MCP.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/WorldgenProbe/",
+            "testsrc/WorldGen.Tests/L00C/",
+            "worklogs/L00-C.md"
+          ],
+          "requirements": [
+            "R00-04",
+            "R00-05",
+            "R00-06"
+          ],
+          "tests": [
+            "T00-04",
+            "T00-05",
+            "T00-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L01-A",
+          "lot": "L01",
+          "title": "Construire coordonnées, RNG et IDs",
+          "document": "tasks/L01/L01-A.md",
+          "depends_on": [
+            "L00-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L01/L01-A.md",
+            "specs/S01.md",
+            "contracts/C00.md",
+            "tests/T01.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Foundation/",
+            "testsrc/WorldGen.Tests/L01A/",
+            "worklogs/L01-A.md"
+          ],
+          "requirements": [
+            "R01-01",
+            "R01-02"
+          ],
+          "tests": [
+            "T01-01",
+            "T01-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L01-B",
+          "lot": "L01",
+          "title": "Geler contrats C# et snapshots",
+          "document": "tasks/L01/L01-B.md",
+          "depends_on": [
+            "L01-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L01/L01-B.md",
+            "specs/S01.md",
+            "contracts/C00.md",
+            "tests/T01.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Contracts/",
+            "testsrc/WorldGen.Tests/L01B/",
+            "worklogs/L01-B.md"
+          ],
+          "requirements": [
+            "R01-03",
+            "R01-04"
+          ],
+          "tests": [
+            "T01-03",
+            "T01-04"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L01-C",
+          "lot": "L01",
+          "title": "Établir banc analytique et harnais de tests",
+          "document": "tasks/L01/L01-C.md",
+          "depends_on": [
+            "L01-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L01/L01-C.md",
+            "specs/S01.md",
+            "contracts/C00.md",
+            "tests/T01.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Tools/TestHarness/",
+            "testsrc/WorldGen.Tests/L01C/",
+            "worklogs/L01-C.md"
+          ],
+          "requirements": [
+            "R01-05",
+            "R01-06"
+          ],
+          "tests": [
+            "T01-05",
+            "T01-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L02-A",
+          "lot": "L02",
+          "title": "Construire la géométrie robuste de l’atlas",
+          "document": "tasks/L02/L02-A.md",
+          "depends_on": [
+            "L01-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L02/L02-A.md",
+            "specs/S02.md",
+            "contracts/C00.md",
+            "contracts/C01.md",
+            "tests/T02.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Atlas/Geometry/",
+            "testsrc/WorldGen.Tests/L02A/",
+            "worklogs/L02-A.md"
+          ],
+          "requirements": [
+            "R02-01",
+            "R02-02"
+          ],
+          "tests": [
+            "T02-01",
+            "T02-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L02-B",
+          "lot": "L02",
+          "title": "Indexer et borner les descriptions globales",
+          "document": "tasks/L02/L02-B.md",
+          "depends_on": [
+            "L02-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L02/L02-B.md",
+            "specs/S02.md",
+            "contracts/C00.md",
+            "contracts/C01.md",
+            "tests/T02.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Atlas/SpatialIndex/",
+            "testsrc/WorldGen.Tests/L02B/",
+            "worklogs/L02-B.md"
+          ],
+          "requirements": [
+            "R02-03",
+            "R02-04"
+          ],
+          "tests": [
+            "T02-03",
+            "T02-04"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L02-C",
+          "lot": "L02",
+          "title": "Définir profils d’échelle et contrôle des motifs",
+          "document": "tasks/L02/L02-C.md",
+          "depends_on": [
+            "L02-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L02/L02-C.md",
+            "specs/S02.md",
+            "contracts/C00.md",
+            "contracts/C01.md",
+            "tests/T02.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Atlas/Profiles/",
+            "testsrc/WorldGen.Tests/L02C/",
+            "worklogs/L02-C.md"
+          ],
+          "requirements": [
+            "R02-05",
+            "R02-06"
+          ],
+          "tests": [
+            "T02-05",
+            "T02-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L03-A",
+          "lot": "L03",
+          "title": "Produire plaques et masses continentales",
+          "document": "tasks/L03/L03-A.md",
+          "depends_on": [
+            "L02-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L03/L03-A.md",
+            "specs/S03.md",
+            "contracts/C01.md",
+            "tests/T03.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Geology/Plates/",
+            "testsrc/WorldGen.Tests/L03A/",
+            "worklogs/L03-A.md"
+          ],
+          "requirements": [
+            "R03-01",
+            "R03-02"
+          ],
+          "tests": [
+            "T03-01",
+            "T03-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L03-B",
+          "lot": "L03",
+          "title": "Composer reliefs et enveloppe verticale",
+          "document": "tasks/L03/L03-B.md",
+          "depends_on": [
+            "L03-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L03/L03-B.md",
+            "specs/S03.md",
+            "contracts/C01.md",
+            "tests/T03.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Geology/Landscapes/",
+            "testsrc/WorldGen.Tests/L03B/",
+            "worklogs/L03-B.md"
+          ],
+          "requirements": [
+            "R03-05",
+            "R03-06"
+          ],
+          "tests": [
+            "T03-05",
+            "T03-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L03-C",
+          "lot": "L03",
+          "title": "Décrire strates et propriétés des roches",
+          "document": "tasks/L03/L03-C.md",
+          "depends_on": [
+            "L03-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L03/L03-C.md",
+            "specs/S03.md",
+            "contracts/C01.md",
+            "tests/T03.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Geology/Materials/",
+            "testsrc/WorldGen.Tests/L03C/",
+            "worklogs/L03-C.md"
+          ],
+          "requirements": [
+            "R03-03",
+            "R03-04"
+          ],
+          "tests": [
+            "T03-03",
+            "T03-04"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L04-A",
+          "lot": "L04",
+          "title": "Calculer température et latitude cohérentes",
+          "document": "tasks/L04/L04-A.md",
+          "depends_on": [
+            "L03-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L04/L04-A.md",
+            "specs/S04.md",
+            "contracts/C02.md",
+            "tests/T04.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Climate/Temperature/",
+            "testsrc/WorldGen.Tests/L04A/",
+            "worklogs/L04-A.md"
+          ],
+          "requirements": [
+            "R04-01",
+            "R04-02"
+          ],
+          "tests": [
+            "T04-01",
+            "T04-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L04-B",
+          "lot": "L04",
+          "title": "Transporter humidité et précipitations",
+          "document": "tasks/L04/L04-B.md",
+          "depends_on": [
+            "L04-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L04/L04-B.md",
+            "specs/S04.md",
+            "contracts/C02.md",
+            "tests/T04.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Climate/Precipitation/",
+            "testsrc/WorldGen.Tests/L04B/",
+            "worklogs/L04-B.md"
+          ],
+          "requirements": [
+            "R04-03",
+            "R04-04"
+          ],
+          "tests": [
+            "T04-03",
+            "T04-04"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L04-C",
+          "lot": "L04",
+          "title": "Établir budgets de ruissellement et recharge",
+          "document": "tasks/L04/L04-C.md",
+          "depends_on": [
+            "L04-B",
+            "L03-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L04/L04-C.md",
+            "specs/S04.md",
+            "contracts/C02.md",
+            "tests/T04.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Climate/WaterBudget/",
+            "testsrc/WorldGen.Tests/L04C/",
+            "worklogs/L04-C.md"
+          ],
+          "requirements": [
+            "R04-05",
+            "R04-06"
+          ],
+          "tests": [
+            "T04-05",
+            "T04-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L05-A",
+          "lot": "L05",
+          "title": "Résoudre dépressions et topologie de drainage",
+          "document": "tasks/L05/L05-A.md",
+          "depends_on": [
+            "L03-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L05/L05-A.md",
+            "specs/S05.md",
+            "contracts/C02.md",
+            "contracts/C03.md",
+            "tests/T05.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Hydrology/Depressions/",
+            "testsrc/WorldGen.Tests/L05A/",
+            "worklogs/L05-A.md"
+          ],
+          "requirements": [
+            "R05-01",
+            "R05-02",
+            "R05-04"
+          ],
+          "tests": [
+            "T05-01",
+            "T05-02",
+            "T05-04"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L05-B",
+          "lot": "L05",
+          "title": "Accumuler débits et transferts",
+          "document": "tasks/L05/L05-B.md",
+          "depends_on": [
+            "L05-A",
+            "L04-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L05/L05-B.md",
+            "specs/S05.md",
+            "contracts/C02.md",
+            "contracts/C03.md",
+            "tests/T05.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Hydrology/Discharge/",
+            "testsrc/WorldGen.Tests/L05B/",
+            "worklogs/L05-B.md"
+          ],
+          "requirements": [
+            "R05-03"
+          ],
+          "tests": [
+            "T05-03"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L05-C",
+          "lot": "L05",
+          "title": "Publier exutoires et budgets de raffinement",
+          "document": "tasks/L05/L05-C.md",
+          "depends_on": [
+            "L05-B",
+            "L02-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L05/L05-C.md",
+            "specs/S05.md",
+            "contracts/C02.md",
+            "contracts/C03.md",
+            "tests/T05.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Hydrology/Boundaries/",
+            "testsrc/WorldGen.Tests/L05C/",
+            "worklogs/L05-C.md"
+          ],
+          "requirements": [
+            "R05-05",
+            "R05-06"
+          ],
+          "tests": [
+            "T05-05",
+            "T05-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L06-A",
+          "lot": "L06",
+          "title": "Implémenter incision et uplift déterministes",
+          "document": "tasks/L06/L06-A.md",
+          "depends_on": [
+            "L05-C",
+            "L03-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L06/L06-A.md",
+            "specs/S06.md",
+            "contracts/C03.md",
+            "tests/T06.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Erosion/Incision/",
+            "testsrc/WorldGen.Tests/L06A/",
+            "worklogs/L06-A.md"
+          ],
+          "requirements": [
+            "R06-01",
+            "R06-03"
+          ],
+          "tests": [
+            "T06-01",
+            "T06-03"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L06-B",
+          "lot": "L06",
+          "title": "Ajouter transport, dépôts et boucle couplée",
+          "document": "tasks/L06/L06-B.md",
+          "depends_on": [
+            "L06-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L06/L06-B.md",
+            "specs/S06.md",
+            "contracts/C03.md",
+            "tests/T06.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Erosion/Evolution/",
+            "testsrc/WorldGen.Tests/L06B/",
+            "worklogs/L06-B.md"
+          ],
+          "requirements": [
+            "R06-02",
+            "R06-04"
+          ],
+          "tests": [
+            "T06-02",
+            "T06-04"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L06-C",
+          "lot": "L06",
+          "title": "Raffiner sans détruire les contraintes",
+          "document": "tasks/L06/L06-C.md",
+          "depends_on": [
+            "L06-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L06/L06-C.md",
+            "specs/S06.md",
+            "contracts/C03.md",
+            "tests/T06.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Erosion/Refinement/",
+            "testsrc/WorldGen.Tests/L06C/",
+            "worklogs/L06-C.md"
+          ],
+          "requirements": [
+            "R06-05",
+            "R06-06"
+          ],
+          "tests": [
+            "T06-05",
+            "T06-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L07-A",
+          "lot": "L07",
+          "title": "Construire trajectoires et sections fluviales",
+          "document": "tasks/L07/L07-A.md",
+          "depends_on": [
+            "L06-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L07/L07-A.md",
+            "specs/S07.md",
+            "contracts/C03.md",
+            "contracts/C06.md",
+            "tests/T07.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Waters/Rivers/",
+            "testsrc/WorldGen.Tests/L07A/",
+            "worklogs/L07-A.md"
+          ],
+          "requirements": [
+            "R07-01",
+            "R07-02"
+          ],
+          "tests": [
+            "T07-01",
+            "T07-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L07-B",
+          "lot": "L07",
+          "title": "Construire lacs, côtes et deltas",
+          "document": "tasks/L07/L07-B.md",
+          "depends_on": [
+            "L07-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L07/L07-B.md",
+            "specs/S07.md",
+            "contracts/C03.md",
+            "contracts/C06.md",
+            "tests/T07.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Waters/WaterBodies/",
+            "testsrc/WorldGen.Tests/L07B/",
+            "worklogs/L07-B.md"
+          ],
+          "requirements": [
+            "R07-03",
+            "R07-04",
+            "R07-05"
+          ],
+          "tests": [
+            "T07-03",
+            "T07-04",
+            "T07-05"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L07-C",
+          "lot": "L07",
+          "title": "Qualifier la matérialisation des fluides",
+          "document": "tasks/L07/L07-C.md",
+          "depends_on": [
+            "L07-B",
+            "L11-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L07/L07-C.md",
+            "specs/S07.md",
+            "contracts/C03.md",
+            "contracts/C06.md",
+            "tests/T07.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/Fluids/",
+            "testsrc/WorldGen.Tests/L07C/",
+            "worklogs/L07-C.md"
+          ],
+          "requirements": [
+            "R07-06"
+          ],
+          "tests": [
+            "T07-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L08-A",
+          "lot": "L08",
+          "title": "Planifier les réseaux de cavernes",
+          "document": "tasks/L08/L08-A.md",
+          "depends_on": [
+            "L03-C",
+            "L05-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L08/L08-A.md",
+            "specs/S08.md",
+            "contracts/C04.md",
+            "tests/T08.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Caves/Networks/",
+            "testsrc/WorldGen.Tests/L08A/",
+            "worklogs/L08-A.md"
+          ],
+          "requirements": [
+            "R08-01",
+            "R08-03"
+          ],
+          "tests": [
+            "T08-01",
+            "T08-03"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L08-B",
+          "lot": "L08",
+          "title": "Composer les volumes souterrains",
+          "document": "tasks/L08/L08-B.md",
+          "depends_on": [
+            "L08-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L08/L08-B.md",
+            "specs/S08.md",
+            "contracts/C04.md",
+            "tests/T08.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Caves/Volumes/",
+            "testsrc/WorldGen.Tests/L08B/",
+            "worklogs/L08-B.md"
+          ],
+          "requirements": [
+            "R08-02",
+            "R08-06"
+          ],
+          "tests": [
+            "T08-02",
+            "T08-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L08-C",
+          "lot": "L08",
+          "title": "Valider navigation et eau souterraine",
+          "document": "tasks/L08/L08-C.md",
+          "depends_on": [
+            "L08-B",
+            "L07-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L08/L08-C.md",
+            "specs/S08.md",
+            "contracts/C04.md",
+            "tests/T08.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Caves/Traversal/",
+            "testsrc/WorldGen.Tests/L08C/",
+            "worklogs/L08-C.md"
+          ],
+          "requirements": [
+            "R08-04",
+            "R08-05"
+          ],
+          "tests": [
+            "T08-04",
+            "T08-05"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L09-A",
+          "lot": "L09",
+          "title": "Sélectionner des sites rares connectés",
+          "document": "tasks/L09/L09-A.md",
+          "depends_on": [
+            "L08-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L09/L09-A.md",
+            "specs/S09.md",
+            "contracts/C04.md",
+            "tests/T09.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Wonders/Placement/",
+            "testsrc/WorldGen.Tests/L09A/",
+            "worklogs/L09-A.md"
+          ],
+          "requirements": [
+            "R09-02",
+            "R09-03"
+          ],
+          "tests": [
+            "T09-02",
+            "T09-03"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L09-B",
+          "lot": "L09",
+          "title": "Composer les cinq familles fantastiques",
+          "document": "tasks/L09/L09-B.md",
+          "depends_on": [
+            "L09-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L09/L09-B.md",
+            "specs/S09.md",
+            "contracts/C04.md",
+            "tests/T09.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Core/Wonders/Themes/",
+            "testsrc/WorldGen.Tests/L09B/",
+            "worklogs/L09-B.md"
+          ],
+          "requirements": [
+            "R09-01",
+            "R09-06"
+          ],
+          "tests": [
+            "T09-01",
+            "T09-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L09-C",
+          "lot": "L09",
+          "title": "Certifier les accès après toutes les passes",
+          "document": "tasks/L09/L09-C.md",
+          "depends_on": [
+            "L09-B",
+            "L11-C",
+            "L12-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L09/L09-C.md",
+            "specs/S09.md",
+            "contracts/C04.md",
+            "tests/T09.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/WonderValidation/",
+            "testsrc/WorldGen.Tests/L09C/",
+            "worklogs/L09-C.md"
+          ],
+          "requirements": [
+            "R09-04",
+            "R09-05"
+          ],
+          "tests": [
+            "T09-04",
+            "T09-05"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L10-A",
+          "lot": "L10",
+          "title": "Écrire manifeste et stockage versionné",
+          "document": "tasks/L10/L10-A.md",
+          "depends_on": [
+            "L01-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L10/L10-A.md",
+            "specs/S10.md",
+            "contracts/C00.md",
+            "contracts/C05.md",
+            "tests/T10.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Runtime/Persistence/",
+            "testsrc/WorldGen.Tests/L10A/",
+            "worklogs/L10-A.md"
+          ],
+          "requirements": [
+            "R10-01",
+            "R10-02"
+          ],
+          "tests": [
+            "T10-01",
+            "T10-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L10-B",
+          "lot": "L10",
+          "title": "Construire scheduler et caches bornés",
+          "document": "tasks/L10/L10-B.md",
+          "depends_on": [
+            "L10-A",
+            "L01-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L10/L10-B.md",
+            "specs/S10.md",
+            "contracts/C00.md",
+            "contracts/C05.md",
+            "tests/T10.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Runtime/Scheduling/",
+            "testsrc/WorldGen.Tests/L10B/",
+            "worklogs/L10-B.md"
+          ],
+          "requirements": [
+            "R10-04",
+            "R10-05"
+          ],
+          "tests": [
+            "T10-04",
+            "T10-05"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L10-C",
+          "lot": "L10",
+          "title": "Qualifier reprise après crash et arrêt",
+          "document": "tasks/L10/L10-C.md",
+          "depends_on": [
+            "L10-B",
+            "L11-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L10/L10-C.md",
+            "specs/S10.md",
+            "contracts/C00.md",
+            "contracts/C05.md",
+            "tests/T10.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Runtime/Recovery/",
+            "testsrc/WorldGen.Tests/L10C/",
+            "worklogs/L10-C.md"
+          ],
+          "requirements": [
+            "R10-03",
+            "R10-06"
+          ],
+          "tests": [
+            "T10-03",
+            "T10-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L11-A",
+          "lot": "L11",
+          "title": "Brancher les hooks et cartes natives",
+          "document": "tasks/L11/L11-A.md",
+          "depends_on": [
+            "L00-C",
+            "L02-C",
+            "L01-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L11/L11-A.md",
+            "specs/S11.md",
+            "contracts/C05.md",
+            "contracts/C06.md",
+            "tests/T11.md",
+            "docs/04-AUDIT-API.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/Adapters/",
+            "testsrc/WorldGen.Tests/L11A/",
+            "worklogs/L11-A.md"
+          ],
+          "requirements": [
+            "R11-01",
+            "R11-02"
+          ],
+          "tests": [
+            "T11-01",
+            "T11-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L11-B",
+          "lot": "L11",
+          "title": "Assembler la colonne complète",
+          "document": "tasks/L11/L11-B.md",
+          "depends_on": [
+            "L11-A",
+            "L07-C",
+            "L08-C",
+            "L09-B",
+            "L10-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L11/L11-B.md",
+            "specs/S11.md",
+            "contracts/C05.md",
+            "contracts/C06.md",
+            "tests/T11.md",
+            "docs/04-AUDIT-API.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/ColumnGeneration/",
+            "testsrc/WorldGen.Tests/L11B/",
+            "worklogs/L11-B.md"
+          ],
+          "requirements": [
+            "R11-03"
+          ],
+          "tests": [
+            "T11-03"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L11-C",
+          "lot": "L11",
+          "title": "Qualifier contenu vanilla, spawn et serveur",
+          "document": "tasks/L11/L11-C.md",
+          "depends_on": [
+            "L11-B",
+            "L12-A",
+            "L10-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L11/L11-C.md",
+            "specs/S11.md",
+            "contracts/C05.md",
+            "contracts/C06.md",
+            "tests/T11.md",
+            "docs/04-AUDIT-API.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/Compatibility/",
+            "testsrc/WorldGen.Tests/L11C/",
+            "worklogs/L11-C.md"
+          ],
+          "requirements": [
+            "R11-04",
+            "R11-05",
+            "R11-06"
+          ],
+          "tests": [
+            "T11-04",
+            "T11-05",
+            "T11-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L12-A",
+          "lot": "L12",
+          "title": "Réaliser assets et palettes fantastiques",
+          "document": "tasks/L12/L12-A.md",
+          "depends_on": [
+            "L09-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L12/L12-A.md",
+            "specs/S12.md",
+            "contracts/C06.md",
+            "contracts/C07.md",
+            "tests/T12.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/Assets/",
+            "testsrc/WorldGen.Tests/L12A/",
+            "worklogs/L12-A.md",
+            "assets/worldgen/"
+          ],
+          "requirements": [
+            "R12-01"
+          ],
+          "tests": [
+            "T12-01"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L12-B",
+          "lot": "L12",
+          "title": "Exposer profils et configuration validée",
+          "document": "tasks/L12/L12-B.md",
+          "depends_on": [
+            "L02-C",
+            "L10-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L12/L12-B.md",
+            "specs/S12.md",
+            "contracts/C06.md",
+            "contracts/C07.md",
+            "tests/T12.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.VintageStory/Configuration/",
+            "testsrc/WorldGen.Tests/L12B/",
+            "worklogs/L12-B.md"
+          ],
+          "requirements": [
+            "R12-02",
+            "R12-03"
+          ],
+          "tests": [
+            "T12-02",
+            "T12-03"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L12-C",
+          "lot": "L12",
+          "title": "Finaliser aperçu, diagnostics et preuves",
+          "document": "tasks/L12/L12-C.md",
+          "depends_on": [
+            "L01-C",
+            "L06-C",
+            "L08-B",
+            "L09-B",
+            "L11-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L12/L12-C.md",
+            "specs/S12.md",
+            "contracts/C06.md",
+            "contracts/C07.md",
+            "tests/T12.md"
+          ],
+          "allowed_write_paths": [
+            "src/WorldGen.Tools/Diagnostics/",
+            "testsrc/WorldGen.Tests/L12C/",
+            "worklogs/L12-C.md",
+            "src/WorldGen.VintageStory/Diagnostics/"
+          ],
+          "requirements": [
+            "R12-04",
+            "R12-05",
+            "R12-06"
+          ],
+          "tests": [
+            "T12-04",
+            "T12-05",
+            "T12-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L13-A",
+          "lot": "L13",
+          "title": "Exécuter la campagne et la revue des paysages",
+          "document": "tasks/L13/L13-A.md",
+          "depends_on": [
+            "L09-C",
+            "L11-C",
+            "L12-C",
+            "L10-C"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L13/L13-A.md",
+            "specs/S13.md",
+            "contracts/C07.md",
+            "tests/T13.md",
+            "tests/00-RECETTE.md",
+            "registry/quality-budgets.json"
+          ],
+          "allowed_write_paths": [
+            "testsrc/WorldGen.AcceptanceTests/Campaigns/",
+            "testsrc/WorldGen.Tests/L13A/",
+            "worklogs/L13-A.md"
+          ],
+          "requirements": [
+            "R13-01",
+            "R13-02"
+          ],
+          "tests": [
+            "T13-01",
+            "T13-02"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L13-B",
+          "lot": "L13",
+          "title": "Qualifier performances et parties complètes",
+          "document": "tasks/L13/L13-B.md",
+          "depends_on": [
+            "L13-A",
+            "L12-B"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L13/L13-B.md",
+            "specs/S13.md",
+            "contracts/C07.md",
+            "tests/T13.md",
+            "tests/00-RECETTE.md",
+            "registry/quality-budgets.json"
+          ],
+          "allowed_write_paths": [
+            "testsrc/WorldGen.AcceptanceTests/Endurance/",
+            "testsrc/WorldGen.Tests/L13B/",
+            "worklogs/L13-B.md"
+          ],
+          "requirements": [
+            "R13-03",
+            "R13-04"
+          ],
+          "tests": [
+            "T13-03",
+            "T13-04"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        },
+        {
+          "id": "L13-C",
+          "lot": "L13",
+          "title": "Préparer et auditer la distribution V1",
+          "document": "tasks/L13/L13-C.md",
+          "depends_on": [
+            "L13-B",
+            "L12-A"
+          ],
+          "required_read": [
+            "AGENTS.md",
+            "docs/02-SOCLE.md",
+            "tasks/L13/L13-C.md",
+            "specs/S13.md",
+            "contracts/C07.md",
+            "tests/T13.md",
+            "tests/00-RECETTE.md",
+            "registry/quality-budgets.json"
+          ],
+          "allowed_write_paths": [
+            "distribution/",
+            "testsrc/WorldGen.Tests/L13C/",
+            "worklogs/L13-C.md"
+          ],
+          "requirements": [
+            "R13-05",
+            "R13-06"
+          ],
+          "tests": [
+            "T13-05",
+            "T13-06"
+          ],
+          "context_max_bytes": 49152,
+          "state": "BACKLOG"
+        }
+      ]
+    },
+    "registry/requirements.json": {
+      "schema_version": 1,
+      "requirements": [
+        {
+          "id": "R00-01",
+          "module": "S00",
+          "text": "La cible exacte du jeu, du runtime et des assemblages doit être relevée et verrouillée avant tout code dépendant de l’API.",
+          "source": "specs/S00.md"
+        },
+        {
+          "id": "R00-02",
+          "module": "S00",
+          "text": "Le template doit compiler en Debug et Release et le package doit charger une seule instance du mod sans double DLL.",
+          "source": "specs/S00.md"
+        },
+        {
+          "id": "R00-03",
+          "module": "S00",
+          "text": "Codex doit pouvoir atteindre un breakpoint C# dans le processus réel du jeu via le MCP, avec symboles correspondant au commit.",
+          "source": "specs/S00.md"
+        },
+        {
+          "id": "R00-04",
+          "module": "S00",
+          "text": "La prise de contrôle de worldgen doit être ciblée, traçable et limitée aux nouveaux mondes explicitement activés.",
+          "source": "specs/S00.md"
+        },
+        {
+          "id": "R00-05",
+          "module": "S00",
+          "text": "La preuve initiale doit valider blocs solides, fluides et métadonnées sur la même colonne réelle.",
+          "source": "specs/S00.md"
+        },
+        {
+          "id": "R00-06",
+          "module": "S00",
+          "text": "L’initialisation, la sauvegarde, la fermeture et le rechargement doivent libérer les handlers/ressources sans duplication.",
+          "source": "specs/S00.md"
+        },
+        {
+          "id": "R01-01",
+          "module": "S01",
+          "text": "Les conversions d’unités, coordonnées, indices, tailles et niveaux doivent être centralisées et sans débordement silencieux.",
+          "source": "specs/S01.md"
+        },
+        {
+          "id": "R01-02",
+          "module": "S01",
+          "text": "Le RNG et les identifiants doivent être stables, séparés par domaine et indépendants de l’ordre d’évaluation.",
+          "source": "specs/S01.md"
+        },
+        {
+          "id": "R01-03",
+          "module": "S01",
+          "text": "Les contrats et snapshots doivent être immuables, versionnés et sérialisés de manière canonique.",
+          "source": "specs/S01.md"
+        },
+        {
+          "id": "R01-04",
+          "module": "S01",
+          "text": "La génération doit reproduire les mêmes données sur les configurations machine/runtime qualifiées, indépendamment du parallélisme et du cache.",
+          "source": "specs/S01.md"
+        },
+        {
+          "id": "R01-05",
+          "module": "S01",
+          "text": "Le cœur doit être testable hors jeu, avec fixtures analytiques et sans dépendance Vintage Story/MCP/GPU.",
+          "source": "specs/S01.md"
+        },
+        {
+          "id": "R01-06",
+          "module": "S01",
+          "text": "Les erreurs, annulations et valeurs invalides doivent être explicites et ne publier aucun résultat partiellement valide.",
+          "source": "specs/S01.md"
+        },
+        {
+          "id": "R02-01",
+          "module": "S02",
+          "text": "Le maillage doit être robuste, déterministe et valide pour les configurations dégénérées admises.",
+          "source": "specs/S02.md"
+        },
+        {
+          "id": "R02-02",
+          "module": "S02",
+          "text": "Les frontières de calcul ne doivent produire ni trous ni discontinuités de champs ou de primitives.",
+          "source": "specs/S02.md"
+        },
+        {
+          "id": "R02-03",
+          "module": "S02",
+          "text": "L’atlas doit avoir un budget borné indépendant du nombre de colonnes détaillées du monde.",
+          "source": "specs/S02.md"
+        },
+        {
+          "id": "R02-04",
+          "module": "S02",
+          "text": "Les structures partagées doivent avoir un propriétaire et des IDs stables avec index spatial local.",
+          "source": "specs/S02.md"
+        },
+        {
+          "id": "R02-05",
+          "module": "S02",
+          "text": "Les profils d’échelle et le budget vertical doivent être explicites, validés et gelés par monde.",
+          "source": "specs/S02.md"
+        },
+        {
+          "id": "R02-06",
+          "module": "S02",
+          "text": "Le générateur ne doit pas rendre visuellement le pavage Voronoï comme motif systématique de terrain ou de biome.",
+          "source": "specs/S02.md"
+        },
+        {
+          "id": "R03-01",
+          "module": "S03",
+          "text": "Les types de limites de plaques et leurs champs de soulèvement doivent respecter des conventions testées et produire des effets distincts.",
+          "source": "specs/S03.md"
+        },
+        {
+          "id": "R03-02",
+          "module": "S03",
+          "text": "Continents, océans et reliefs doivent présenter plusieurs échelles sans reproduire une cellule par paysage.",
+          "source": "specs/S03.md"
+        },
+        {
+          "id": "R03-03",
+          "module": "S03",
+          "text": "Le modèle géologique doit fournir des propriétés continues ou stratifiées utilisables par l’érosion, les cavernes et les ressources.",
+          "source": "specs/S03.md"
+        },
+        {
+          "id": "R03-04",
+          "module": "S03",
+          "text": "Les formations rocheuses doivent rester cohérentes après érosion, découpe de vallée et excavation.",
+          "source": "specs/S03.md"
+        },
+        {
+          "id": "R03-05",
+          "module": "S03",
+          "text": "Le budget vertical doit préserver relief, océan, plancher et cavernes sans clipping silencieux.",
+          "source": "specs/S03.md"
+        },
+        {
+          "id": "R03-06",
+          "module": "S03",
+          "text": "Le catalogue doit proposer plusieurs familles de reliefs avec paramètres et signatures distincts.",
+          "source": "specs/S03.md"
+        },
+        {
+          "id": "R04-01",
+          "module": "S04",
+          "text": "La température doit dépendre de latitude, altitude et continentalité avec unités explicites et sans double correction native.",
+          "source": "specs/S04.md"
+        },
+        {
+          "id": "R04-02",
+          "module": "S04",
+          "text": "Le climat personnalisé doit rester cohérent avec saisons, gel et latitude du jeu pour les options déclarées supportées.",
+          "source": "specs/S04.md"
+        },
+        {
+          "id": "R04-03",
+          "module": "S04",
+          "text": "Le transport d’humidité et les précipitations doivent répondre aux vents et aux reliefs sans artefacts de bord.",
+          "source": "specs/S04.md"
+        },
+        {
+          "id": "R04-04",
+          "module": "S04",
+          "text": "Les champs de pluie, humidité du sol, ruissellement et recharge doivent rester distincts et bornés.",
+          "source": "specs/S04.md"
+        },
+        {
+          "id": "R04-05",
+          "module": "S04",
+          "text": "Le bilan de l’eau doit compter chaque apport une seule fois, y compris les échanges souterrains.",
+          "source": "specs/S04.md"
+        },
+        {
+          "id": "R04-06",
+          "module": "S04",
+          "text": "Les modifications de climat pendant le calcul préparatoire doivent converger ou terminer de manière bornée avant publication.",
+          "source": "specs/S04.md"
+        },
+        {
+          "id": "R05-01",
+          "module": "S05",
+          "text": "Les dépressions, seuils et capacités doivent être explicitement modélisés sans aplanir systématiquement le relief physique.",
+          "source": "specs/S05.md"
+        },
+        {
+          "id": "R05-02",
+          "module": "S05",
+          "text": "Le drainage principal doit être acyclique, déterministe sur terrains plats et aboutir à une sortie ou un bassin terminal identifié.",
+          "source": "specs/S05.md"
+        },
+        {
+          "id": "R05-03",
+          "module": "S05",
+          "text": "Les débits doivent respecter les apports, pertes et stockages à chaque confluence et sur un bassin complet.",
+          "source": "specs/S05.md"
+        },
+        {
+          "id": "R05-04",
+          "module": "S05",
+          "text": "L’océan, les lacs ouverts, les lacs fermés et les bassins secs doivent être distingués par connectivité et bilan.",
+          "source": "specs/S05.md"
+        },
+        {
+          "id": "R05-05",
+          "module": "S05",
+          "text": "Les conditions aux limites doivent assurer le raccordement d’un fleuve à travers des régions non explorées.",
+          "source": "specs/S05.md"
+        },
+        {
+          "id": "R05-06",
+          "module": "S05",
+          "text": "Le raffinement des affluents doit conserver le budget hydrologique du niveau supérieur et les exutoires publiés.",
+          "source": "specs/S05.md"
+        },
+        {
+          "id": "R06-01",
+          "module": "S06",
+          "text": "Le solveur doit combiner soulèvement et érosion avec unités, stabilité et cas analytiques vérifiables.",
+          "source": "specs/S06.md"
+        },
+        {
+          "id": "R06-02",
+          "module": "S06",
+          "text": "Les processus de transport/dépôt doivent conserver la matière à la précision déclarée ou comptabiliser explicitement ses sorties.",
+          "source": "specs/S06.md"
+        },
+        {
+          "id": "R06-03",
+          "module": "S06",
+          "text": "Le résultat du solveur doit être indépendant de l’ordre des cellules et du nombre de workers.",
+          "source": "specs/S06.md"
+        },
+        {
+          "id": "R06-04",
+          "module": "S06",
+          "text": "Le couplage climat–drainage–relief doit terminer de manière bornée et publier un snapshot cohérent unique.",
+          "source": "specs/S06.md"
+        },
+        {
+          "id": "R06-05",
+          "module": "S06",
+          "text": "Le raffinement doit conserver les contraintes parentales, exutoires et profils d’écoulement.",
+          "source": "specs/S06.md"
+        },
+        {
+          "id": "R06-06",
+          "module": "S06",
+          "text": "Le détail local ne doit pas fermer un cours d’eau, créer de couture technique ou effacer une structure géographique.",
+          "source": "specs/S06.md"
+        },
+        {
+          "id": "R07-01",
+          "module": "S07",
+          "text": "Chaque cours d’eau doit posséder une géométrie cohérente avec son débit, sa pente et son contexte, avec de vraies confluences.",
+          "source": "specs/S07.md"
+        },
+        {
+          "id": "R07-02",
+          "module": "S07",
+          "text": "Le profil d’eau et le lit doivent rester continus et non montants après quantification voxel et passage des décorations.",
+          "source": "specs/S07.md"
+        },
+        {
+          "id": "R07-03",
+          "module": "S07",
+          "text": "Les lacs doivent partager un niveau unique, un masque cohérent et des entrées/sorties explicites.",
+          "source": "specs/S07.md"
+        },
+        {
+          "id": "R07-04",
+          "module": "S07",
+          "text": "Les océans et littoraux doivent posséder une bathymétrie continue et une distinction salinité/connexion correcte.",
+          "source": "specs/S07.md"
+        },
+        {
+          "id": "R07-05",
+          "module": "S07",
+          "text": "Les deltas et distributaires doivent conserver les débits et être réservés aux contextes appropriés.",
+          "source": "specs/S07.md"
+        },
+        {
+          "id": "R07-06",
+          "module": "S07",
+          "text": "L’eau produite doit rester stable dans le moteur réel sans destruction automatique des modifications du joueur.",
+          "source": "specs/S07.md"
+        },
+        {
+          "id": "R08-01",
+          "module": "S08",
+          "text": "Les cavernes doivent posséder un réseau et une famille géologique avant génération de leurs volumes.",
+          "source": "specs/S08.md"
+        },
+        {
+          "id": "R08-02",
+          "module": "S08",
+          "text": "Leur géométrie doit proposer des sections, boucles, niveaux et salles variés sans répétition systématique.",
+          "source": "specs/S08.md"
+        },
+        {
+          "id": "R08-03",
+          "module": "S08",
+          "text": "Les réseaux transfrontaliers doivent être continus avec enveloppes bornées et sans dépendance aux chunks chargés.",
+          "source": "specs/S08.md"
+        },
+        {
+          "id": "R08-04",
+          "module": "S08",
+          "text": "La praticabilité doit être mesurée sur les voxels avec un gabarit et des transitions de joueur explicites.",
+          "source": "specs/S08.md"
+        },
+        {
+          "id": "R08-05",
+          "module": "S08",
+          "text": "Les écoulements souterrains doivent respecter les bilans et les domaines d’eau sans remplissage automatique sous le niveau marin.",
+          "source": "specs/S08.md"
+        },
+        {
+          "id": "R08-06",
+          "module": "S08",
+          "text": "La génération de cavernes doit respecter plancher, couverture et réservations, avec sorties intentionnelles identifiées.",
+          "source": "specs/S08.md"
+        },
+        {
+          "id": "R09-01",
+          "module": "S09",
+          "text": "Les cinq familles du catalogue doivent être réalisées avec variantes et identité dominante, sans dépendance à un rendu personnalisé obligatoire.",
+          "source": "specs/S09.md"
+        },
+        {
+          "id": "R09-02",
+          "module": "S09",
+          "text": "La rareté doit être déterministe, spatiale, paramétrable et mesurée sans quota fixe par chunk/région ni placement selon le joueur.",
+          "source": "specs/S09.md"
+        },
+        {
+          "id": "R09-03",
+          "module": "S09",
+          "text": "Tout site publié doit être connecté topologiquement à une galerie naturelle, et au réseau d’accès défini par son profil.",
+          "source": "specs/S09.md"
+        },
+        {
+          "id": "R09-04",
+          "module": "S09",
+          "text": "Tout site publié doit rester réellement accessible après voxelisation et toutes les décorations via un chemin certifié pour le gabarit joueur.",
+          "source": "specs/S09.md"
+        },
+        {
+          "id": "R09-05",
+          "module": "S09",
+          "text": "Les sites doivent respecter eau, couverture, plancher et réservations ; un placement impossible doit être rejeté proprement.",
+          "source": "specs/S09.md"
+        },
+        {
+          "id": "R09-06",
+          "module": "S09",
+          "text": "Les ambiances, indices, tailles et ressources doivent encourager la découverte sans rendre le fantastique banal ou économiquement obligatoire.",
+          "source": "specs/S09.md"
+        },
+        {
+          "id": "R10-01",
+          "module": "S10",
+          "text": "Le manifeste et les décisions canoniques doivent être persistants, versionnés et transférables avec la sauvegarde.",
+          "source": "specs/S10.md"
+        },
+        {
+          "id": "R10-02",
+          "module": "S10",
+          "text": "Une sauvegarde incompatible, ancienne non activée ou corrompue doit être refusée sans changement silencieux de terrain.",
+          "source": "specs/S10.md"
+        },
+        {
+          "id": "R10-03",
+          "module": "S10",
+          "text": "La publication des snapshots doit être cohérente et récupérable après interruption de chaque phase d’écriture.",
+          "source": "specs/S10.md"
+        },
+        {
+          "id": "R10-04",
+          "module": "S10",
+          "text": "Le cache doit être borné et reconstructible sans modifier les résultats, avec ownership sûr des tampons.",
+          "source": "specs/S10.md"
+        },
+        {
+          "id": "R10-05",
+          "module": "S10",
+          "text": "Le scheduler doit éviter travaux doublonnés, interblocages et appels API depuis un thread non autorisé.",
+          "source": "specs/S10.md"
+        },
+        {
+          "id": "R10-06",
+          "module": "S10",
+          "text": "Arrêt, annulation et éviction doivent terminer proprement sans perte de données ni modification des blocs joués.",
+          "source": "specs/S10.md"
+        },
+        {
+          "id": "R11-01",
+          "module": "S11",
+          "text": "L’adaptateur doit isoler l’API du cœur et s’enregistrer dans les bons événements/contextes avec propriété des passes vérifiée.",
+          "source": "specs/S11.md"
+        },
+        {
+          "id": "R11-02",
+          "module": "S11",
+          "text": "Les cartes natives de région doivent respecter leur encodage et leurs consommateurs ; aucune carte supposée générique ne doit être inventée.",
+          "source": "specs/S11.md"
+        },
+        {
+          "id": "R11-03",
+          "module": "S11",
+          "text": "Les blocs, fluides et métadonnées des colonnes doivent être cohérents avec les sémantiques natives.",
+          "source": "specs/S11.md"
+        },
+        {
+          "id": "R11-04",
+          "module": "S11",
+          "text": "Les passes de décor, minerais et structures conservées doivent respecter les contraintes du monde et les accès souterrains certifiés.",
+          "source": "specs/S11.md"
+        },
+        {
+          "id": "R11-05",
+          "module": "S11",
+          "text": "Le spawn et la progression vanilla doivent rester praticables et ne pas dépendre d’une merveille obligatoire.",
+          "source": "specs/S11.md"
+        },
+        {
+          "id": "R11-06",
+          "module": "S11",
+          "text": "La génération doit fonctionner en solo et serveur dédié qualifiés sans dépendre d’un client graphique ni divulguer l’atlas caché.",
+          "source": "specs/S11.md"
+        },
+        {
+          "id": "R12-01",
+          "module": "S12",
+          "text": "Les assets fantastiques doivent être complets, licenciés, localisés et compatibles collision/lumière/drops sans dépendance graphique obligatoire.",
+          "source": "specs/S12.md"
+        },
+        {
+          "id": "R12-02",
+          "module": "S12",
+          "text": "Les paramètres géographiques doivent être validés puis gelés par monde ; les réglages runtime ne doivent pas changer la géographie.",
+          "source": "specs/S12.md"
+        },
+        {
+          "id": "R12-03",
+          "module": "S12",
+          "text": "La configuration utilisateur doit présenter clairement profils, limites et erreurs sans exiger une nouvelle application externe.",
+          "source": "specs/S12.md"
+        },
+        {
+          "id": "R12-04",
+          "module": "S12",
+          "text": "Le banc d’essai doit utiliser le même cœur que le mod et exporter des données reproductibles et inspectables.",
+          "source": "specs/S12.md"
+        },
+        {
+          "id": "R12-05",
+          "module": "S12",
+          "text": "Les diagnostics doivent fournir des métriques par étape et des preuves liées à seed/config/commit sans révéler de secrets.",
+          "source": "specs/S12.md"
+        },
+        {
+          "id": "R12-06",
+          "module": "S12",
+          "text": "Les commandes et exports sensibles doivent être limités aux administrateurs et ne jamais régénérer implicitement une partie jouée.",
+          "source": "specs/S12.md"
+        },
+        {
+          "id": "R13-01",
+          "module": "S13",
+          "text": "La campagne finale doit couvrir un corpus déterministe non filtré et des cas négatifs prouvant la sensibilité des tests.",
+          "source": "specs/S13.md"
+        },
+        {
+          "id": "R13-02",
+          "module": "S13",
+          "text": "La qualité des reliefs, des eaux, des grottes et des merveilles doit être validée aux échelles carte et jeu par métriques et revue humaine.",
+          "source": "specs/S13.md"
+        },
+        {
+          "id": "R13-03",
+          "module": "S13",
+          "text": "Les budgets de temps, mémoire et concurrence doivent être mesurés sur un matériel qualifié sans débogueur et respecter les seuils gelés.",
+          "source": "specs/S13.md"
+        },
+        {
+          "id": "R13-04",
+          "module": "S13",
+          "text": "La survie, l’exploration et le multijoueur doivent fonctionner sur des parcours complets avec sauvegarde/reprise.",
+          "source": "specs/S13.md"
+        },
+        {
+          "id": "R13-05",
+          "module": "S13",
+          "text": "Les versions, dépendances, compatibilités et risques de sauvegarde doivent être publiés avec preuves et limites explicites.",
+          "source": "specs/S13.md"
+        },
+        {
+          "id": "R13-06",
+          "module": "S13",
+          "text": "Le package final doit s’installer proprement, ne contenir aucun fichier interdit et permettre de reproduire la recette.",
+          "source": "specs/S13.md"
+        }
+      ]
+    },
+    "registry/tests.json": {
+      "schema_version": 1,
+      "tests": [
+        {
+          "id": "T00-01",
+          "module": "S00",
+          "title": "Cible locale et références",
+          "requirements": [
+            "R00-01"
+          ],
+          "level": "Audit + compilation",
+          "state": "NOT_RUN",
+          "source": "tests/T00.md"
+        },
+        {
+          "id": "T00-02",
+          "module": "S00",
+          "title": "Chargement du template",
+          "requirements": [
+            "R00-02"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T00.md"
+        },
+        {
+          "id": "T00-03",
+          "module": "S00",
+          "title": "MCP et symboles",
+          "requirements": [
+            "R00-03"
+          ],
+          "level": "Débogage réel",
+          "state": "NOT_RUN",
+          "source": "tests/T00.md"
+        },
+        {
+          "id": "T00-04",
+          "module": "S00",
+          "title": "Remplacement sélectif",
+          "requirements": [
+            "R00-04"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T00.md"
+        },
+        {
+          "id": "T00-05",
+          "module": "S00",
+          "title": "Colonne solide et fluide",
+          "requirements": [
+            "R00-05"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T00.md"
+        },
+        {
+          "id": "T00-06",
+          "module": "S00",
+          "title": "Cycle de vie",
+          "requirements": [
+            "R00-06"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T00.md"
+        },
+        {
+          "id": "T01-01",
+          "module": "S01",
+          "title": "Coordonnées extrêmes",
+          "requirements": [
+            "R01-01"
+          ],
+          "level": "Unitaire + propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T01.md"
+        },
+        {
+          "id": "T01-02",
+          "module": "S01",
+          "title": "RNG par domaine",
+          "requirements": [
+            "R01-02"
+          ],
+          "level": "Unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T01.md"
+        },
+        {
+          "id": "T01-03",
+          "module": "S01",
+          "title": "Sérialisation canonique",
+          "requirements": [
+            "R01-03"
+          ],
+          "level": "Unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T01.md"
+        },
+        {
+          "id": "T01-04",
+          "module": "S01",
+          "title": "Déterminisme concurrent",
+          "requirements": [
+            "R01-04"
+          ],
+          "level": "Propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T01.md"
+        },
+        {
+          "id": "T01-05",
+          "module": "S01",
+          "title": "Indépendance Core",
+          "requirements": [
+            "R01-05"
+          ],
+          "level": "Architecture + unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T01.md"
+        },
+        {
+          "id": "T01-06",
+          "module": "S01",
+          "title": "Échec atomique",
+          "requirements": [
+            "R01-06"
+          ],
+          "level": "Injection de fautes",
+          "state": "NOT_RUN",
+          "source": "tests/T01.md"
+        },
+        {
+          "id": "T02-01",
+          "module": "S02",
+          "title": "Maillage dégénéré",
+          "requirements": [
+            "R02-01"
+          ],
+          "level": "Unitaire + propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T02.md"
+        },
+        {
+          "id": "T02-02",
+          "module": "S02",
+          "title": "Continuité globale",
+          "requirements": [
+            "R02-02"
+          ],
+          "level": "Unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T02.md"
+        },
+        {
+          "id": "T02-03",
+          "module": "S02",
+          "title": "Atlas vaste monde",
+          "requirements": [
+            "R02-03"
+          ],
+          "level": "Performance + architecture",
+          "state": "NOT_RUN",
+          "source": "tests/T02.md"
+        },
+        {
+          "id": "T02-04",
+          "module": "S02",
+          "title": "Propriété canonique",
+          "requirements": [
+            "R02-04"
+          ],
+          "level": "Unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T02.md"
+        },
+        {
+          "id": "T02-05",
+          "module": "S02",
+          "title": "Presets et hauteur",
+          "requirements": [
+            "R02-05"
+          ],
+          "level": "Unitaire + intégration",
+          "state": "NOT_RUN",
+          "source": "tests/T02.md"
+        },
+        {
+          "id": "T02-06",
+          "module": "S02",
+          "title": "Pavage invisible",
+          "requirements": [
+            "R02-06"
+          ],
+          "level": "Analyse + revue",
+          "state": "NOT_RUN",
+          "source": "tests/T02.md"
+        },
+        {
+          "id": "T03-01",
+          "module": "S03",
+          "title": "Limites tectoniques",
+          "requirements": [
+            "R03-01"
+          ],
+          "level": "Unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T03.md"
+        },
+        {
+          "id": "T03-02",
+          "module": "S03",
+          "title": "Continents multiscales",
+          "requirements": [
+            "R03-02"
+          ],
+          "level": "Propriétés + revue",
+          "state": "NOT_RUN",
+          "source": "tests/T03.md"
+        },
+        {
+          "id": "T03-03",
+          "module": "S03",
+          "title": "Propriétés géologiques",
+          "requirements": [
+            "R03-03"
+          ],
+          "level": "Unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T03.md"
+        },
+        {
+          "id": "T03-04",
+          "module": "S03",
+          "title": "Couches après excavation",
+          "requirements": [
+            "R03-04"
+          ],
+          "level": "Intégration Core",
+          "state": "NOT_RUN",
+          "source": "tests/T03.md"
+        },
+        {
+          "id": "T03-05",
+          "module": "S03",
+          "title": "Enveloppe verticale",
+          "requirements": [
+            "R03-05"
+          ],
+          "level": "Unitaire + propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T03.md"
+        },
+        {
+          "id": "T03-06",
+          "module": "S03",
+          "title": "Diversité des reliefs",
+          "requirements": [
+            "R03-06"
+          ],
+          "level": "Revue + mesures",
+          "state": "NOT_RUN",
+          "source": "tests/T03.md"
+        },
+        {
+          "id": "T04-01",
+          "module": "S04",
+          "title": "Gradient thermique",
+          "requirements": [
+            "R04-01"
+          ],
+          "level": "Unitaire + intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T04.md"
+        },
+        {
+          "id": "T04-02",
+          "module": "S04",
+          "title": "Saisons et axe",
+          "requirements": [
+            "R04-02"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T04.md"
+        },
+        {
+          "id": "T04-03",
+          "module": "S04",
+          "title": "Ombre pluviométrique",
+          "requirements": [
+            "R04-03"
+          ],
+          "level": "Métamorphique",
+          "state": "NOT_RUN",
+          "source": "tests/T04.md"
+        },
+        {
+          "id": "T04-04",
+          "module": "S04",
+          "title": "Champs séparés",
+          "requirements": [
+            "R04-04"
+          ],
+          "level": "Unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T04.md"
+        },
+        {
+          "id": "T04-05",
+          "module": "S04",
+          "title": "Bilan hydrique",
+          "requirements": [
+            "R04-05"
+          ],
+          "level": "Unitaire + bilan",
+          "state": "NOT_RUN",
+          "source": "tests/T04.md"
+        },
+        {
+          "id": "T04-06",
+          "module": "S04",
+          "title": "Boucle bornée",
+          "requirements": [
+            "R04-06"
+          ],
+          "level": "Intégration Core",
+          "state": "NOT_RUN",
+          "source": "tests/T04.md"
+        },
+        {
+          "id": "T05-01",
+          "module": "S05",
+          "title": "Dépressions emboîtées",
+          "requirements": [
+            "R05-01"
+          ],
+          "level": "Unitaire analytique",
+          "state": "NOT_RUN",
+          "source": "tests/T05.md"
+        },
+        {
+          "id": "T05-02",
+          "module": "S05",
+          "title": "Drainage plat et acyclique",
+          "requirements": [
+            "R05-02"
+          ],
+          "level": "Propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T05.md"
+        },
+        {
+          "id": "T05-03",
+          "module": "S05",
+          "title": "Conservation des débits",
+          "requirements": [
+            "R05-03"
+          ],
+          "level": "Unitaire + bilan",
+          "state": "NOT_RUN",
+          "source": "tests/T05.md"
+        },
+        {
+          "id": "T05-04",
+          "module": "S05",
+          "title": "Mer versus bassin sous-marin",
+          "requirements": [
+            "R05-04"
+          ],
+          "level": "Unitaire",
+          "state": "NOT_RUN",
+          "source": "tests/T05.md"
+        },
+        {
+          "id": "T05-05",
+          "module": "S05",
+          "title": "Fleuve transrégional",
+          "requirements": [
+            "R05-05"
+          ],
+          "level": "Intégration Core",
+          "state": "NOT_RUN",
+          "source": "tests/T05.md"
+        },
+        {
+          "id": "T05-06",
+          "module": "S05",
+          "title": "Affluents fins",
+          "requirements": [
+            "R05-06"
+          ],
+          "level": "Métamorphique",
+          "state": "NOT_RUN",
+          "source": "tests/T05.md"
+        },
+        {
+          "id": "T06-01",
+          "module": "S06",
+          "title": "Incision analytique",
+          "requirements": [
+            "R06-01"
+          ],
+          "level": "Unitaire analytique",
+          "state": "NOT_RUN",
+          "source": "tests/T06.md"
+        },
+        {
+          "id": "T06-02",
+          "module": "S06",
+          "title": "Bilan sédimentaire",
+          "requirements": [
+            "R06-02"
+          ],
+          "level": "Bilan",
+          "state": "NOT_RUN",
+          "source": "tests/T06.md"
+        },
+        {
+          "id": "T06-03",
+          "module": "S06",
+          "title": "Ordre du solveur",
+          "requirements": [
+            "R06-03"
+          ],
+          "level": "Métamorphique",
+          "state": "NOT_RUN",
+          "source": "tests/T06.md"
+        },
+        {
+          "id": "T06-04",
+          "module": "S06",
+          "title": "Convergence et refus",
+          "requirements": [
+            "R06-04"
+          ],
+          "level": "Intégration Core",
+          "state": "NOT_RUN",
+          "source": "tests/T06.md"
+        },
+        {
+          "id": "T06-05",
+          "module": "S06",
+          "title": "Raffinement contraint",
+          "requirements": [
+            "R06-05"
+          ],
+          "level": "Intégration Core",
+          "state": "NOT_RUN",
+          "source": "tests/T06.md"
+        },
+        {
+          "id": "T06-06",
+          "module": "S06",
+          "title": "Détail protégé",
+          "requirements": [
+            "R06-06"
+          ],
+          "level": "Propriétés + revue",
+          "state": "NOT_RUN",
+          "source": "tests/T06.md"
+        },
+        {
+          "id": "T07-01",
+          "module": "S07",
+          "title": "Morphologie et confluences",
+          "requirements": [
+            "R07-01"
+          ],
+          "level": "Intégration Core + revue",
+          "state": "NOT_RUN",
+          "source": "tests/T07.md"
+        },
+        {
+          "id": "T07-02",
+          "module": "S07",
+          "title": "Quantification des pentes",
+          "requirements": [
+            "R07-02"
+          ],
+          "level": "Propriétés + intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T07.md"
+        },
+        {
+          "id": "T07-03",
+          "module": "S07",
+          "title": "Lac multirégional",
+          "requirements": [
+            "R07-03"
+          ],
+          "level": "Intégration",
+          "state": "NOT_RUN",
+          "source": "tests/T07.md"
+        },
+        {
+          "id": "T07-04",
+          "module": "S07",
+          "title": "Littoral et salinité",
+          "requirements": [
+            "R07-04"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T07.md"
+        },
+        {
+          "id": "T07-05",
+          "module": "S07",
+          "title": "Delta conservatif",
+          "requirements": [
+            "R07-05"
+          ],
+          "level": "Bilan + revue",
+          "state": "NOT_RUN",
+          "source": "tests/T07.md"
+        },
+        {
+          "id": "T07-06",
+          "module": "S07",
+          "title": "Stabilité fluide en jeu",
+          "requirements": [
+            "R07-06"
+          ],
+          "level": "Intégration VS longue",
+          "state": "NOT_RUN",
+          "source": "tests/T07.md"
+        },
+        {
+          "id": "T08-01",
+          "module": "S08",
+          "title": "Familles géologiques",
+          "requirements": [
+            "R08-01"
+          ],
+          "level": "Unitaire + revue",
+          "state": "NOT_RUN",
+          "source": "tests/T08.md"
+        },
+        {
+          "id": "T08-02",
+          "module": "S08",
+          "title": "Réseau et volumes",
+          "requirements": [
+            "R08-02"
+          ],
+          "level": "Intégration Core",
+          "state": "NOT_RUN",
+          "source": "tests/T08.md"
+        },
+        {
+          "id": "T08-03",
+          "module": "S08",
+          "title": "Raccord 3D",
+          "requirements": [
+            "R08-03"
+          ],
+          "level": "Propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T08.md"
+        },
+        {
+          "id": "T08-04",
+          "module": "S08",
+          "title": "Gabarit joueur",
+          "requirements": [
+            "R08-04"
+          ],
+          "level": "Navigation + intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T08.md"
+        },
+        {
+          "id": "T08-05",
+          "module": "S08",
+          "title": "Perte et résurgence",
+          "requirements": [
+            "R08-05"
+          ],
+          "level": "Bilan + intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T08.md"
+        },
+        {
+          "id": "T08-06",
+          "module": "S08",
+          "title": "Réservations souterraines",
+          "requirements": [
+            "R08-06"
+          ],
+          "level": "Propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T08.md"
+        },
+        {
+          "id": "T09-01",
+          "module": "S09",
+          "title": "Catalogue complet",
+          "requirements": [
+            "R09-01"
+          ],
+          "level": "Intégration VS + revue",
+          "state": "NOT_RUN",
+          "source": "tests/T09.md"
+        },
+        {
+          "id": "T09-02",
+          "module": "S09",
+          "title": "Rareté et espacement",
+          "requirements": [
+            "R09-02"
+          ],
+          "level": "Statistique + propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T09.md"
+        },
+        {
+          "id": "T09-03",
+          "module": "S09",
+          "title": "Connexion topologique universelle",
+          "requirements": [
+            "R09-03"
+          ],
+          "level": "Propriétés bloquantes",
+          "state": "NOT_RUN",
+          "source": "tests/T09.md"
+        },
+        {
+          "id": "T09-04",
+          "module": "S09",
+          "title": "Accès voxel après décor",
+          "requirements": [
+            "R09-04"
+          ],
+          "level": "Navigation + intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T09.md"
+        },
+        {
+          "id": "T09-05",
+          "module": "S09",
+          "title": "Conflits et rejets",
+          "requirements": [
+            "R09-05"
+          ],
+          "level": "Injection de contraintes",
+          "state": "NOT_RUN",
+          "source": "tests/T09.md"
+        },
+        {
+          "id": "T09-06",
+          "module": "S09",
+          "title": "Découverte et économie",
+          "requirements": [
+            "R09-06"
+          ],
+          "level": "Revue de jeu",
+          "state": "NOT_RUN",
+          "source": "tests/T09.md"
+        },
+        {
+          "id": "T10-01",
+          "module": "S10",
+          "title": "Sauvegarde portable",
+          "requirements": [
+            "R10-01"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T10.md"
+        },
+        {
+          "id": "T10-02",
+          "module": "S10",
+          "title": "Version/configuration/corruption",
+          "requirements": [
+            "R10-02"
+          ],
+          "level": "Injection de fautes",
+          "state": "NOT_RUN",
+          "source": "tests/T10.md"
+        },
+        {
+          "id": "T10-03",
+          "module": "S10",
+          "title": "Crash de publication",
+          "requirements": [
+            "R10-03"
+          ],
+          "level": "Injection de crash",
+          "state": "NOT_RUN",
+          "source": "tests/T10.md"
+        },
+        {
+          "id": "T10-04",
+          "module": "S10",
+          "title": "Cache sous pression",
+          "requirements": [
+            "R10-04"
+          ],
+          "level": "Stress + propriétés",
+          "state": "NOT_RUN",
+          "source": "tests/T10.md"
+        },
+        {
+          "id": "T10-05",
+          "module": "S10",
+          "title": "Single-flight et DAG",
+          "requirements": [
+            "R10-05"
+          ],
+          "level": "Concurrence",
+          "state": "NOT_RUN",
+          "source": "tests/T10.md"
+        },
+        {
+          "id": "T10-06",
+          "module": "S10",
+          "title": "Annulation et constructions",
+          "requirements": [
+            "R10-06"
+          ],
+          "level": "Stress + intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T10.md"
+        },
+        {
+          "id": "T11-01",
+          "module": "S11",
+          "title": "Cycle et propriété des passes",
+          "requirements": [
+            "R11-01"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T11.md"
+        },
+        {
+          "id": "T11-02",
+          "module": "S11",
+          "title": "Maps natives",
+          "requirements": [
+            "R11-02"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T11.md"
+        },
+        {
+          "id": "T11-03",
+          "module": "S11",
+          "title": "Heightmaps et couches",
+          "requirements": [
+            "R11-03"
+          ],
+          "level": "Intégration VS",
+          "state": "NOT_RUN",
+          "source": "tests/T11.md"
+        },
+        {
+          "id": "T11-04",
+          "module": "S11",
+          "title": "Structures et réservations",
+          "requirements": [
+            "R11-04"
+          ],
+          "level": "Intégration VS + revue",
+          "state": "NOT_RUN",
+          "source": "tests/T11.md"
+        },
+        {
+          "id": "T11-05",
+          "module": "S11",
+          "title": "Spawn et progression",
+          "requirements": [
+            "R11-05"
+          ],
+          "level": "Intégration VS + jeu",
+          "state": "NOT_RUN",
+          "source": "tests/T11.md"
+        },
+        {
+          "id": "T11-06",
+          "module": "S11",
+          "title": "Serveur sans rendu",
+          "requirements": [
+            "R11-06"
+          ],
+          "level": "Multijoueur",
+          "state": "NOT_RUN",
+          "source": "tests/T11.md"
+        },
+        {
+          "id": "T12-01",
+          "module": "S12",
+          "title": "Assets et collisions",
+          "requirements": [
+            "R12-01"
+          ],
+          "level": "Intégration VS + audit",
+          "state": "NOT_RUN",
+          "source": "tests/T12.md"
+        },
+        {
+          "id": "T12-02",
+          "module": "S12",
+          "title": "Configuration gelée",
+          "requirements": [
+            "R12-02"
+          ],
+          "level": "Intégration",
+          "state": "NOT_RUN",
+          "source": "tests/T12.md"
+        },
+        {
+          "id": "T12-03",
+          "module": "S12",
+          "title": "Erreurs utilisateur",
+          "requirements": [
+            "R12-03"
+          ],
+          "level": "Fonctionnel",
+          "state": "NOT_RUN",
+          "source": "tests/T12.md"
+        },
+        {
+          "id": "T12-04",
+          "module": "S12",
+          "title": "Parité aperçu/jeu",
+          "requirements": [
+            "R12-04"
+          ],
+          "level": "Intégration",
+          "state": "NOT_RUN",
+          "source": "tests/T12.md"
+        },
+        {
+          "id": "T12-05",
+          "module": "S12",
+          "title": "Télémétrie exploitable",
+          "requirements": [
+            "R12-05"
+          ],
+          "level": "Observabilité",
+          "state": "NOT_RUN",
+          "source": "tests/T12.md"
+        },
+        {
+          "id": "T12-06",
+          "module": "S12",
+          "title": "Autorisations et non-destruction",
+          "requirements": [
+            "R12-06"
+          ],
+          "level": "Sécurité fonctionnelle",
+          "state": "NOT_RUN",
+          "source": "tests/T12.md"
+        },
+        {
+          "id": "T13-01",
+          "module": "S13",
+          "title": "Corpus et témoins négatifs",
+          "requirements": [
+            "R13-01"
+          ],
+          "level": "Campagne automatique",
+          "state": "NOT_RUN",
+          "source": "tests/T13.md"
+        },
+        {
+          "id": "T13-02",
+          "module": "S13",
+          "title": "Recette visuelle",
+          "requirements": [
+            "R13-02"
+          ],
+          "level": "Mesures + revue humaine",
+          "state": "NOT_RUN",
+          "source": "tests/T13.md"
+        },
+        {
+          "id": "T13-03",
+          "module": "S13",
+          "title": "RAM, latence et endurance",
+          "requirements": [
+            "R13-03"
+          ],
+          "level": "Performance + endurance",
+          "state": "NOT_RUN",
+          "source": "tests/T13.md"
+        },
+        {
+          "id": "T13-04",
+          "module": "S13",
+          "title": "Parcours de survie",
+          "requirements": [
+            "R13-04"
+          ],
+          "level": "Jeu + multijoueur",
+          "state": "NOT_RUN",
+          "source": "tests/T13.md"
+        },
+        {
+          "id": "T13-05",
+          "module": "S13",
+          "title": "Matrice de compatibilité",
+          "requirements": [
+            "R13-05"
+          ],
+          "level": "Audit de release",
+          "state": "NOT_RUN",
+          "source": "tests/T13.md"
+        },
+        {
+          "id": "T13-06",
+          "module": "S13",
+          "title": "Installation propre",
+          "requirements": [
+            "R13-06"
+          ],
+          "level": "Packaging + intégration",
+          "state": "NOT_RUN",
+          "source": "tests/T13.md"
+        }
+      ]
+    },
+    "registry/gates.json": {
+      "schema_version": 1,
+      "gates": [
+        {
+          "id": "G0",
+          "title": "Environnement et intégration prouvés",
+          "tasks": [
+            "L00-A",
+            "L00-B",
+            "L00-C"
+          ],
+          "decision": "Version locale verrouillée, breakpoint réel MCP, preuve de remplacement sélectif et fluides/heightmaps. Sans cela, aucune prétention de compatibilité au jeu."
+        },
+        {
+          "id": "G1",
+          "title": "Socle reproductible et atlas borné",
+          "tasks": [
+            "L01-A",
+            "L01-B",
+            "L01-C",
+            "L02-A",
+            "L02-B",
+            "L02-C",
+            "L10-A",
+            "L11-A"
+          ],
+          "decision": "Contrats gelés, atlas échantillonné, quotas, stockage abstrait et premiers codecs natifs éprouvés."
+        },
+        {
+          "id": "G2",
+          "title": "Bassin complet des sources à la mer",
+          "tasks": [
+            "L03-A",
+            "L03-B",
+            "L03-C",
+            "L04-A",
+            "L04-B",
+            "L04-C",
+            "L05-A",
+            "L05-B",
+            "L05-C",
+            "L06-A",
+            "L06-B",
+            "L06-C",
+            "L07-A",
+            "L07-B",
+            "L07-C",
+            "L10-B"
+          ],
+          "decision": "Bilan et raffinement conservés, profils fluviaux corrects et eau stable sur le moteur réel. Prototype interne de surface, pas V1."
+        },
+        {
+          "id": "G3",
+          "title": "Sous-sol et catalogue intégrés",
+          "tasks": [
+            "L08-A",
+            "L08-B",
+            "L08-C",
+            "L09-A",
+            "L09-B",
+            "L12-A",
+            "L11-B"
+          ],
+          "decision": "Réseaux naturels, cinq familles fantastiques matérialisées et colonne complète ; certification finale reste à G4."
+        },
+        {
+          "id": "G4",
+          "title": "Toutes les fonctions prévues raccordées",
+          "tasks": [
+            "L09-C",
+            "L10-C",
+            "L11-C",
+            "L12-B",
+            "L12-C"
+          ],
+          "decision": "Accès finaux certifiés, reprise après crash, contenu vanilla, configuration et diagnostics prêts. Candidat de recette, non encore version validée."
+        },
+        {
+          "id": "G5",
+          "title": "V1 qualifiée et distribuable",
+          "tasks": [
+            "L13-A",
+            "L13-B",
+            "L13-C"
+          ],
+          "decision": "Corpus, revue, endurance, jeu/serveur et installation propre validés. Tous les tests bloquants effectivement exécutés."
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,498 @@
+{
+  "schema_version": 1,
+  "template_only": true,
+  "spec_version": "1.2",
+  "updated_utc": null,
+  "integrated_commit": null,
+  "notice": "Ne pas remplacer registry/state.json. Les anciens états sont inconnus ici. La seule information utilisateur est L05-C en cours de développement.",
+  "tasks": {
+    "L00-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L00-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L00-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L01-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L01-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L01-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L02-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L02-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L02-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L03-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L03-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L03-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L04-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L04-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L04-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L05-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L05-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L05-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L06-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L06-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L06-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L07-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L07-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L07-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L08-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L08-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L08-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L09-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L09-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L09-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L10-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L10-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L10-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L11-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L11-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L11-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L12-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L12-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L12-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L13-A": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L13-B": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L13-C": {
+      "status": "UNVERIFIED",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L05-D": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L14-A": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L14-B": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L14-C": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L18-A": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L15-A": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L15-B": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L15-C": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L16-A": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L16-B": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L16-C": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L16-D": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L17-A": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L17-B": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L17-C": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L17-D": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L18-B": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L18-C": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L18-D": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    }
+  }
+}

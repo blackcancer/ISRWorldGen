@@ -1,29 +1,24 @@
-# Synthèse du cahier des charges
-## Finalité
-Le mod doit produire des mondes crédibles et agréables à explorer dans Vintage Story, sans remplacer les motifs visibles actuels par une mosaïque de polygones. Les reliefs, les eaux, les roches, le climat et les réseaux souterrains doivent partager une même organisation. Le résultat recherché est un réalisme condensé pour le jeu, pas une simulation scientifique exhaustive de la Terre.
+# ISRWorldGen — synthèse de la référence 1.2
+## Objectif
+Produire des mondes variés, crédibles et intéressants à explorer, avec continents, océans, reliefs, bassins versants, ruisseaux, rivières, fleuves, lacs et cavernes. Le maillage Voronoï/Delaunay structure les calculs ; il ne doit pas apparaître sous forme de biomes polygonaux ou de montagnes systématiques sur ses arêtes. Le détail aléatoire reste subordonné à la géographie.
 
-Le maillage Voronoï/Delaunay est une structure de calcul. Il n’impose ni une cellule par biome, ni une montagne par frontière, ni une rivière suivant chaque arête. Les grands paysages doivent dépendre des structures géologiques et des bassins versants. Un bruit éventuel ne peut qu’enrichir le détail, sans décider seul des continents ou couper un cours d’eau.
+## Périmètre confirmé
+Les cinq distributions sont des exigences de la V1 : **strates rocheuses, sols et fertilité, minerais et gisements, végétation, neige et glace**. Elles partagent climat, terrain et géologie ; elles ne sont pas cinq cartes indépendantes. Les ressources, blocs, usages, comportements agricoles et progression natives sont conservés selon la cible auditée, sans reproduire forcément la distribution exacte de la seed vanilla.
 
-## Périmètre de la première version complète
-La version 1 comprend les continents et océans avec bathymétrie, les reliefs de plusieurs familles, un climat simplifié, des bassins connectés, des ruisseaux, rivières et fleuves, des lacs avec exutoires ou bassins fermés explicitement justifiés, ainsi que des cavernes géologiques. Elle comprend aussi des paysages souterrains fantastiques rares et connectés, la configuration, la persistance, les diagnostics, l’intégration des ressources et de la survie vanilla et la qualification solo/serveur.
+Le périmètre existant est conservé : cavernes géologiques ; sites fantastiques rares intégrés aux galeries et certifiés accessibles ; persistance ; configuration ; diagnostics ; structures/spawn ; solo et serveur dédié qualifiés. Le catalogue fantastique déjà prévu dans S09 n’est pas supprimé par cette mise à jour. Les détails artistiques, ratios de rareté et budgets sont des paramètres/choix à qualifier, pas des résultats acquis.
 
-Les cinq familles fantastiques proposées dans la discussion — forêt fongique, cathédrale de cristaux, lac intérieur, gouffre à ponts et jardin minéral — constituent le catalogue initial à réaliser. Leur exécution artistique pourra être ajustée sans retirer les garanties d’accès, la rareté ou la diversité. Le gigantisme n’est pas une condition : les volumes doivent respecter le budget vertical réel du monde.
+## Architecture
+Atlas global borné → géologie volumique et relief initial → climat et bilan hydrique avec stockage neigeux → drainage et ports partagés → boucle bornée d’érosion/dépôts → raffinement conservatif. Les sols sont issus de cette surface ; les gisements sont conditionnés par la géologie ; la végétation par le contexte écologique. Cavernes et masques de ressources partagent le même sous-sol. Les chunks ne font que matérialiser les descriptions canoniques.
 
-Sont exclus de V1 : une tectonique active pendant la partie, une mécanique des fluides complète réagissant physiquement à chaque barrage, l’érosion qui détruit les constructions du joueur, la migration automatique de terrains existants, un moteur de rendu/shaders personnalisé obligatoire et une compatibilité universelle avec tous les mods de génération. Une extension future peut traiter ces sujets séparément.
+La génération structurelle est indépendante de la date de première visite. L’état saisonnier, les cultures, l’exploitation minière et les constructions suivent le temps du jeu et ne sont pas régénérés depuis l’atlas. Le gel/dégel conserve le type d’eau, les niveaux et la sémantique de courant ; la neige temporaire n’efface pas le sol.
 
-## Architecture retenue
-Un **atlas global borné en mémoire** est préparé à la création du monde. Il contient les grandes structures et les connexions majeures. Des solveurs régionaux/bassins raffinent les données avec des conditions aux limites publiées. La génération des chunks matérialise ensuite une portion de descriptions immuables. Une limite de cache n’est jamais une ligne de partage des eaux.
+## Statut des décisions
+Acquis : ISRWorldGen, C#, Visual Studio Community 2026, template déjà installé, MCP Visual Studio, modèle hiérarchique et exigences d’exploration/compatibilité. Les algorithmes exacts, seuils, tables de profils et formes supplémentaires sont des décisions de réalisation à justifier par tests. Les noms de contrats C08-C12 sont internes au mod, pas supposés natifs.
 
-Le pipeline de calcul comporte une boucle bornée climat–drainage–érosion avant publication. Les données d’une itération sont distinctes des suivantes ; après publication, aucun affluent tardif ne peut modifier un fleuve déjà construit. Le détail redistribue un budget hydrologique existant plutôt que de créer de l’eau supplémentaire.
+L’utilisateur indique un développement à **L05-C**. Cette version complète le plan à cet endroit, sans redémarrage global, renumérotation ni effacement d’historique. Les nouveaux L14-L18 s’intercalent selon leurs dépendances ; leur numéro ne signifie pas qu’ils attendent la fin de L13.
 
-Les cavernes sont planifiées sous forme de réseaux puis converties en volumes. Les sites fantastiques sont intégrés à ces réseaux avant la voxelisation, avec des corridors réservés et une validation finale après les décorations. Un site connecté seulement dans le graphe mais muré dans les blocs est invalide.
+## Limites
+Pas de tectonique active en partie, hydraulique physique universelle, érosion des constructions, migration automatique d’anciens terrains ou moteur de rendu obligatoire. Pas de refonte automatique de l’agriculture ni d’IA animale dans ces lots. Un glacier dynamique, banquise physique ou nouveaux filons complexes sont des extensions candidates, non des dépendances imposées. ISRTreeGen peut rester dans une solution commune mais ses assets/générateurs admis demeurent utilisables sans le générateur de monde.
 
-## Décisions acquises et choix de démarrage
-Les besoins de génération, le caractère rare et connecté du fantastique, C#, Visual Studio Community 2026 et l’usage du MCP sont acquis. `WorldGen/worldgen`, les profils de dimensions, la densité exacte des merveilles et les budgets de performance sont des propositions de démarrage, identifiées comme telles. Ils ne sont pas présentés comme des choix déjà validés par l’utilisateur.
-
-La documentation en ligne consultée correspond à Vintage Story 1.22.7. La version installée, son runtime, les références du template et le MCP doivent être relevés dans L00. Il est interdit de reprendre implicitement la cible d’un autre projet ou de choisir un framework parce que l’IDE est récent. Voir [l’audit](04-AUDIT-API.md).
-
-## Ce qui constitue une livraison
-Le dossier final doit inclure un mod compilé et empaqueté, ses sources et données, un manifeste des dépendances, une documentation utilisateur FR/EN minimale, les profils de test, une matrice de compatibilité et les preuves de recette. Les jalons précédents sont des prototypes internes, même si un aperçu de terrain est déjà visible.
-
-La validation complète exige des tests automatisés et une inspection humaine dans le jeu et sur sa carte. Elle n’exige pas une preuve universelle d’absence de tout motif sur toutes les seeds ; elle exige des mesures de détection, un corpus fixé, des tests de raccords stricts et une revue contradictoire des paysages.
+## Validation
+La livraison finale reste un mod compilé et distribuable avec preuves C#, tests en jeu via MCP lorsque requis, corpus indépendant, inspection humaine et mesures Release. Cette livraison-ci est documentaire : elle n’a pas exécuté le mod ni audité le dépôt actif. Les 48 nouveaux scénarios sont NOT_RUN ; les résultats historiques du projet sont à préserver.

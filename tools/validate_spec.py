@@ -30,7 +30,10 @@ def validate(root: Path) -> dict[str, Any]:
         tasks = load(root, "registry/tasks.json")["tasks"]
         requirements = load(root, "registry/requirements.json")["requirements"]
         tests = load(root, "registry/tests.json")["tests"]
-        states = load(root, "registry/state.json")["tasks"]
+        state_path = "registry/state.json" if (root / "registry/state.json").is_file() else "registry/state.template.json"
+        state_data = load(root, state_path)
+        states = state_data["tasks"]
+        state_is_template = state_path.endswith("template.json") or state_data.get("template_only", False)
         gates = load(root, "registry/gates.json")["gates"]
         fixtures = load(root, "registry/fixtures.json")
     except (OSError, ValueError, KeyError) as exc:
@@ -75,7 +78,8 @@ def validate(root: Path) -> dict[str, Any]:
             if dep in by_task: visit(dep)
         colors[tid] = 2
     for tid in by_task: visit(tid)
-    if tids != set(states): errors.append("State registry and task IDs differ")
+    if not tids.issubset(set(states)): errors.append("State registry is missing task IDs")
+    if state_is_template: warnings.append("Active execution state unavailable. Template is not progress; reported L05-C is not assumed DONE.")
     for test in tests:
         coverage.update(test["requirements"])
         for rid in test["requirements"]:
@@ -101,8 +105,9 @@ def validate(root: Path) -> dict[str, Any]:
     if set(fixtures["calibration_seeds"]) & set(fixtures["holdout_seeds"]): errors.append("Calibration and holdout overlap")
     if set(fixtures["calibration_seeds"]) | set(fixtures["holdout_seeds"]) != set(full): errors.append("Corpus partitions incomplete")
     markdown_count = 0
+    ignored_documentation_parts = {".git", ".local", "artifacts", "bin", "obj", "__pycache__"}
     for doc in root.rglob("*.md"):
-        if "artifacts" in doc.relative_to(root).parts: continue
+        if ignored_documentation_parts & set(doc.relative_to(root).parts): continue
         markdown_count += 1
         text = doc.read_text(encoding="utf-8")
         if "\x00" in text or "\ufffd" in text: errors.append(f"Invalid text in {doc.relative_to(root)}")
@@ -113,9 +118,11 @@ def validate(root: Path) -> dict[str, Any]:
             if target and not (doc.parent / target).resolve().exists(): errors.append(f"Broken link {doc.relative_to(root)} -> {target}")
     quality = load(root, "registry/quality-budgets.json")
     if quality["status"] != "FROZEN": warnings.append("Game/performance/rarity budgets are proposed; mod acceptance remains blocked until frozen and executed.")
+    dist = load(root, "registry/distribution-budgets.json")
+    if dist.get("status") != "FROZEN": warnings.append("Distribution-specific budgets not frozen; no final game qualification claimed.")
     warnings.append("PowerShell runtime, C# compilation, installed game and MCP were not exercised by this documentation validator.")
-    ready = sorted(t["id"] for t in tasks if states[t["id"]]["status"] in {"BACKLOG", "READY"} and all(states[d]["status"] == "DONE" for d in t["depends_on"] if d in states))
-    return {"status": "PASS" if not errors else "FAIL", "scope": "DOCUMENTATION_ONLY", "generated_utc": datetime.now(timezone.utc).isoformat(), "counts": {"tasks": len(tasks), "requirements": len(requirements), "test_scenarios": len(tests), "gates": len(gates), "seeds": len(full), "markdown_documents": markdown_count}, "ready_by_dependencies": ready, "context_bytes": context_sizes, "errors": errors, "warnings": warnings}
+    ready = [] if state_is_template else sorted(t["id"] for t in tasks if states[t["id"]]["status"] in {"BACKLOG", "READY"} and all(states[d]["status"] == "DONE" for d in t["depends_on"] if d in states))
+    return {"status": "PASS" if not errors else "FAIL", "scope": "DOCUMENTATION_ONLY", "generated_utc": datetime.now(timezone.utc).isoformat(), "counts": {"tasks": len(tasks), "requirements": len(requirements), "test_scenarios": len(tests), "gates": len(gates), "seeds": len(full), "markdown_documents": markdown_count}, "candidate_tasks_by_declared_status_only_not_requalification": ready, "active_state_available": not state_is_template, "context_bytes": context_sizes, "errors": errors, "warnings": warnings}
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)

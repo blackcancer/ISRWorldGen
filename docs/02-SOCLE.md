@@ -2,7 +2,7 @@
 **Normatif · v1.0.** Les identifiants R-* sont définis dans les fiches de spécification ; les T-* dans les fiches de test. « Doit » signifie obligatoire pour la recette correspondante.
 
 ## Produit
-C# ; Visual Studio Community 2026 ; template de mod déjà installé ; MCP Visual Studio pour diagnostiquer le processus réel. Cœur CPU sans référence au jeu, adaptateur Vintage Story séparé. Le framework et les dépendances sont verrouillés après audit local, pas déduits de l’année de l’IDE. Nom provisoire : WorldGen, modid provisoire : worldgen.
+C# ; Visual Studio Community 2026 ; template de mod déjà installé ; MCP Visual Studio pour diagnostiquer le processus réel. Cœur CPU sans référence au jeu, adaptateur Vintage Story séparé. Le framework et les dépendances sont verrouillés après audit local, pas déduits de l’année de l’IDE. Produit : ISRWorldGen. Les noms des projets et le modid déjà intégrés sont conservés après relevé local ; WorldGen dans les chemins hérités est un alias, pas un ordre de renommage.
 
 Le monde comprend un atlas global, un raffinement par bassins/régions et une matérialisation voxel. Géologie, relief, climat et eau sont couplés. Voronoï reste invisible comme grille. Le bruit ne commande pas les grandes structures. Une simulation hors-jeu simplifiée prépare des paysages ; elle ne tourne pas continuellement et ne régénère pas les constructions.
 
@@ -20,3 +20,6 @@ Les cavernes naturelles suivent des familles géologiques et comportent des rés
 Nouvelle sauvegarde dédiée uniquement pour V1. Ne pas remplacer silencieusement le générateur d’un monde ancien. Manifeste persistant, configurations gelées, snapshots et caches versionnés. En cas de données incompatibles/corrompues, message explicite et arrêt sûr du chargement concerné ; pas de retour discret à vanilla.
 
 Toutes les tâches ont des tests et des preuves. `NOT_RUN`/`BLOCKED` ne valent jamais réussite. L’intégrateur possède les contrats, le manifeste, le verrou MCP et la décision de fusion. Les agents ne publient rien et ne modifient pas une sauvegarde personnelle. Les hypothèses et seuils provisoires restent visibles et ne sont pas convertis en faits par répétition.
+
+## Complément 1.2 — distributions et états
+Les cinq distributions partagent une même référence de géologie/climat/terrain. Sols, minerais et végétation ne peuvent générer des apports d’eau hors bilan. Les plans structurels ne dépendent pas de la date de première visite ; les états saisonniers et modifications du joueur ne sont pas régénérés depuis ces plans. La requalification du delta à L05-C conserve les anciens IDs et preuves sans en déduire un succès 1.2.

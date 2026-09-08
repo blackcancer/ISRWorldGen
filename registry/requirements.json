@@ -504,6 +504,343 @@
       "module": "S13",
       "text": "Le package final doit s’installer proprement, ne contenir aucun fichier interdit et permettre de reproduire la recette.",
       "source": "specs/S13.md"
+    },
+    {
+      "id": "R14-01",
+      "module": "S14",
+      "text": "Le catalogue des roches doit être issu des assets réellement chargés, traçable et sans substitution silencieuse.",
+      "source": "specs/S14.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R14-02",
+      "module": "S14",
+      "text": "Les formations doivent être définies en 3D avec ordre, épaisseur et priorité de recouvrement déterministes.",
+      "source": "specs/S14.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R14-03",
+      "module": "S14",
+      "text": "Une incision doit révéler la même géologie sans réensemencer les roches et doit distinguer le dépôt meuble du substrat.",
+      "source": "specs/S14.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R14-04",
+      "module": "S14",
+      "text": "Une formation traversant des régions doit conserver son identité et sa géométrie indépendamment du découpage et de l’ordre de calcul.",
+      "source": "specs/S14.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R14-05",
+      "module": "S14",
+      "text": "Érosion, recharge, cavernes et gisements doivent consommer le même snapshot géologique et ses propriétés.",
+      "source": "specs/S14.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R14-06",
+      "module": "S14",
+      "text": "Les strates matérialisées doivent respecter les cartes natives requises sans écrasement par un second générateur.",
+      "source": "specs/S14.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R14-07",
+      "module": "S14",
+      "text": "La distribution rocheuse doit préserver les familles hôtes nécessaires à la progression, selon un budget de recherche qualifié.",
+      "source": "specs/S14.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R14-08",
+      "module": "S14",
+      "text": "Les formations et correspondances d’assets doivent se recharger sans dépendre de l’ordre numérique des IDs natifs.",
+      "source": "specs/S14.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R15-01",
+      "module": "S15",
+      "text": "La distribution des sols doit dépendre du substrat, des dépôts, du relief et du drainage sans assimiler humidité à fertilité.",
+      "source": "specs/S15.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R15-02",
+      "module": "S15",
+      "text": "Le potentiel de sol doit être projeté explicitement vers les variantes natives sans confondre les unités de fertilité.",
+      "source": "specs/S15.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R15-03",
+      "module": "S15",
+      "text": "Le profil de sol doit survivre aux passes d’eau, végétation, sol forestier et neige selon une politique de conversion explicite.",
+      "source": "specs/S15.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R15-04",
+      "module": "S15",
+      "text": "Les terres générées doivent donner les états agricoles attendus lors du labour et conserver la gestion native des nutriments.",
+      "source": "specs/S15.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R15-05",
+      "module": "S15",
+      "text": "Les effets natifs d’irrigation, de sel et d’engrais doivent rester utilisables sans irrigation fictive par une nappe abstraite.",
+      "source": "specs/S15.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R15-06",
+      "module": "S15",
+      "text": "La variété et l’accessibilité des classes de sol doivent être qualifiées sans rendre les améliorations agricoles inutiles.",
+      "source": "specs/S15.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R15-07",
+      "module": "S15",
+      "text": "Les sols modifiés par le joueur ne doivent être ni remplacés ni réinitialisés par cache, changement de saison ou reprise.",
+      "source": "specs/S15.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-01",
+      "module": "S16",
+      "text": "Tous les gisements du périmètre, métalliques ou non, doivent posséder des règles chargées et traçables.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-02",
+      "module": "S16",
+      "text": "Le potentiel minéral doit être déterministe, conditionné par le contexte géologique et distinct d’une occurrence garantie.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-03",
+      "module": "S16",
+      "text": "Les gisements doivent respecter formes, bornes de profondeur et relations parent/enfant sur toutes les hauteurs de monde admises.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-04",
+      "module": "S16",
+      "text": "Une occurrence partagée ne doit être ni doublée ni tronquée aux frontières de génération.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-05",
+      "module": "S16",
+      "text": "Le minerai final doit respecter vides, réservations, roche résiduelle et séparation des cristaux décoratifs.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-06",
+      "module": "S16",
+      "text": "Les lectures de potentiel doivent consommer le même modèle de géologie et de ressources que le générateur.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-07",
+      "module": "S16",
+      "text": "Les modes locaux disponibles et les indices de surface doivent conserver leur sémantique, sans promesse universelle ni disparition de leurs informations utiles.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-08",
+      "module": "S16",
+      "text": "L’accès aux ressources doit être qualifié sur le corpus indépendant après tous les masques et décorations.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R16-09",
+      "module": "S16",
+      "text": "Les occurrences et lectures doivent rester stables au rechargement et bornées en temps/mémoire sans repeupler les mines.",
+      "source": "specs/S16.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-01",
+      "module": "S17",
+      "text": "Le routage doit couvrir les plantes et arbres natifs du périmètre, y compris les catégories hors passe principale de végétation.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-02",
+      "module": "S17",
+      "text": "Les végétaux doivent consommer le même sol et climat que le terrain, avec eau et support appropriés.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-03",
+      "module": "S17",
+      "text": "Les peuplements doivent être variés, cohérents et dépourvus de frontières artificielles de cellules ou de chunks selon les critères figés.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-04",
+      "module": "S17",
+      "text": "Les arbres et patchs partagés doivent être déterministes, complets et bornés malgré collisions et ordre de génération.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-05",
+      "module": "S17",
+      "text": "Sous-bois et sols forestiers ne doivent ni dupliquer les patches ni détruire sols agricoles prévus, structures ou accès réservés.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-06",
+      "module": "S17",
+      "text": "Les ressources récoltables doivent rester accessibles et utilisables, sans concentration universelle autour du spawn.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-07",
+      "module": "S17",
+      "text": "Les plantations du joueur doivent conserver leur comportement et le contenu ISRTreeGen admis rester utilisable sans ISRWorldGen.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-08",
+      "module": "S17",
+      "text": "La saison de découverte ne doit pas modifier les peuplements planifiés ; leurs comportements saisonniers doivent rester cohérents.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-09",
+      "module": "S17",
+      "text": "Worldgen ne doit pas replanter les zones exploitées, et la génération végétale doit rester bornée.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-01",
+      "module": "S18",
+      "text": "Les décisions structurelles doivent être indépendantes de la saison de génération tandis que l’état saisonnier porte sa date.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-02",
+      "module": "S18",
+      "text": "La fraction neigeuse et sa fonte doivent conserver le budget hydrique annuel et saisonnier sans double comptage.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-03",
+      "module": "S18",
+      "text": "Le climat natif et le modèle doivent partager une latitude et appliquer une seule correction altitudinale/saisonnière.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-04",
+      "module": "S18",
+      "text": "La neige/glace durable doit dépendre du climat annuel et des précipitations, non d’un seuil Y uniforme.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-05",
+      "module": "S18",
+      "text": "La matérialisation neigeuse doit respecter supports, couches natives et métadonnées sans modifier sol ou sous-sol.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-06",
+      "module": "S18",
+      "text": "Le cycle de gel/dégel ou casse de glace doit conserver type d’eau, niveau et courant selon le profil supporté.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-07",
+      "module": "S18",
+      "text": "Une mise à jour de glace ne doit pas restaurer des fluides par-dessus des modifications du joueur ou des données périmées.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-08",
+      "module": "S18",
+      "text": "L’état saisonnier doit rester cohérent après un cycle annuel et une absence prolongée sans exiger le même historique de ticks.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-09",
+      "module": "S18",
+      "text": "Les options neige/glace et interactions avec sols, plantes et accès souterrains doivent fonctionner sans contredire leurs contrats.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R18-10",
+      "module": "S18",
+      "text": "L’intégration saisonnière doit avoir des files et coûts bornés et ne pas activer deux systèmes concurrents sur les mêmes blocs.",
+      "source": "specs/S18.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R05U-01",
+      "module": "S05U",
+      "text": "L’adoption du plan doit préserver le code, le registre réel, les preuves, les tâches existantes et les sauvegardes.",
+      "source": "specs/S05U.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R05U-02",
+      "module": "S05U",
+      "text": "Les changements sur les contrats et dépendances doivent avoir un impact tracé et des preuves explicitement requalifiées.",
+      "source": "specs/S05U.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R05U-03",
+      "module": "S05U",
+      "text": "Le plan révisé doit être acyclique et préserver l’identité des tâches et les règles d’accès concurrents.",
+      "source": "specs/S05U.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R15-08",
+      "module": "S15",
+      "text": "L’adaptateur de sol doit matérialiser sur fixture native les catégories du mapping, sans exiger les modules végétation et saisons encore absents.",
+      "source": "specs/S15.md",
+      "introduced_in": "1.2"
+    },
+    {
+      "id": "R17-10",
+      "module": "S17",
+      "text": "L’adaptateur végétal doit prouver les appels, initialisations et ownership sur fixtures natives avant assemblage complet.",
+      "source": "specs/S17.md",
+      "introduced_in": "1.2"
     }
-  ]
+  ],
+  "spec_version": "1.2"
 }

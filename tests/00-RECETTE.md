@@ -1,6 +1,6 @@
 # Recette du mod et définition de V1 validée
 ## Portée
-Les 84 scénarios T00-01 à T13-06 sont **à implémenter et exécuter**. Tous sont NOT_RUN à la livraison du cahier des charges. Leur présence n’est pas une suite C# déjà compilable. Les vérifications de ce dossier documentaire restent séparées.
+Les 84 scénarios historiques T00-01 à T13-06 restent applicables ; leur état réel doit être repris des preuves du dépôt. La version 1.2 ajoute 48 scénarios, tous NOT_RUN dans cette livraison documentaire. Leur présence n’est pas une suite C# déjà compilable ; les contrôles documentaires sont distincts.
 
 Un test de conformité à une exigence peut inclure plusieurs assertions. Chaque assertion bloquante doit être réussie, pas seulement la majorité. Les cas en jeu ne sont pas remplacés par des mocks. Une tâche peut avancer avec un stub prévu, mais le résultat du test réel reste NOT_RUN jusqu’à son exécution.
 
@@ -31,3 +31,14 @@ Injecter des défauts connus pour vérifier la suite : montée de rivière d’u
 
 ## Procès-verbal
 La V1 nécessite gates G0–G5 closes, rapports complets, tous les cas bloquants PASS, aucune fonctionnalité revendiquée sans preuve et installation propre. Une réserve cosmétique mineure peut être conservée avec validation explicite ; pas une corruption, un accès impossible ou une incohérence de drainage. Utiliser le modèle `templates/RELEASE-REVIEW.md` et conserver les sources des résultats.
+
+## Complément obligatoire 1.2 — distributions
+Les suites T05U, T14, T15, T16, T17 et T18 ajoutent 48 scénarios bloquants ; le corpus total comporte 132 scénarios principaux. Les résultats historiques restent ceux du dépôt réel. Tous les nouveaux scénarios sont NOT_RUN dans cette livraison.
+
+La recette ajoute coupes de roches et interfaces de faille, sols minces/alluviaux/marécageux, gisements en hôtes autorisés et après excavation, prospection par mode, ressources végétales et peuplements, puis neige/glace selon saison et type d’eau. Les tests négatifs injectent une faute discriminante afin de prouver l’oracle, sans désactiver l’invariant dans le code de production.
+
+Sur le bassin complet, parcourir au minimum un transect montagne/source → versant → vallée alluviale → fleuve/estuaire, avec coupes géologiques et exploration souterraine. Tester le climat froid/humide et froid/sec, les sols/forêts, l’accès aux minerais et la prospection. Faire tourner un cycle saisonnier selon le protocole, recharger une zone absente, modifier volontairement sol/arbre/glace puis vérifier la persistance des actions du joueur.
+
+Les tests T15-08 et T17-10 sont des probes natifs précoces, non des équivalents des campagnes finales. Les budgets [distribution-budgets](../registry/distribution-budgets.json) sont fixés avant holdout. Aucun seuil final requis ne reste null ; les champs proposés ne sont pas des performances promises. Le responsable de chaque seuil fournit une preuve de calibration et l’intégrateur gèle le profil.
+
+L11-C rejoue les régressions croisées listées dans la matrice de passes. L09-C vérifie les accès après toutes les écritures et dans les états saisonniers naturels supportés. Un accès bouché volontairement par le joueur n’est jamais rouvert par worldgen. L13 inclut solo/serveur, Release sans debugger pour les performances, ressources économiques et agriculture natives, installation propre et contraintes de sauvegarde.

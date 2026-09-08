@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "template_only": true,
+  "spec_version": "1.2",
+  "policy": "Evidence history is retained. Fill local disposition/evidence in L05-D; UNKNOWN is not success. Do not mass-reset old task status.",
+  "entries": [
+    {
+      "tasks": [
+        "L03-C"
+      ],
+      "new_consumers": [
+        "L14-A",
+        "L14-B"
+      ],
+      "reason": "Catalogue réel, strates 3D et propriétés communes",
+      "disposition": "TO_ASSESS",
+      "evidence": []
+    },
+    {
+      "tasks": [
+        "L04-A",
+        "L04-B",
+        "L04-C",
+        "L05-B",
+        "L05-C"
+      ],
+      "new_consumers": [
+        "L18-A",
+        "L06-A"
+      ],
+      "reason": "Un seul climat, neige-stockage-fonte et budgets de ports annuels",
+      "disposition": "TO_ASSESS",
+      "evidence": []
+    },
+    {
+      "tasks": [
+        "L10-A",
+        "L10-B"
+      ],
+      "new_consumers": [
+        "L14-C",
+        "L18-C",
+        "L11-B"
+      ],
+      "reason": "Schémas extensions, empreintes catalogues et état temporel",
+      "disposition": "TO_ASSESS",
+      "evidence": []
+    },
+    {
+      "tasks": [
+        "L11-A"
+      ],
+      "new_consumers": [
+        "L14-C",
+        "L16-C",
+        "L17-C",
+        "L18-B",
+        "L18-C"
+      ],
+      "reason": "Cartes, ownership des passes, API/consommateurs natifs",
+      "disposition": "TO_ASSESS",
+      "evidence": []
+    },
+    {
+      "tasks": [
+        "L06-A",
+        "L08-A",
+        "L11-B",
+        "L11-C",
+        "L12-B",
+        "L12-C",
+        "L13-A",
+        "L13-B",
+        "L13-C"
+      ],
+      "new_consumers": [],
+      "reason": "Si déjà commencés ou DONE localement, compléter et requalifier le delta 1.2 ; ne pas réécrire l’historique",
+      "disposition": "TO_ASSESS",
+      "evidence": []
+    }
+  ]
+}

@@ -11,10 +11,14 @@ class DocumentationToolTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / "spec"
-        shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns("artifacts", "__pycache__"))
+        shutil.copytree(
+            ROOT,
+            self.root,
+            ignore=shutil.ignore_patterns(".git", ".local", "artifacts", "bin", "obj", "__pycache__"),
+        )
         # Preserve the small evidence files referenced by delivery notes, but not
         # generated maps, contexts or large future game artifacts.
-        for name in ("spec-validation.json", "documentation-tool-tests.txt"):
+        for name in ("spec-validation.json", "documentation-tool-tests.txt", "plan-update-tool-tests.txt"):
             source = ROOT / "artifacts" / name
             if source.is_file():
                 target = self.root / "artifacts" / name
@@ -45,6 +49,11 @@ class DocumentationToolTests(unittest.TestCase):
     def test_broken_link(self):
         with (self.root / "README.md").open("a", encoding="utf-8") as f: f.write("\n[Broken](does-not-exist.md)\n")
         self.assertIn("Broken link", self.errors())
+    def test_generated_local_output_is_ignored(self):
+        foreign = self.root / ".local" / "foreign"
+        foreign.mkdir(parents=True)
+        (foreign / "README.md").write_text("[Broken](does-not-exist.md)\n", encoding="utf-8")
+        self.assertEqual(self.errors(), "")
     def test_duplicate_seeds(self):
         self.edit("registry/fixtures.json", lambda x: x["full_seeds"].append(0))
         self.assertIn("Duplicate corpus seeds", self.errors())

@@ -15,7 +15,7 @@ ADR-006 : contrats partagés gouvernés par l’intégrateur, sous-lots bornés 
 Ces décisions structurent la présente version documentaire. Leur évolution utilise [le modèle ADR](../templates/ADR.md) et met à jour les exigences et tests impactés.
 
 ## Choix proposés à geler, pas préférences utilisateur déjà connues
-Nom WorldGen/worldgen ; profils d’étendue et hauteur ; nombres de sites ; seuils de rareté ; budgets de RAM/temps ; profil d’équipement des accès verticaux ; bibliothèque de géométrie ; runner de test ; format de snapshot ; placement exact des phases dans l’API. Chaque choix a un lot responsable et doit être consigné avant sa gate d’acceptation.
+Nom de produit ISRWorldGen acquis ; identifiants/projets existants à préserver ; profils d’étendue et hauteur ; nombres de sites ; seuils de rareté ; budgets de RAM/temps ; profil d’équipement des accès verticaux ; bibliothèque de géométrie ; runner de test ; format de snapshot ; placement exact des phases dans l’API. Chaque choix a un lot responsable et doit être consigné avant sa gate d’acceptation.
 
 L’accès surface→galerie→merveille est la règle standard proposée, plus forte que la demande minimale « toujours reliée à une galerie ». Elle sert à garantir la découvrabilité. Une adaptation ultérieure peut changer le profil d’accès sans jamais autoriser une merveille isolée ou murée.
 
@@ -41,3 +41,8 @@ L’accès surface→galerie→merveille est la règle standard proposée, plus 
 Ne pas réduire la portée d’un besoin sans le dire : supprimer toutes les merveilles pour gagner de la RAM, remplir toutes les dépressions pour simplifier l’eau, retirer les structures story pour éviter une collision, remplacer les galeries par poches isolées ou revenir à vanilla en cas d’erreur ne sont pas des solutions conformes.
 
 Une nouvelle version du jeu déclenche un audit de l’adaptateur et une campagne de compatibilité. Le cœur peut conserver son identité algorithmique seulement si ses sorties et formats restent identiques.
+
+## Décisions 1.2 depuis L05-C
+Préserver la progression locale et les 42 IDs ; ajouter L05-D et cinq lots. C08-C12 étendent les contrats plutôt que supposer que L03-C/L11 suffisent. Les budgets annuels déjà publiés ne peuvent être changés silencieusement par la neige ou la pédologie. L’agriculture et les plantations restent natives. Les ressources et comportements sont conservés, pas nécessairement la répartition vanilla exacte.
+
+Risques prioritaires : strates/prospection utilisant deux géologies ; fertilité recalculée depuis le climat contre le sol réel ; herbes/sous-bois perdus par désactivation d’une passe ; gel de courant absent et restitution d’eau douce en mer ; double gradient de température ; monde découvert en hiver structurellement différent ; tests finaux rendus impossibles par un DAG circulaire. Les cas T14-T18 et la séparation probes/campagnes répondent explicitement à ces risques.

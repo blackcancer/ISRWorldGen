@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^L[0-9]{2}-[ABC]$')]
+    [ValidatePattern('^L[0-9]{2}-[A-Z]$')]
     [string]$TaskId,
     [ValidateRange(1024, 1048576)]
     [int]$MaxBytes = 49152

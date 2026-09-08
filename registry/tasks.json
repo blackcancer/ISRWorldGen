@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "spec_version": "1.0",
+  "spec_version": "1.2",
   "tasks": [
     {
       "id": "L00-A",
@@ -601,7 +601,9 @@
       "document": "tasks/L06/L06-A.md",
       "depends_on": [
         "L05-C",
-        "L03-C"
+        "L03-C",
+        "L14-B",
+        "L18-A"
       ],
       "required_read": [
         "AGENTS.md",
@@ -798,7 +800,9 @@
       "document": "tasks/L08/L08-A.md",
       "depends_on": [
         "L03-C",
-        "L05-C"
+        "L05-C",
+        "L14-B",
+        "L18-A"
       ],
       "required_read": [
         "AGENTS.md",
@@ -1134,7 +1138,13 @@
         "L07-C",
         "L08-C",
         "L09-B",
-        "L10-B"
+        "L10-B",
+        "L14-C",
+        "L15-B",
+        "L16-C",
+        "L17-C",
+        "L18-B",
+        "L18-C"
       ],
       "required_read": [
         "AGENTS.md",
@@ -1168,7 +1178,11 @@
       "depends_on": [
         "L11-B",
         "L12-A",
-        "L10-C"
+        "L10-C",
+        "L15-C",
+        "L16-D",
+        "L17-D",
+        "L18-D"
       ],
       "required_read": [
         "AGENTS.md",
@@ -1237,7 +1251,8 @@
       "document": "tasks/L12/L12-B.md",
       "depends_on": [
         "L02-C",
-        "L10-A"
+        "L10-A",
+        "L05-D"
       ],
       "required_read": [
         "AGENTS.md",
@@ -1274,7 +1289,10 @@
         "L06-C",
         "L08-B",
         "L09-B",
-        "L11-B"
+        "L11-B",
+        "L16-D",
+        "L17-D",
+        "L18-D"
       ],
       "required_read": [
         "AGENTS.md",
@@ -1410,6 +1428,682 @@
       ],
       "context_max_bytes": 49152,
       "state": "BACKLOG"
+    },
+    {
+      "id": "L05-D",
+      "lot": "L05",
+      "title": "Adopter le plan et auditer les contrats publiés",
+      "document": "tasks/L05/L05-D.md",
+      "depends_on": [
+        "L05-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L05/L05-D.md",
+        "specs/S05U.md",
+        "contracts/C00.md",
+        "contracts/C03.md",
+        "tests/T05U.md",
+        "docs/10-MIGRATION-DEPUIS-L05-C.md"
+      ],
+      "allowed_write_paths": [
+        "artifacts/plan-adoption/",
+        "testsrc/WorldGen.Tests/L05D/",
+        "worklogs/L05-D.md"
+      ],
+      "requirements": [
+        "R05U-01",
+        "R05U-02",
+        "R05U-03"
+      ],
+      "tests": [
+        "T05U-01",
+        "T05U-02",
+        "T05U-03"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L14-A",
+      "lot": "L14",
+      "title": "Inventorier roches et associations natives",
+      "document": "tasks/L14/L14-A.md",
+      "depends_on": [
+        "L05-D",
+        "L03-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L14/L14-A.md",
+        "specs/S14.md",
+        "contracts/C08.md",
+        "contracts/C06.md",
+        "tests/T14.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Compatibility/RockCatalog/",
+        "testsrc/WorldGen.Tests/L14A/",
+        "worklogs/L14-A.md"
+      ],
+      "requirements": [
+        "R14-01"
+      ],
+      "tests": [
+        "T14-01"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L14-B",
+      "lot": "L14",
+      "title": "Compléter la stratigraphie 3D commune",
+      "document": "tasks/L14/L14-B.md",
+      "depends_on": [
+        "L14-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L14/L14-B.md",
+        "specs/S14.md",
+        "contracts/C08.md",
+        "contracts/C06.md",
+        "tests/T14.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Geology/Stratigraphy/",
+        "testsrc/WorldGen.Tests/L14B/",
+        "worklogs/L14-B.md"
+      ],
+      "requirements": [
+        "R14-02",
+        "R14-03",
+        "R14-04",
+        "R14-05"
+      ],
+      "tests": [
+        "T14-02",
+        "T14-03",
+        "T14-04",
+        "T14-05"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L14-C",
+      "lot": "L14",
+      "title": "Raccorder strates et métadonnées natives",
+      "document": "tasks/L14/L14-C.md",
+      "depends_on": [
+        "L14-B",
+        "L11-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L14/L14-C.md",
+        "specs/S14.md",
+        "contracts/C08.md",
+        "contracts/C06.md",
+        "tests/T14.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Materialization/Strata/",
+        "testsrc/WorldGen.Tests/L14C/",
+        "worklogs/L14-C.md"
+      ],
+      "requirements": [
+        "R14-06",
+        "R14-08"
+      ],
+      "tests": [
+        "T14-06",
+        "T14-08"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L18-A",
+      "lot": "L18",
+      "title": "Qualifier neige climatique et budgets saisonniers",
+      "document": "tasks/L18/L18-A.md",
+      "depends_on": [
+        "L05-D",
+        "L04-C",
+        "L11-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L18/L18-A.md",
+        "specs/S18.md",
+        "contracts/C12.md",
+        "contracts/C02.md",
+        "contracts/C06.md",
+        "tests/T18.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Climate/SeasonalWater/",
+        "src/WorldGen.VintageStory/Compatibility/ClimateBridge/",
+        "testsrc/WorldGen.Tests/L18A/",
+        "worklogs/L18-A.md"
+      ],
+      "requirements": [
+        "R18-01",
+        "R18-02",
+        "R18-03"
+      ],
+      "tests": [
+        "T18-01",
+        "T18-02",
+        "T18-03"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L15-A",
+      "lot": "L15",
+      "title": "Produire profils pédologiques et classes",
+      "document": "tasks/L15/L15-A.md",
+      "depends_on": [
+        "L14-B",
+        "L06-C",
+        "L18-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L15/L15-A.md",
+        "specs/S15.md",
+        "contracts/C09.md",
+        "contracts/C06.md",
+        "tests/T15.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Soils/",
+        "testsrc/WorldGen.Tests/L15A/",
+        "worklogs/L15-A.md"
+      ],
+      "requirements": [
+        "R15-01",
+        "R15-02"
+      ],
+      "tests": [
+        "T15-01",
+        "T15-02"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L15-B",
+      "lot": "L15",
+      "title": "Matérialiser les sols sans casser les couvertures",
+      "document": "tasks/L15/L15-B.md",
+      "depends_on": [
+        "L15-A",
+        "L14-C",
+        "L07-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L15/L15-B.md",
+        "specs/S15.md",
+        "contracts/C09.md",
+        "contracts/C06.md",
+        "tests/T15.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Materialization/Soils/",
+        "testsrc/WorldGen.Tests/L15B/",
+        "worklogs/L15-B.md"
+      ],
+      "requirements": [
+        "R15-08"
+      ],
+      "tests": [
+        "T15-08"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L15-C",
+      "lot": "L15",
+      "title": "Qualifier agriculture et conservation en jeu",
+      "document": "tasks/L15/L15-C.md",
+      "depends_on": [
+        "L15-B",
+        "L11-B",
+        "L18-D"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L15/L15-C.md",
+        "specs/S15.md",
+        "contracts/C09.md",
+        "contracts/C06.md",
+        "tests/T15.md"
+      ],
+      "allowed_write_paths": [
+        "testsrc/WorldGen.Tests/SoilIntegration/",
+        "testsrc/WorldGen.Tests/L15C/",
+        "worklogs/L15-C.md"
+      ],
+      "requirements": [
+        "R15-04",
+        "R15-05",
+        "R15-06",
+        "R15-07",
+        "R15-03"
+      ],
+      "tests": [
+        "T15-04",
+        "T15-05",
+        "T15-06",
+        "T15-07",
+        "T15-03"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L16-A",
+      "lot": "L16",
+      "title": "Extraire règles de dépôts et profil de potentiel",
+      "document": "tasks/L16/L16-A.md",
+      "depends_on": [
+        "L14-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L16/L16-A.md",
+        "specs/S16.md",
+        "contracts/C10.md",
+        "contracts/C08.md",
+        "contracts/C06.md",
+        "tests/T16.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Minerals/CatalogAndPotential/",
+        "src/WorldGen.VintageStory/Compatibility/DepositCatalog/",
+        "testsrc/WorldGen.Tests/L16A/",
+        "worklogs/L16-A.md"
+      ],
+      "requirements": [
+        "R16-01",
+        "R16-02"
+      ],
+      "tests": [
+        "T16-01",
+        "T16-02"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L16-B",
+      "lot": "L16",
+      "title": "Planifier occurrences et matérialisation filtrée",
+      "document": "tasks/L16/L16-B.md",
+      "depends_on": [
+        "L16-A",
+        "L06-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L16/L16-B.md",
+        "specs/S16.md",
+        "contracts/C10.md",
+        "contracts/C08.md",
+        "contracts/C06.md",
+        "tests/T16.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Minerals/Deposits/",
+        "testsrc/WorldGen.Tests/L16B/",
+        "worklogs/L16-B.md"
+      ],
+      "requirements": [
+        "R16-03",
+        "R16-04"
+      ],
+      "tests": [
+        "T16-03",
+        "T16-04"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L16-C",
+      "lot": "L16",
+      "title": "Raccorder gisements et modes de prospection",
+      "document": "tasks/L16/L16-C.md",
+      "depends_on": [
+        "L16-B",
+        "L14-C",
+        "L07-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L16/L16-C.md",
+        "specs/S16.md",
+        "contracts/C10.md",
+        "contracts/C08.md",
+        "contracts/C06.md",
+        "tests/T16.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Compatibility/Prospecting/",
+        "testsrc/WorldGen.Tests/L16C/",
+        "worklogs/L16-C.md"
+      ],
+      "requirements": [
+        "R16-06",
+        "R16-07"
+      ],
+      "tests": [
+        "T16-06",
+        "T16-07"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L16-D",
+      "lot": "L16",
+      "title": "Qualifier minerais après assemblage complet",
+      "document": "tasks/L16/L16-D.md",
+      "depends_on": [
+        "L16-C",
+        "L11-B",
+        "L12-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L16/L16-D.md",
+        "specs/S16.md",
+        "contracts/C10.md",
+        "contracts/C08.md",
+        "contracts/C06.md",
+        "tests/T16.md",
+        "specs/S14.md",
+        "tests/T14.md"
+      ],
+      "allowed_write_paths": [
+        "testsrc/WorldGen.Tests/MineralIntegration/",
+        "testsrc/WorldGen.Tests/L16D/",
+        "worklogs/L16-D.md"
+      ],
+      "requirements": [
+        "R16-08",
+        "R16-09",
+        "R14-07",
+        "R16-05"
+      ],
+      "tests": [
+        "T16-08",
+        "T16-09",
+        "T14-07",
+        "T16-05"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L17-A",
+      "lot": "L17",
+      "title": "Inventorier flore et qualifier contexte écologique",
+      "document": "tasks/L17/L17-A.md",
+      "depends_on": [
+        "L15-A",
+        "L18-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L17/L17-A.md",
+        "specs/S17.md",
+        "contracts/C11.md",
+        "contracts/C09.md",
+        "contracts/C06.md",
+        "tests/T17.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Ecology/Habitats/",
+        "testsrc/WorldGen.Tests/L17A/",
+        "worklogs/L17-A.md"
+      ],
+      "requirements": [
+        "R17-01",
+        "R17-02"
+      ],
+      "tests": [
+        "T17-01",
+        "T17-02"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L17-B",
+      "lot": "L17",
+      "title": "Composer peuplements et voisinages stables",
+      "document": "tasks/L17/L17-B.md",
+      "depends_on": [
+        "L17-A",
+        "L06-C",
+        "L07-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L17/L17-B.md",
+        "specs/S17.md",
+        "contracts/C11.md",
+        "contracts/C09.md",
+        "contracts/C06.md",
+        "tests/T17.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Ecology/Placement/",
+        "testsrc/WorldGen.Tests/L17B/",
+        "worklogs/L17-B.md"
+      ],
+      "requirements": [
+        "R17-03",
+        "R17-04"
+      ],
+      "tests": [
+        "T17-03",
+        "T17-04"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L17-C",
+      "lot": "L17",
+      "title": "Brancher arbres, patches et sous-bois natifs",
+      "document": "tasks/L17/L17-C.md",
+      "depends_on": [
+        "L17-B",
+        "L15-B",
+        "L11-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L17/L17-C.md",
+        "specs/S17.md",
+        "contracts/C11.md",
+        "contracts/C09.md",
+        "contracts/C06.md",
+        "tests/T17.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Materialization/Vegetation/",
+        "testsrc/WorldGen.Tests/L17C/",
+        "worklogs/L17-C.md"
+      ],
+      "requirements": [
+        "R17-07",
+        "R17-10"
+      ],
+      "tests": [
+        "T17-07",
+        "T17-10"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L17-D",
+      "lot": "L17",
+      "title": "Qualifier flore, récoltes et saisons en monde complet",
+      "document": "tasks/L17/L17-D.md",
+      "depends_on": [
+        "L17-C",
+        "L18-D",
+        "L11-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L17/L17-D.md",
+        "specs/S17.md",
+        "contracts/C11.md",
+        "contracts/C09.md",
+        "contracts/C06.md",
+        "tests/T17.md"
+      ],
+      "allowed_write_paths": [
+        "testsrc/WorldGen.Tests/VegetationIntegration/",
+        "testsrc/WorldGen.Tests/L17D/",
+        "worklogs/L17-D.md"
+      ],
+      "requirements": [
+        "R17-06",
+        "R17-08",
+        "R17-09",
+        "R17-05"
+      ],
+      "tests": [
+        "T17-06",
+        "T17-08",
+        "T17-09",
+        "T17-05"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L18-B",
+      "lot": "L18",
+      "title": "Distribuer neige et glace initiales",
+      "document": "tasks/L18/L18-B.md",
+      "depends_on": [
+        "L18-A",
+        "L07-C",
+        "L15-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L18/L18-B.md",
+        "specs/S18.md",
+        "contracts/C12.md",
+        "contracts/C02.md",
+        "contracts/C06.md",
+        "tests/T18.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Materialization/SnowIce/",
+        "testsrc/WorldGen.Tests/L18B/",
+        "worklogs/L18-B.md"
+      ],
+      "requirements": [
+        "R18-04",
+        "R18-05"
+      ],
+      "tests": [
+        "T18-04",
+        "T18-05"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L18-C",
+      "lot": "L18",
+      "title": "Garantir gel-dégel des eaux et ownership",
+      "document": "tasks/L18/L18-C.md",
+      "depends_on": [
+        "L18-A",
+        "L07-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L18/L18-C.md",
+        "specs/S18.md",
+        "contracts/C12.md",
+        "contracts/C02.md",
+        "contracts/C06.md",
+        "tests/T18.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Runtime/WaterIce/",
+        "testsrc/WorldGen.Tests/L18C/",
+        "worklogs/L18-C.md"
+      ],
+      "requirements": [
+        "R18-06",
+        "R18-07"
+      ],
+      "tests": [
+        "T18-06",
+        "T18-07"
+      ],
+      "context_max_bytes": 49152
+    },
+    {
+      "id": "L18-D",
+      "lot": "L18",
+      "title": "Qualifier l’année et le rattrapage saisonnier",
+      "document": "tasks/L18/L18-D.md",
+      "depends_on": [
+        "L18-B",
+        "L18-C",
+        "L11-B",
+        "L10-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L18/L18-D.md",
+        "specs/S18.md",
+        "contracts/C12.md",
+        "contracts/C02.md",
+        "contracts/C06.md",
+        "tests/T18.md"
+      ],
+      "allowed_write_paths": [
+        "testsrc/WorldGen.Tests/CryosphereIntegration/",
+        "testsrc/WorldGen.Tests/L18D/",
+        "worklogs/L18-D.md"
+      ],
+      "requirements": [
+        "R18-08",
+        "R18-09",
+        "R18-10"
+      ],
+      "tests": [
+        "T18-08",
+        "T18-09",
+        "T18-10"
+      ],
+      "context_max_bytes": 49152
     }
-  ]
+  ],
+  "product": "ISRWorldGen",
+  "ordering": "depends_on, not numeric ID",
+  "execution_state": "registry/state.json in the real repository only"
 }

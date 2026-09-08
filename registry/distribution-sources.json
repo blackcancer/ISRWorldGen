@@ -1,0 +1,86 @@
+{
+  "checked_on": "2026-09-08",
+  "scope": "Public source review, not installed-game qualification",
+  "essentials_ref": "06673b67318e002332b6aa8b3d0308f11d2aba99",
+  "survival_ref": "849fa8cad9e392368566efc7474e73db6404a145",
+  "sources": [
+    {
+      "id": "DIST-01",
+      "title": "GenRockStrataNew",
+      "url": "https://github.com/anegostudios/vsessentialsmod/blob/06673b67318e002332b6aa8b3d0308f11d2aba99/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs",
+      "finding": "Le générateur natif des strates est un consommateur à auditer, également appelé par la prospection. Les cartes de strates seules ne garantissent pas une géologie 3D compatible."
+    },
+    {
+      "id": "DIST-02",
+      "title": "IMapRegion / IMapChunk",
+      "url": "https://apidocs.vintagestory.at/api/Vintagestory.API.Common.IMapRegion.html",
+      "finding": "Cartes de climat, forêt, arbustes, roches et minerais exposées ; leur existence n’en fait pas un encodage libre. IMapChunk distingue TopRockIdMap, RainHeightMap et SnowAccum."
+    },
+    {
+      "id": "DIST-03",
+      "title": "BESoilNutrition",
+      "url": "https://github.com/anegostudios/vssurvivalmod/blob/849fa8cad9e392368566efc7474e73db6404a145/BlockEntity/BESoilNutrition.cs",
+      "finding": "L’état agricole contient nutriments, réserve initiale et humidité ; sa création dépend de la variante de fertilité du sol. Ne pas confondre avec Block.Fertility."
+    },
+    {
+      "id": "DIST-04",
+      "title": "GenBlockLayers et ClimateCondition",
+      "url": "https://github.com/anegostudios/vsessentialsmod/blob/06673b67318e002332b6aa8b3d0308f11d2aba99/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs",
+      "finding": "GenBlockLayers intervient dans les sols et herbes ; les consommateurs de climat/fertilité et les mutations de cartes doivent être inventoriés."
+    },
+    {
+      "id": "DIST-05",
+      "title": "GenDeposits",
+      "url": "https://github.com/anegostudios/vsessentialsmod/blob/06673b67318e002332b6aa8b3d0308f11d2aba99/Systems/WorldGen/Standard/ChunkGen/5.GenDeposits/GenDeposits.cs",
+      "finding": "Charge les définitions worldgen/deposits, sous-gisements et cartes de potentiel ; différentes conditions et facteurs de quantité sont appliqués."
+    },
+    {
+      "id": "DIST-06",
+      "title": "ProPickWorkSpace",
+      "url": "https://github.com/anegostudios/vssurvivalmod/blob/849fa8cad9e392368566efc7474e73db6404a145/Systems/Prospecting/ProPickWorkSpace.cs",
+      "finding": "Crée des instances de GenRockStrataNew et GenDeposits ; il faut raccorder cette reconstruction au modèle ISRWorldGen si leurs sorties diffèrent."
+    },
+    {
+      "id": "DIST-07",
+      "title": "GenVegetationAndPatches",
+      "url": "https://github.com/anegostudios/vsessentialsmod/blob/06673b67318e002332b6aa8b3d0308f11d2aba99/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/GenVegetationAndPatches.cs",
+      "finding": "Lit forêt, arbustes, climat et heightmap ; répartit patches avant/après arbres et expose des modificateurs de placement liés aux structures."
+    },
+    {
+      "id": "DIST-08",
+      "title": "TreeSupplier et BlockPatchConfig",
+      "url": "https://github.com/anegostudios/vsessentialsmod/blob/06673b67318e002332b6aa8b3d0308f11d2aba99/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeSupplier.cs",
+      "finding": "Le choix d’arbre recalcule une fertilité climatique ; le sol du modèle ne sera pas automatiquement consommé. Les restrictions des patches doivent être vérifiées séparément."
+    },
+    {
+      "id": "DIST-09",
+      "title": "ForestFloorSystem",
+      "url": "https://github.com/anegostudios/vsessentialsmod/blob/06673b67318e002332b6aa8b3d0308f11d2aba99/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/ForestFloorSystem.cs",
+      "finding": "Le sol forestier et les patches sous/sur arbres dépendent des arbres, du climat et du système de patches. Supprimer ce dernier sans adapter les consommateurs est risqué."
+    },
+    {
+      "id": "DIST-10",
+      "title": "WeatherSimulationSnowAccum",
+      "url": "https://github.com/anegostudios/vsessentialsmod/blob/06673b67318e002332b6aa8b3d0308f11d2aba99/Systems/Weather/WeatherSimulationSnowAccum.cs",
+      "finding": "Traite neige, chargement des colonnes et horodatages. Lit snowAccum et active un drapeau global de gel ; cela ne suffit pas à prouver chaque chemin de fonte."
+    },
+    {
+      "id": "DIST-11",
+      "title": "BlockWater",
+      "url": "https://github.com/anegostudios/vssurvivalmod/blob/849fa8cad9e392368566efc7474e73db6404a145/Block/BlockWater.cs",
+      "finding": "Les conditions natives de gel filtrent notamment eau immobile à niveau plein puis attributs/exposition/température. Toute variante de courant n’est pas présumée gélifiable."
+    },
+    {
+      "id": "DIST-12",
+      "title": "BlockLakeIce",
+      "url": "https://github.com/anegostudios/vssurvivalmod/blob/849fa8cad9e392368566efc7474e73db6404a145/Block/BlockLakeIce.cs",
+      "finding": "Le code consulté résout water-still-7 pour la restitution d’eau. La fonte/casse adaptée doit préserver eau salée et courant si ces milieux sont supportés."
+    },
+    {
+      "id": "DIST-13",
+      "title": "Temperature",
+      "url": "https://github.com/anegostudios/vssurvivalmod/blob/849fa8cad9e392368566efc7474e73db6404a145/Systems/Temperature.cs",
+      "finding": "La latitude saisonnière est calculée via le calendrier depuis Z ; un équateur oblique uniquement dans l’atlas serait insuffisant."
+    }
+  ]
+}

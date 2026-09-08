@@ -1,21 +1,31 @@
-# Outils du dossier documentaire
-## Capsule Windows sans dépendance Python
-Depuis la racine :
+# Outils documentaires — plan 1.2
+## Capsules
 ```powershell
-powershell -NoProfile -File ./tools/Get-TaskContext.ps1 -TaskId L05-B
+powershell -NoProfile -File ./tools/Get-TaskContext.ps1 -TaskId L14-B
 ```
-Le script lit le manifeste, agrège uniquement les lectures explicites, calcule leurs empreintes et refuse de tronquer au-delà du budget. Il écrit dans `artifacts/contexts/`. Il ne lance ni agents, ni compilateur, ni jeu. Il est écrit pour les fonctions usuelles de Windows PowerShell 5.1/PowerShell 7 ; son exécution PowerShell n’a pas été vérifiée dans l’environnement de préparation de ce dossier. Une lecture manuelle des fichiers indiqués reste strictement équivalente.
+Agrège uniquement les lectures de la tâche avec leurs empreintes ; refuse de tronquer une capsule hors budget. Ne lance aucun agent, compilateur ou jeu. Le script existant est conservé ; son exécution PowerShell n’a pas été testée sur le poste de l’utilisateur.
 
-## Validation facultative avec Python 3.10 ou ultérieur
-Ces scripts servent à la cohérence du cahier, pas au développement runtime du mod :
+## Préparation d’adoption sans mutation du dépôt
+Python 3.10+ facultatif, bibliothèque standard uniquement, sans dépendance runtime du mod :
+```powershell
+python ./tools/prepare_plan_update.py --existing "CHEMIN_DU_DEPOT_ACTUEL" --output "DOSSIER_DE_REVUE_NEUF_HORS_DEPOT"
+```
+Le dossier de revue doit être neuf et hors du dépôt et de cette livraison. Le script ne change aucun fichier actif. Il conserve les variations locales dans les fusions JSON et signale les conflits textuels pour revue. Les documents proposés sont dans proposal/, les conflits dans review-report.json. Le candidat d’état est séparé, jamais dans proposal/.
+
+La comparaison utilise la référence documentaire 1.1 incorporée dans update_baseline_r11.json. Une adaptation locale divergente n’est pas écrasée. Les champs supplémentaires, tâches locales et preuves sont conservés dans le candidat d’état. Une absence d’état historique reste UNVERIFIED. Le script ne fournit ni --apply ni commande Git.
+
+## Contrôles
 ```powershell
 python ./tools/validate_spec.py
-python ./tools/validate_spec.py --emit-context L05-B
+python ./tools/validate_spec.py --emit-context L18-C
 python ./tools/test_documentation_tools.py
+python ./tools/test_plan_update.py
 ```
-Le validateur contrôle liens relatifs, sources minimales, DAG, IDs, correspondance exigences/tâches/tests, partition du corpus et tailles des capsules. Les huit auto-tests injectent notamment cycle, lien cassé, source manquante et budget dépassé. Ils ne testent pas l’API de Vintage Story.
+Le validateur vérifie IDs, DAG, liens, tâches/exigences/tests et tailles des capsules. En l’absence du vrai état local, il utilise le modèle uniquement pour la cohérence documentaire et ne propose aucune tâche comme réellement prête.
 
-Le rapport `artifacts/spec-validation.json` distingue explicitement DOCUMENTATION_ONLY. Les scripts Python ont été exécutés lors de la livraison ; la preuve d’exécution est fournie dans les artefacts. Les 84 scénarios de test du mod restent NOT_RUN.
+Les auto-tests portent sur les outils du plan, pas sur le mod. Les résultats exécutés figurent dans docs/09-VERIFICATION-DU-DOSSIER.md et artifacts/. La préparation et les auto-tests Python ont leur propre statut. C#, jeu, Visual Studio et MCP ne sont pas invoqués par ces scripts.
 
-## Git
-Les sorties `artifacts/contexts`, snapshots/PNGs de test, logs, bin/obj, données locales du MCP et sauvegardes de laboratoire ne sont pas des sources à versionner automatiquement. Conserver uniquement les preuves sélectionnées et expurgées. Fusionner consciemment cette politique à l’ignore existant du dépôt plutôt que remplacer sa configuration.
+Ne pas versionner automatiquement tous les logs, bin/obj, capsules et sauvegardes. Conserver seulement les preuves nécessaires et expurgées selon la politique du dépôt existant.
+
+## Contrôles exécutés dans cette livraison
+8 tests de validateur et 14 tests de préparation passent. Le sélecteur PowerShell est contrôlé statiquement pour tous les IDs, sans exécution PowerShell. Voir les journaux du rapport de vérification.

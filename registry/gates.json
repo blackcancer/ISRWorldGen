@@ -9,7 +9,8 @@
         "L00-B",
         "L00-C"
       ],
-      "decision": "Version locale verrouillée, breakpoint réel MCP, preuve de remplacement sélectif et fluides/heightmaps. Sans cela, aucune prétention de compatibilité au jeu."
+      "decision": "Version locale verrouillée, breakpoint réel MCP, preuve de remplacement sélectif et fluides/heightmaps. Sans cela, aucune prétention de compatibilité au jeu.",
+      "qualification_version": "1.2"
     },
     {
       "id": "G1",
@@ -24,7 +25,8 @@
         "L10-A",
         "L11-A"
       ],
-      "decision": "Contrats gelés, atlas échantillonné, quotas, stockage abstrait et premiers codecs natifs éprouvés."
+      "decision": "Contrats gelés, atlas échantillonné, quotas, stockage abstrait et premiers codecs natifs éprouvés.",
+      "qualification_version": "1.2"
     },
     {
       "id": "G2",
@@ -45,9 +47,15 @@
         "L07-A",
         "L07-B",
         "L07-C",
-        "L10-B"
+        "L10-B",
+        "L05-D",
+        "L14-A",
+        "L14-B",
+        "L14-C",
+        "L18-A"
       ],
-      "decision": "Bilan et raffinement conservés, profils fluviaux corrects et eau stable sur le moteur réel. Prototype interne de surface, pas V1."
+      "decision": "Bilan et raffinement conservés, profils fluviaux corrects et eau stable sur le moteur réel. Prototype interne de surface, pas V1. Strates 3D et agrégation annuelle neige-fonte qualifiées avant certification du bassin.",
+      "qualification_version": "1.2"
     },
     {
       "id": "G3",
@@ -59,9 +67,20 @@
         "L09-A",
         "L09-B",
         "L12-A",
-        "L11-B"
+        "L11-B",
+        "L15-A",
+        "L15-B",
+        "L16-A",
+        "L16-B",
+        "L16-C",
+        "L17-A",
+        "L17-B",
+        "L17-C",
+        "L18-B",
+        "L18-C"
       ],
-      "decision": "Réseaux naturels, cinq familles fantastiques matérialisées et colonne complète ; certification finale reste à G4."
+      "decision": "Réseaux naturels, cinq familles fantastiques matérialisées et colonne complète ; certification finale reste à G4. La colonne complète intègre désormais sols, gisements/prospection, végétation et neige/glace initiales ; leurs cycles complets sont qualifiés à G4.",
+      "qualification_version": "1.2"
     },
     {
       "id": "G4",
@@ -71,9 +90,14 @@
         "L10-C",
         "L11-C",
         "L12-B",
-        "L12-C"
+        "L12-C",
+        "L15-C",
+        "L16-D",
+        "L17-D",
+        "L18-D"
       ],
-      "decision": "Accès finaux certifiés, reprise après crash, contenu vanilla, configuration et diagnostics prêts. Candidat de recette, non encore version validée."
+      "decision": "Accès finaux certifiés, reprise après crash, contenu vanilla, configuration et diagnostics prêts. Candidat de recette, non encore version validée. Agriculture, minerais/prospection, récoltes/plantations et cycles neige/gel/dégel ont leurs preuves réelles.",
+      "qualification_version": "1.2"
     },
     {
       "id": "G5",
@@ -83,7 +107,9 @@
         "L13-B",
         "L13-C"
       ],
-      "decision": "Corpus, revue, endurance, jeu/serveur et installation propre validés. Tous les tests bloquants effectivement exécutés."
+      "decision": "Corpus, revue, endurance, jeu/serveur et installation propre validés. Tous les tests bloquants effectivement exécutés. Tous les cas supplémentaires T14 à T18 et T05U sont inclus ; un ancien rapport 1.1 ne certifie pas la recette 1.2.",
+      "qualification_version": "1.2"
     }
-  ]
+  ],
+  "spec_version": "1.2"
 }
