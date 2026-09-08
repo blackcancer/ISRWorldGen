@@ -1092,6 +1092,174 @@
       "text": "Qualifier les bornes et budgets gelés, concurrence, froid/chaud, mémoire, surcoût worldgen/stockage et absence de modification des sorties L00–L18 ; transmettre à L13 les régressions pertinentes.",
       "source": "specs/S19.md",
       "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-01",
+      "module": "S-AQ",
+      "text": "Inventorier tous les contenus fixes aquatiques natifs chargés, leurs règles et propriétaires, sans assimiler classes techniques et catégories biologiques.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-02",
+      "module": "S-AQ",
+      "text": "Inventorier les entités aquatiques et semi-aquatiques effectivement disponibles et leurs voies worldgen/runtime, sans nouvelle espèce ni second spawner.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-03",
+      "module": "S-AQ",
+      "text": "Fournir géométrie aquatique et connexions structurelles à résolution explicite, distinguant fond, surface, rive et volumes superposés.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-04",
+      "module": "S-AQ",
+      "text": "Utiliser fond, substrat et support natif réels, avec critères écologiques séparés de la fertilité terrestre.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-05",
+      "module": "S-AQ",
+      "text": "Composer fonds nus et peuplements selon profondeur, type d’eau, substrat et contexte climatique, sans tapis uniforme ni seuil universel non documenté.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-06",
+      "module": "S-AQ",
+      "text": "Borner les placements sous-marins et arbitrer les patches partagés sans dépendance à l’ordre des chunks ou threads.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-07",
+      "module": "S-AQ",
+      "text": "Respecter solides/liquides et supports natifs, et enregistrer l’emprise réellement placée, y compris rejets ou appels sans effet.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-08",
+      "module": "S-AQ",
+      "text": "Attribuer un propriétaire aux modifications de fond et décors des récifs ; interdire toute altération des réservations hydrauliques, structures et accès obligatoires.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-09",
+      "module": "S-AQ",
+      "text": "Préserver les comportements et ressources natifs des peuplements submergés, sans réensemencement worldgen au rechargement.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-10",
+      "module": "S-AQ",
+      "text": "Préserver le spawning aquatique natif à la génération, avec une seule autorité et les cartes/métadonnées attendues.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-11",
+      "module": "S-AQ",
+      "text": "Qualifier séparément le runtime, la sauvegarde et le chargement de faune native, sans modifier ses comportements au titre de L19.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-12",
+      "module": "S-AQ",
+      "text": "Conserver identités/types d’eau et comportement natif lors du gel/dégel, sans assimiler surface gelée et volume complètement gelé.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-13",
+      "module": "S-AQ",
+      "text": "Étendre l’inventaire et C13 avec eau, fond, colonne, surface, berge, verticalité, connexions, unités, provenance et validité.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-14",
+      "module": "S-AQ",
+      "text": "Implémenter consultations XYZ et recherches à domaine vertical explicite, avec distance à la géométrie et couverture volumique.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-15",
+      "module": "S-AQ",
+      "text": "Exposer un voisinage hydrologique borné et orienté lorsque pertinent, sans produire de trajet animal ni nier des connexions non couvertes.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-16",
+      "module": "S-AQ",
+      "text": "Publier des vues de ressources, couvert, refuge et reproduction potentiels depuis les caractéristiques produites, pas depuis une simulation animale.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-17",
+      "module": "S-AQ",
+      "text": "Produire les métadonnées aquatiques sans mod animalier, avec publication/reçus cohérents et références persistantes à coût borné.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-18",
+      "module": "S-AQ",
+      "text": "Rendre consultables les données aquatiques après ajout tardif du consommateur et traiter honnêtement les mondes sans historique exact.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-19",
+      "module": "S-AQ",
+      "text": "Borner recherche 3D, voisinage et lecture de métadonnées ; distinguer inconnu, vide, résultat tronqué et couverture complète.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-20",
+      "module": "S-AQ",
+      "text": "Ne jamais faire passer un catalogue initial pour une observation actuelle après actions sur l’eau, les fonds, les plantes ou le gel.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-21",
+      "module": "S-AQ",
+      "text": "Un mod externe doit utiliser réellement les données aquatiques sans références aux classes internes d’ISRWorldGen ni logique biologique.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-22",
+      "module": "S-AQ",
+      "text": "Exporter diagnostics aquatiques reproductibles, sans remplacer les assertions numériques par une image.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-23",
+      "module": "S-AQ",
+      "text": "Mesurer surcoûts worldgen/stockage/requête et démontrer que L19 n’altère pas les décisions de génération aquatique de la même révision.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R-AQ-24",
+      "module": "S-AQ",
+      "text": "Inclure les preuves aquatiques dans la qualification V1 et les rejouer sur le candidat final sans dépendance à L20.",
+      "source": "specs/S-AQ.md",
+      "release_scope": "V1"
     }
   ],
   "spec_version": "1.3"

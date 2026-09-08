@@ -708,7 +708,9 @@
         "specs/S07.md",
         "contracts/C03.md",
         "contracts/C06.md",
-        "tests/T07.md"
+        "tests/T07.md",
+        "tasks/L07/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Core/Waters/Rivers/",
@@ -741,7 +743,10 @@
         "specs/S07.md",
         "contracts/C03.md",
         "contracts/C06.md",
-        "tests/T07.md"
+        "tests/T07.md",
+        "tasks/L07/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L07.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Core/Waters/WaterBodies/",
@@ -751,12 +756,14 @@
       "requirements": [
         "R07-03",
         "R07-04",
-        "R07-05"
+        "R07-05",
+        "R-AQ-03"
       ],
       "tests": [
         "T07-03",
         "T07-04",
-        "T07-05"
+        "T07-05",
+        "T-AQ-03"
       ],
       "context_max_bytes": 49152,
       "state": "BACKLOG"
@@ -777,7 +784,9 @@
         "specs/S07.md",
         "contracts/C03.md",
         "contracts/C06.md",
-        "tests/T07.md"
+        "tests/T07.md",
+        "tasks/L07/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/Fluids/",
@@ -875,7 +884,9 @@
         "tasks/L08/L08-C.md",
         "specs/S08.md",
         "contracts/C04.md",
-        "tests/T08.md"
+        "tests/T08.md",
+        "tasks/L08/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Core/Caves/Traversal/",
@@ -1040,7 +1051,9 @@
         "specs/S10.md",
         "contracts/C00.md",
         "contracts/C05.md",
-        "tests/T10.md"
+        "tests/T10.md",
+        "tasks/L10/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Runtime/Scheduling/",
@@ -1074,7 +1087,9 @@
         "specs/S10.md",
         "contracts/C00.md",
         "contracts/C05.md",
-        "tests/T10.md"
+        "tests/T10.md",
+        "tasks/L10/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Runtime/Recovery/",
@@ -1110,7 +1125,10 @@
         "contracts/C05.md",
         "contracts/C06.md",
         "tests/T11.md",
-        "docs/04-AUDIT-API.md"
+        "docs/04-AUDIT-API.md",
+        "tasks/L11/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L11.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/Adapters/",
@@ -1119,13 +1137,15 @@
       ],
       "requirements": [
         "R11-01",
-        "R11-02"
+        "R11-02",
+        "R-AQ-02"
       ],
       "tests": [
         "T11-01",
-        "T11-02"
+        "T11-02",
+        "T-AQ-02"
       ],
-      "context_max_bytes": 49152,
+      "context_max_bytes": 65536,
       "state": "BACKLOG"
     },
     {
@@ -1154,7 +1174,10 @@
         "contracts/C05.md",
         "contracts/C06.md",
         "tests/T11.md",
-        "docs/04-AUDIT-API.md"
+        "docs/04-AUDIT-API.md",
+        "tasks/L11/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L11.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/ColumnGeneration/",
@@ -1162,12 +1185,14 @@
         "worklogs/L11-B.md"
       ],
       "requirements": [
-        "R11-03"
+        "R11-03",
+        "R-AQ-10"
       ],
       "tests": [
-        "T11-03"
+        "T11-03",
+        "T-AQ-10"
       ],
-      "context_max_bytes": 49152,
+      "context_max_bytes": 65536,
       "state": "BACKLOG"
     },
     {
@@ -1192,7 +1217,10 @@
         "contracts/C05.md",
         "contracts/C06.md",
         "tests/T11.md",
-        "docs/04-AUDIT-API.md"
+        "docs/04-AUDIT-API.md",
+        "tasks/L11/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L11.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/Compatibility/",
@@ -1202,14 +1230,16 @@
       "requirements": [
         "R11-04",
         "R11-05",
-        "R11-06"
+        "R11-06",
+        "R-AQ-11"
       ],
       "tests": [
         "T11-04",
         "T11-05",
-        "T11-06"
+        "T11-06",
+        "T-AQ-11"
       ],
-      "context_max_bytes": 49152,
+      "context_max_bytes": 65536,
       "state": "BACKLOG"
     },
     {
@@ -1261,7 +1291,9 @@
         "specs/S12.md",
         "contracts/C06.md",
         "contracts/C07.md",
-        "tests/T12.md"
+        "tests/T12.md",
+        "tasks/L12/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/Configuration/",
@@ -1301,7 +1333,9 @@
         "specs/S12.md",
         "contracts/C06.md",
         "contracts/C07.md",
-        "tests/T12.md"
+        "tests/T12.md",
+        "tasks/L12/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Tools/Diagnostics/",
@@ -1343,7 +1377,10 @@
         "contracts/C07.md",
         "tests/T13.md",
         "tests/00-RECETTE.md",
-        "registry/quality-budgets.json"
+        "registry/quality-budgets.json",
+        "tasks/L13/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L13.md"
       ],
       "allowed_write_paths": [
         "testsrc/WorldGen.AcceptanceTests/Campaigns/",
@@ -1352,13 +1389,15 @@
       ],
       "requirements": [
         "R13-01",
-        "R13-02"
+        "R13-02",
+        "R-AQ-24"
       ],
       "tests": [
         "T13-01",
-        "T13-02"
+        "T13-02",
+        "T-AQ-24"
       ],
-      "context_max_bytes": 49152,
+      "context_max_bytes": 65536,
       "state": "BACKLOG"
     },
     {
@@ -1378,7 +1417,9 @@
         "contracts/C07.md",
         "tests/T13.md",
         "tests/00-RECETTE.md",
-        "registry/quality-budgets.json"
+        "registry/quality-budgets.json",
+        "tasks/L13/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "testsrc/WorldGen.AcceptanceTests/Endurance/",
@@ -1393,7 +1434,7 @@
         "T13-03",
         "T13-04"
       ],
-      "context_max_bytes": 49152,
+      "context_max_bytes": 65536,
       "state": "BACKLOG"
     },
     {
@@ -1413,7 +1454,9 @@
         "contracts/C07.md",
         "tests/T13.md",
         "tests/00-RECETTE.md",
-        "registry/quality-budgets.json"
+        "registry/quality-budgets.json",
+        "tasks/L13/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "distribution/",
@@ -1428,7 +1471,7 @@
         "T13-05",
         "T13-06"
       ],
-      "context_max_bytes": 49152,
+      "context_max_bytes": 65536,
       "state": "BACKLOG"
     },
     {
@@ -1512,7 +1555,9 @@
         "specs/S14.md",
         "contracts/C08.md",
         "contracts/C06.md",
-        "tests/T14.md"
+        "tests/T14.md",
+        "tasks/L14/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Core/Geology/Stratigraphy/",
@@ -1549,7 +1594,9 @@
         "specs/S14.md",
         "contracts/C08.md",
         "contracts/C06.md",
-        "tests/T14.md"
+        "tests/T14.md",
+        "tasks/L14/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/Materialization/Strata/",
@@ -1621,7 +1668,9 @@
         "specs/S15.md",
         "contracts/C09.md",
         "contracts/C06.md",
-        "tests/T15.md"
+        "tests/T15.md",
+        "tasks/L15/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Core/Soils/",
@@ -1655,7 +1704,9 @@
         "specs/S15.md",
         "contracts/C09.md",
         "contracts/C06.md",
-        "tests/T15.md"
+        "tests/T15.md",
+        "tasks/L15/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/Materialization/Soils/",
@@ -1687,7 +1738,9 @@
         "specs/S15.md",
         "contracts/C09.md",
         "contracts/C06.md",
-        "tests/T15.md"
+        "tests/T15.md",
+        "tasks/L15/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "testsrc/WorldGen.Tests/SoilIntegration/",
@@ -1871,7 +1924,10 @@
         "contracts/C11.md",
         "contracts/C09.md",
         "contracts/C06.md",
-        "tests/T17.md"
+        "tests/T17.md",
+        "tasks/L17/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L17.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Core/Ecology/Habitats/",
@@ -1880,13 +1936,15 @@
       ],
       "requirements": [
         "R17-01",
-        "R17-02"
+        "R17-02",
+        "R-AQ-01"
       ],
       "tests": [
         "T17-01",
-        "T17-02"
+        "T17-02",
+        "T-AQ-01"
       ],
-      "context_max_bytes": 49152
+      "context_max_bytes": 65536
     },
     {
       "id": "L17-B",
@@ -1906,7 +1964,10 @@
         "contracts/C11.md",
         "contracts/C09.md",
         "contracts/C06.md",
-        "tests/T17.md"
+        "tests/T17.md",
+        "tasks/L17/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L17.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Core/Ecology/Placement/",
@@ -1915,13 +1976,17 @@
       ],
       "requirements": [
         "R17-03",
-        "R17-04"
+        "R17-04",
+        "R-AQ-04",
+        "R-AQ-05"
       ],
       "tests": [
         "T17-03",
-        "T17-04"
+        "T17-04",
+        "T-AQ-04",
+        "T-AQ-05"
       ],
-      "context_max_bytes": 49152
+      "context_max_bytes": 65536
     },
     {
       "id": "L17-C",
@@ -1931,7 +1996,8 @@
       "depends_on": [
         "L17-B",
         "L15-B",
-        "L11-A"
+        "L11-A",
+        "L07-C"
       ],
       "required_read": [
         "AGENTS.md",
@@ -1941,7 +2007,10 @@
         "contracts/C11.md",
         "contracts/C09.md",
         "contracts/C06.md",
-        "tests/T17.md"
+        "tests/T17.md",
+        "tasks/L17/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L17.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/Materialization/Vegetation/",
@@ -1950,13 +2019,19 @@
       ],
       "requirements": [
         "R17-07",
-        "R17-10"
+        "R17-10",
+        "R-AQ-06",
+        "R-AQ-07",
+        "R-AQ-08"
       ],
       "tests": [
         "T17-07",
-        "T17-10"
+        "T17-10",
+        "T-AQ-06",
+        "T-AQ-07",
+        "T-AQ-08"
       ],
-      "context_max_bytes": 49152
+      "context_max_bytes": 65536
     },
     {
       "id": "L17-D",
@@ -1976,7 +2051,10 @@
         "contracts/C11.md",
         "contracts/C09.md",
         "contracts/C06.md",
-        "tests/T17.md"
+        "tests/T17.md",
+        "tasks/L17/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L17.md"
       ],
       "allowed_write_paths": [
         "testsrc/WorldGen.Tests/VegetationIntegration/",
@@ -1987,15 +2065,17 @@
         "R17-06",
         "R17-08",
         "R17-09",
-        "R17-05"
+        "R17-05",
+        "R-AQ-09"
       ],
       "tests": [
         "T17-06",
         "T17-08",
         "T17-09",
-        "T17-05"
+        "T17-05",
+        "T-AQ-09"
       ],
-      "context_max_bytes": 49152
+      "context_max_bytes": 65536
     },
     {
       "id": "L18-B",
@@ -2049,7 +2129,9 @@
         "contracts/C12.md",
         "contracts/C02.md",
         "contracts/C06.md",
-        "tests/T18.md"
+        "tests/T18.md",
+        "tasks/L18/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.VintageStory/Runtime/WaterIce/",
@@ -2064,7 +2146,7 @@
         "T18-06",
         "T18-07"
       ],
-      "context_max_bytes": 49152
+      "context_max_bytes": 65536
     },
     {
       "id": "L18-D",
@@ -2085,7 +2167,10 @@
         "contracts/C12.md",
         "contracts/C02.md",
         "contracts/C06.md",
-        "tests/T18.md"
+        "tests/T18.md",
+        "tasks/L18/COMPLEMENT-AQUATIQUE-r15.md",
+        "specs/S-AQ.md",
+        "tests/aquatic/T-AQ-L18.md"
       ],
       "allowed_write_paths": [
         "testsrc/WorldGen.Tests/CryosphereIntegration/",
@@ -2095,14 +2180,16 @@
       "requirements": [
         "R18-08",
         "R18-09",
-        "R18-10"
+        "R18-10",
+        "R-AQ-12"
       ],
       "tests": [
         "T18-08",
         "T18-09",
-        "T18-10"
+        "T18-10",
+        "T-AQ-12"
       ],
-      "context_max_bytes": 49152
+      "context_max_bytes": 65536
     },
     {
       "id": "L20-A",
@@ -2311,7 +2398,8 @@
         "tasks/L19/L19-A.md",
         "specs/S19.md",
         "tests/T19.md",
-        "tests/L19/T19-A.md"
+        "tests/L19/T19-A.md",
+        "tasks/L19/COMPLEMENT-AQUATIQUE-r15.md"
       ],
       "allowed_write_paths": [
         "docs/future-fauna/inventaire.md",
@@ -2346,7 +2434,10 @@
         "specs/S19.md",
         "tests/T19.md",
         "tests/L19/T19-B.md",
-        "contracts/C13.md"
+        "contracts/C13.md",
+        "tasks/L19/COMPLEMENT-AQUATIQUE-r15.md",
+        "contracts/C13-AQ.md",
+        "tests/aquatic/T-AQ-L19-Contrat.md"
       ],
       "allowed_write_paths": [
         "docs/future-fauna/dictionnaire.md",
@@ -2358,14 +2449,16 @@
       "requirements": [
         "R19-04",
         "R19-05",
-        "R19-06"
+        "R19-06",
+        "R-AQ-13"
       ],
       "tests": [
         "T19-04",
         "T19-05",
-        "T19-06"
+        "T19-06",
+        "T-AQ-13"
       ],
-      "context_max_bytes": 65536,
+      "context_max_bytes": 81920,
       "release_scope": "V1",
       "requires_gates": []
     },
@@ -2387,7 +2480,9 @@
         "specs/S19.md",
         "tests/T19.md",
         "tests/L19/T19-C.md",
-        "contracts/C13.md"
+        "contracts/C13.md",
+        "tasks/L19/COMPLEMENT-AQUATIQUE-r15.md",
+        "contracts/C13-AQ.md"
       ],
       "allowed_write_paths": [
         "docs/future-fauna/",
@@ -2423,7 +2518,10 @@
         "tests/T19.md",
         "tests/L19/T19-D.md",
         "contracts/C13.md",
-        "contracts/C05.md"
+        "contracts/C05.md",
+        "tasks/L19/COMPLEMENT-AQUATIQUE-r15.md",
+        "contracts/C13-AQ.md",
+        "tests/aquatic/T-AQ-L19-Collecte.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.Core/Environment/Projection/",
@@ -2438,16 +2536,20 @@
         "R19-10",
         "R19-11",
         "R19-12",
-        "R19-13"
+        "R19-13",
+        "R-AQ-16",
+        "R-AQ-17"
       ],
       "tests": [
         "T19-09",
         "T19-10",
         "T19-11",
         "T19-12",
-        "T19-13"
+        "T19-13",
+        "T-AQ-16",
+        "T-AQ-17"
       ],
-      "context_max_bytes": 65536,
+      "context_max_bytes": 81920,
       "release_scope": "V1",
       "requires_gates": []
     },
@@ -2468,7 +2570,10 @@
         "tests/T19.md",
         "tests/L19/T19-E.md",
         "contracts/C13.md",
-        "contracts/C05.md"
+        "contracts/C05.md",
+        "tasks/L19/COMPLEMENT-AQUATIQUE-r15.md",
+        "contracts/C13-AQ.md",
+        "tests/aquatic/T-AQ-L19-Requetes.md"
       ],
       "allowed_write_paths": [
         "src/WorldGen.EnvironmentApi/",
@@ -2485,7 +2590,11 @@
         "R19-16",
         "R19-17",
         "R19-18",
-        "R19-19"
+        "R19-19",
+        "R-AQ-14",
+        "R-AQ-15",
+        "R-AQ-19",
+        "R-AQ-22"
       ],
       "tests": [
         "T19-14",
@@ -2493,9 +2602,13 @@
         "T19-16",
         "T19-17",
         "T19-18",
-        "T19-19"
+        "T19-19",
+        "T-AQ-14",
+        "T-AQ-15",
+        "T-AQ-19",
+        "T-AQ-22"
       ],
-      "context_max_bytes": 65536,
+      "context_max_bytes": 81920,
       "release_scope": "V1",
       "requires_gates": []
     },
@@ -2517,7 +2630,10 @@
         "specs/S19.md",
         "tests/T19.md",
         "tests/L19/T19-F.md",
-        "contracts/C13.md"
+        "contracts/C13.md",
+        "tasks/L19/COMPLEMENT-AQUATIQUE-r15.md",
+        "contracts/C13-AQ.md",
+        "tests/aquatic/T-AQ-L19-Qualification.md"
       ],
       "allowed_write_paths": [
         "testsrc/WorldGen.EnvironmentConsumerProbe/",
@@ -2530,16 +2646,24 @@
         "R19-21",
         "R19-22",
         "R19-23",
-        "R19-24"
+        "R19-24",
+        "R-AQ-18",
+        "R-AQ-20",
+        "R-AQ-21",
+        "R-AQ-23"
       ],
       "tests": [
         "T19-20",
         "T19-21",
         "T19-22",
         "T19-23",
-        "T19-24"
+        "T19-24",
+        "T-AQ-18",
+        "T-AQ-20",
+        "T-AQ-21",
+        "T-AQ-23"
       ],
-      "context_max_bytes": 65536,
+      "context_max_bytes": 81920,
       "release_scope": "V1",
       "requires_gates": []
     }
