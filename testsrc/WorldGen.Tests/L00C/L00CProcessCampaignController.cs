@@ -23,7 +23,8 @@ internal sealed class L00CProcessCampaignController
 {
     private static readonly object Gate = new();
     private static L00CProcessCampaignController? active;
-    private static L00CManagerBootstrapLease? bootstrapLease;
+    private static L00CManagerLeaseLifecycle? bootstrapLease;
+    private static string? bootstrapRoot;
     private readonly object screenManager;
     private readonly string root;
     private readonly string evidence;
@@ -48,71 +49,19 @@ internal sealed class L00CProcessCampaignController
         lock (Gate)
         {
             if (active is not null) { RequireSameRoot(active.root, root); active.SignalSessionReady(); return null; }
-            if (bootstrapLease is not null) { RequireSameRoot(bootstrapLease.Root, root); return null; }
-            L00CManagerResolution resolution;
-            try { resolution = L00CMenuActionDriver.ResolveScreenManagerFromClientApi(api); }
-            catch (Exception exception) { WriteLeaseReceipt(root, "resolver-fault", exception.GetType().Name); return null; }
-            if (resolution.Status == L00CManagerResolutionStatus.Ready) { TryInstallResolvedLocked(root, resolution.ScreenManager!, "immediate"); return null; }
-            if (resolution.Status == L00CManagerResolutionStatus.ApiTypeMismatch) { WriteLeaseReceipt(root, "api-type-mismatch", resolution.Status.ToString()); return null; }
-            L00CManagerBootstrapLease lease = new(api, root);
-            bootstrapLease = lease;
-            L00CManagerLeaseToken token = new(() => CancelLease(lease));
-            lease.SetToken(token);
-            try { lease.Start(); WriteLeaseReceipt(root, "waiting", resolution.Status.ToString()); }
-            catch (Exception exception)
-            {
-                lease.Stop(); bootstrapLease = null; token.Complete();
-                WriteLeaseReceipt(root, "listener-register-fault", exception.GetType().Name);
-            }
+            if (bootstrapLease is not null) { RequireSameRoot(bootstrapRoot!, root); return null; } // one retry listener/pump per process
+            var seams = new VintageManagerLeaseSeams(api, root);
+            var engine = new L00CManagerLeaseLifecycle(seams);
+            bootstrapLease = engine; bootstrapRoot = root;
+            L00CManagerLeaseToken token = new(engine.Dispose);
+            seams.Set(engine, token);
+            engine.Start();
             return bootstrapLease is null ? null : token;
         }
     }
 
     // Invoked at the ModSystem disposal boundary. This cannot hand off a campaign;
     // it only makes a pending session listener terminal and clears all references.
-    private static void CancelLease(L00CManagerBootstrapLease? lease)
-    {
-        lock (Gate)
-        {
-            if (lease is null || !ReferenceEquals(bootstrapLease, lease)) return;
-            string root = lease.Root;
-            bool unregistered = lease.Stop(); bootstrapLease = null;
-            WriteLeaseReceipt(root, unregistered ? "disposed" : "dispose-unregister-fault", "session-dispose");
-        }
-    }
-
-    private static void ResolveLeaseTick(L00CManagerBootstrapLease lease)
-    {
-        lock (Gate)
-        {
-            if (!ReferenceEquals(bootstrapLease, lease) || lease.IsTerminal) return; // late callback
-            if (!lease.TryCountAttempt(out bool expired)) return;
-            if (expired) { TerminalizeLeaseLocked(lease, "timeout", "attempt-or-deadline"); return; }
-            L00CManagerResolution resolution;
-            try { resolution = L00CMenuActionDriver.ResolveScreenManagerFromClientApi(lease.Api!); }
-            catch (Exception exception) { TerminalizeLeaseLocked(lease, "resolver-fault", exception.GetType().Name); return; }
-            if (resolution.Status == L00CManagerResolutionStatus.Ready)
-            {
-                string root = lease.Root;
-                // Atomic handoff rule: unregistration and all API/delegate clearing
-                // complete before the controller is created. Failure means no campaign.
-                if (!lease.Stop()) { bootstrapLease = null; WriteLeaseReceipt(root, "handoff-unregister-fault", "no-controller-installed"); return; }
-                bootstrapLease = null;
-                if (TryInstallResolvedLocked(root, resolution.ScreenManager!, "callback"))
-                    WriteLeaseReceipt(root, "ready", "listener-unregistered-before-controller");
-                return;
-            }
-            if (resolution.Status == L00CManagerResolutionStatus.ApiTypeMismatch)
-                TerminalizeLeaseLocked(lease, "api-type-mismatch", resolution.Status.ToString());
-        }
-    }
-
-    private static void TerminalizeLeaseLocked(L00CManagerBootstrapLease lease, string status, string detail)
-    {
-        string root = lease.Root;
-        bool unregistered = lease.Stop(); bootstrapLease = null;
-        WriteLeaseReceipt(root, unregistered ? status : status + "-unregister-fault", detail);
-    }
 
     private static bool TryInstallResolvedLocked(string laboratoryRoot, object manager, string phase)
     {
@@ -191,44 +140,43 @@ internal sealed class L00CProcessCampaignController
         catch { /* evidence failure must not revive a refused campaign */ }
     }
 
-    private sealed class L00CManagerBootstrapLease : IDisposable
+    // Production adapter: this is the sole pre-handoff owner of the client API.
+    private sealed class VintageManagerLeaseSeams : IL00CManagerLeaseSeams
     {
-        private const int MaximumAttempts = 600; // 30 seconds at 50 ms
-        private readonly DateTimeOffset deadlineUtc = DateTimeOffset.UtcNow.AddSeconds(30);
         private ICoreClientAPI? api;
-        private Action<float>? tick;
+        private readonly string root;
+        private L00CManagerLeaseLifecycle? engine;
         private L00CManagerLeaseToken? token;
-        private long listenerId;
-        private int attempts;
-        private bool terminal;
-
-        internal L00CManagerBootstrapLease(ICoreClientAPI clientApi, string laboratoryRoot) { api = clientApi; Root = laboratoryRoot; }
-        internal string Root { get; }
-        internal ICoreClientAPI? Api => api;
-        internal bool IsTerminal => terminal;
-        internal bool Owns(ICoreClientAPI candidate) => ReferenceEquals(api, candidate);
-        internal void SetToken(L00CManagerLeaseToken value) { token = value; }
-        internal void Start()
+        internal VintageManagerLeaseSeams(ICoreClientAPI clientApi, string laboratoryRoot) { api = clientApi; root = laboratoryRoot; }
+        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+        internal void Set(L00CManagerLeaseLifecycle value, L00CManagerLeaseToken leaseToken) { engine = value; token = leaseToken; }
+        public L00CManagerResolutionStatus Resolve(out object? manager)
         {
-            if (terminal || api is null) throw new InvalidOperationException("L00-C bootstrap lease is already terminal.");
-            tick = OnTick; listenerId = api.Event.RegisterGameTickListener(tick, 50);
+            if (api is null) { manager = null; return L00CManagerResolutionStatus.ApiTypeMismatch; }
+            L00CManagerResolution result = L00CMenuActionDriver.ResolveScreenManagerFromClientApi(api);
+            manager = result.ScreenManager; return result.Status;
         }
-        private void OnTick(float _) => ResolveLeaseTick(this);
-        internal bool TryCountAttempt(out bool expired)
+        public long Register(Action callback)
         {
-            if (terminal) { expired = true; return false; }
-            attempts++; expired = attempts > MaximumAttempts || DateTimeOffset.UtcNow >= deadlineUtc; return true;
+            ICoreClientAPI retained = api ?? throw new InvalidOperationException("L00-C API lease is terminal.");
+            return retained.Event.RegisterGameTickListener(_ => callback(), 50);
         }
-        // References are cleared in finally even if Vintage throws while unregistering.
-        internal bool Stop()
+        public void Unregister(long listenerId)
         {
-            if (terminal) return true;
-            terminal = true; ICoreClientAPI? retainedApi = api; long retainedId = listenerId;
-            try { if (retainedApi is not null && retainedId != 0) retainedApi.Event.UnregisterGameTickListener(retainedId); return true; }
-            catch { return false; }
-            finally { listenerId = 0; tick = null; api = null; token?.Complete(); token = null; }
+            ICoreClientAPI retained = api ?? throw new InvalidOperationException("L00-C API lease is terminal.");
+            retained.Event.UnregisterGameTickListener(listenerId);
         }
-        void IDisposable.Dispose() { _ = Stop(); }
+        public void Install(object manager)
+        {
+            lock (Gate) { if (!TryInstallResolvedLocked(root, manager, "lease")) throw new InvalidOperationException("L00-C controller install refused."); }
+        }
+        public void Receipt(string status, string detail) => WriteLeaseReceipt(root, status, detail);
+        public void Release()
+        {
+            api = null; token?.Complete(); token = null;
+            lock (Gate) { if (ReferenceEquals(bootstrapLease, engine)) { bootstrapLease = null; bootstrapRoot = null; } }
+            engine = null;
+        }
     }
 
     private static void RequireDebugLaboratory()

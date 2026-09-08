@@ -23,21 +23,18 @@ function Assert-Before([string]$Value, [string]$First, [string]$Second, [string]
 # Deterministic white-box regression oracle: these assertions establish the
 # lifetime/state contract without requiring a game process or authentication.
 Assert-Contains $text 'private static L00CProcessCampaignController? active;' 'Singleton'
-Assert-Contains $text 'private static L00CManagerBootstrapLease? bootstrapLease;' 'Bootstrap lease singleton'
+Assert-Contains $text 'private static L00CManagerLeaseLifecycle? bootstrapLease;' 'Shared bootstrap lease engine singleton'
 Assert-Contains $text 'if (active is not null)' 'Singleton rejection/signal branch'
 Assert-Contains $text 'active.SignalSessionReady();' 'Subsequent session signal'
-Assert-Contains $text 'TryInstallResolvedLocked(root, resolution.ScreenManager!, "immediate")' 'Immediate ready handoff'
-Assert-Contains $text 'api.Event.RegisterGameTickListener(tick, 50)' '50ms session retry listener'
-Assert-Contains $text 'private const int MaximumAttempts = 600;' 'Bounded 30 second attempt budget'
-Assert-Contains $text 'DateTimeOffset.UtcNow.AddSeconds(30)' 'Bounded deadline'
+Assert-Contains $text 'var engine = new L00CManagerLeaseLifecycle(seams);' 'Shared engine immediate handoff'
+Assert-Contains $text 'RegisterGameTickListener(_ => callback(), 50)' '50ms session retry listener adapter'
 Assert-Contains $driverText 'GameUnavailable' 'Explicit unavailable resolution status'
 Assert-Contains $driverText 'RunningScreenUnavailable' 'Explicit running-screen status'
 Assert-Contains $driverText 'ManagerUnavailable' 'Explicit manager status'
 Assert-Contains $driverText 'ApiTypeMismatch' 'Explicit API mismatch terminal status'
-Assert-Contains $text 'if (!lease.Stop())' 'No handoff after unregister failure'
-Assert-Contains $text 'finally { listenerId = 0; tick = null; api = null; token?.Complete(); token = null; }' 'Unregister cleanup clears API, delegate, and token'
-Assert-Contains $text 'if (!ReferenceEquals(bootstrapLease, lease) || lease.IsTerminal) return;' 'Late callback rejection'
-Assert-Contains $text 'private static void CancelLease(L00CManagerBootstrapLease? lease)' 'Token-based session disposal cleanup'
+Assert-Contains $text 'public void Release()' 'Adapter clears API after engine terminal state'
+Assert-Contains $text 'api = null; token?.Complete(); token = null;' 'Adapter release clears API and token'
+Assert-Contains $text 'L00CManagerLeaseToken token = new(engine.Dispose);' 'Token-based session disposal cleanup'
 Assert-Contains $text 'schema=l00c-manager-availability-v1' 'Availability receipt schema'
 Assert-Contains $text 'L00CMenuActionDriver.EnqueueMainThreadTask(Pump);' 'Main-thread pump'
 Assert-Contains $driverText '"2D0E0FEC4E3D47E083F2BEF081D24672E8CC03051C47BDBDAEC8CFB37FA7E977"' 'Enqueue IL lock'
@@ -47,7 +44,7 @@ Assert-Contains $text 'host.TryAdvance(screenManager)' 'Campaign survives ModSys
 Assert-Contains $text 'UnregisterAndClearSingleton();' 'Terminal cleanup'
 Assert-Contains $text 'terminal = true;' 'Terminal state'
 Assert-Contains $text 'active = null;' 'Singleton release'
-if ($text -match 'ICoreClientAPI\s+[A-Za-z_][A-Za-z0-9_]*\s*;|ClientMain\s+[A-Za-z_][A-Za-z0-9_]*\s*;') { throw 'Controller retains a forbidden session API.' }
+if ($text -notmatch 'private ICoreClientAPI\? api;' -or $text -notmatch 'api = null; token\?\.Complete\(\); token = null;') { throw 'The sole adapter API reference is not explicitly severed.' }
 
 Assert-Before $hostText 'ExpectPrimaryMenu' 'ExpectSecondaryMenu' 'Primary cycles before secondary campaign phase'
 Assert-Contains $hostText 'state != State.SecondaryMenuOpen || primaryCycles != RequiredPrimaryCycles' 'Five primary cycles gate secondary open'
