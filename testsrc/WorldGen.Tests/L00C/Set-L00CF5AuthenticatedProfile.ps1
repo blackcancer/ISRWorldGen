@@ -26,6 +26,29 @@ function Get-Sha256([byte[]]$Bytes) {
     try { return ([BitConverter]::ToString($algorithm.ComputeHash($Bytes))).Replace('-', '') }
     finally { $algorithm.Dispose() }
 }
+function Get-BootstrapSaveAttestation([string]$ExpectedPath) {
+    # The lab never manufactures this file.  It attests the save created by
+    # the already-authenticated client before the temporary F5 profile is used.
+    if (-not (Test-Path -LiteralPath $ExpectedPath -PathType Leaf)) { throw "Required L00-C bootstrap save is absent: $ExpectedPath" }
+    $canonical = Get-CanonicalPath $ExpectedPath
+    if (-not [string]::Equals($canonical, $ExpectedPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'Bootstrap save did not resolve to its exact canonical L00-C save path.' }
+    $stream = [IO.File]::Open($canonical, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $bytes = New-Object byte[] $stream.Length
+        $offset = 0
+        while ($offset -lt $bytes.Length) { $read = $stream.Read($bytes, $offset, $bytes.Length - $offset); if ($read -le 0) { throw 'Bootstrap save ended while it was being attested.' }; $offset += $read }
+        $info = Get-Item -LiteralPath $canonical -Force
+        return [ordered]@{ Path = $canonical; Size = [Int64]$bytes.Length; LastWriteTimeUtc = $info.LastWriteTimeUtc.ToString('o'); Sha256 = Get-Sha256 $bytes }
+    }
+    finally { $stream.Dispose() }
+}
+function Assert-BootstrapSaveAttestation([object]$Expected) {
+    if ($null -eq $Expected) { throw 'Bootstrap save attestation is missing.' }
+    $actual = Get-BootstrapSaveAttestation ([string]$Expected.Path)
+    foreach ($property in @('Path', 'Size', 'LastWriteTimeUtc', 'Sha256')) {
+        if ([string]$actual[$property] -cne [string]$Expected.$property) { throw "Refusing prepare: bootstrap save drifted at $property." }
+    }
+}
 function Write-NewBytes([string]$Path, [byte[]]$Bytes) {
     $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
     try { $stream.Write($Bytes, 0, $Bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
@@ -81,6 +104,9 @@ $launchSettings = Get-CanonicalPath (Join-Path $repository 'src\WorldGen.Vintage
 $projectUserSettings = Get-CanonicalPath (Join-Path $repository 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj.user')
 $laboratory = Get-CanonicalPath (Join-Path $repository '.local\L00C')
 $mountHelper = Join-Path $PSScriptRoot 'Set-L00CTestModMount.ps1'
+$bootstrapSaveName = 'ISRWorldGen-L00C-Client.vcdbs'
+if ($SyntheticFixtureRoot) { $bootstrapSave = [IO.Path]::GetFullPath((Join-Path $repository ('AppData\VintagestoryData\Saves\' + $bootstrapSaveName))) }
+else { $bootstrapSave = [IO.Path]::GetFullPath((Join-Path $env:APPDATA ('VintagestoryData\Saves\' + $bootstrapSaveName))) }
 $effectiveAction = if ($Action -eq 'Restore') { 'RestoreSettings' } else { $Action }
 $launchSettingsLock = $null; $projectUserSettingsLock = $null
 try {
@@ -162,6 +188,7 @@ if ($effectiveAction -eq 'RestoreSettings') {
 
 foreach ($required in @($laboratory, (Join-Path $laboratory '.isrworldgen-lab'))) { if (-not (Test-Path -LiteralPath $required)) { throw "Required L00-C laboratory root input is missing: $required" } }
 $modsProfileArgument = '--addModPath "$(ProjectDir)bin\$(Configuration)\Mods"'
+$bootstrapWorldArgument = '--openWorld "ISRWorldGen-L00C-Client"'
 
 $original = Read-LockedBytes $launchSettingsLock
 $originalUserSettings = Read-LockedBytes $projectUserSettingsLock
@@ -170,12 +197,17 @@ $profiles = @($document.profiles.PSObject.Properties)
 if ($profiles.Count -lt 1) { throw 'launchSettings.json contains no profile.' }
 $first = $profiles[0]
 $addModPathCount = [regex]::Matches([string]$first.Value.commandLineArgs, '(?i)(?:^|\s)--addModPath(?:\s|=)').Count
-if ($first.Name -ne 'ISRWorldGen Client (authenticated user data)' -or $first.Value.commandName -ne 'Executable' -or [IO.Path]::GetFileName([string]$first.Value.executablePath) -ne 'Vintagestory.exe' -or $addModPathCount -ne 1 -or [string]$first.Value.commandLineArgs -notmatch [regex]::Escape($modsProfileArgument) -or [string]$first.Value.commandLineArgs -match '(?i)--dataPath(?:\s|=|$)' -or (Test-SensitiveProfile $first.Value)) { throw 'First F5 profile is not the conforming authenticated client profile with exactly its existing production Mods path, or it requests credential material.' }
+$openWorldCount = [regex]::Matches([string]$first.Value.commandLineArgs, '(?i)(?:^|\s)--openWorld(?:\s|=|$)').Count
+if ($first.Name -ne 'ISRWorldGen Client (authenticated user data)' -or $first.Value.commandName -ne 'Executable' -or [IO.Path]::GetFileName([string]$first.Value.executablePath) -ne 'Vintagestory.exe' -or $addModPathCount -ne 1 -or $openWorldCount -ne 0 -or [string]$first.Value.commandLineArgs -notmatch [regex]::Escape($modsProfileArgument) -or [string]$first.Value.commandLineArgs -match '(?i)--dataPath(?:\s|=|$)' -or (Test-SensitiveProfile $first.Value)) { throw 'First F5 profile is not the conforming authenticated client profile with exactly its existing production Mods path and no pre-existing openWorld, or it requests credential material.' }
+$bootstrapAttestation = Get-BootstrapSaveAttestation $bootstrapSave
 $modifiedUserSettings = Get-PreparedUserSettingsBytes $originalUserSettings $first.Name
 $mountReceipt = & $mountHelper -Action Prepare -SyntheticFixtureRoot $SyntheticFixtureRoot | ConvertFrom-Json
 $modifiedHash = $null; $modifiedUserSettingsHash = $null
 try {
     $profile = $first.Value
+    # Preserve every pre-existing argument and append the one lab target only
+    # to the verified first profile.
+    $profile.commandLineArgs = ([string]$profile.commandLineArgs) + ' ' + $bootstrapWorldArgument
     if ($null -eq $profile.PSObject.Properties['environmentVariables']) { $profile | Add-Member -NotePropertyName environmentVariables -NotePropertyValue ([pscustomobject]@{}) }
     $profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB -NotePropertyValue '1' -Force
     $profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB_ROOT -NotePropertyValue $laboratory -Force
@@ -183,9 +215,10 @@ try {
     $backupParent = Join-Path $laboratory 'f5-profile-backups'; [void](New-Item -ItemType Directory -Path $backupParent -Force)
     $backup = Join-Path $backupParent ('f5-' + [Guid]::NewGuid().ToString('N')); [void](New-Item -ItemType Directory -Path $backup -ErrorAction Stop)
     $owner = (Get-Acl -LiteralPath $backup).Owner; Write-NewBytes (Join-Path $backup 'launchSettings.original.json') $original; Write-NewBytes (Join-Path $backup 'WorldGen.VintageStory.csproj.user.original') $originalUserSettings
-    $metadata = [ordered]@{ Owner = $owner; LaunchSettingsPath = $launchSettings; ProjectUserSettingsPath = $projectUserSettings; FirstProfile = $first.Name; OriginalSha256 = $originalHash; ModifiedSha256 = $modifiedHash; ProjectUserSettingsOriginalSha256 = (Get-Sha256 $originalUserSettings); ProjectUserSettingsModifiedSha256 = $modifiedUserSettingsHash; MountBackupDirectory = $mountReceipt.BackupDirectory; MountedPackage = $mountReceipt.MountedPackage; Phase = 'PREPARED'; PreparedUtc = [DateTimeOffset]::UtcNow.ToString('o') }
+    $metadata = [ordered]@{ Owner = $owner; LaunchSettingsPath = $launchSettings; ProjectUserSettingsPath = $projectUserSettings; FirstProfile = $first.Name; BootstrapSave = $bootstrapAttestation; OriginalSha256 = $originalHash; ModifiedSha256 = $modifiedHash; ProjectUserSettingsOriginalSha256 = (Get-Sha256 $originalUserSettings); ProjectUserSettingsModifiedSha256 = $modifiedUserSettingsHash; MountBackupDirectory = $mountReceipt.BackupDirectory; MountedPackage = $mountReceipt.MountedPackage; Phase = 'PREPARED'; PreparedUtc = [DateTimeOffset]::UtcNow.ToString('o') }
     Write-NewBytes (Join-Path $backup 'metadata.json') ([Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Depth 4)))
     Invoke-TransactionTestHook 'PrepareBeforeLaunchSettingsWrite'
+    Assert-BootstrapSaveAttestation $bootstrapAttestation
     Assert-CurrentSha256 $launchSettingsLock $originalHash 'prepare launchSettings.json'
     Assert-CurrentSha256 $projectUserSettingsLock (Get-Sha256 $originalUserSettings) 'prepare WorldGen.VintageStory.csproj.user'
     Write-LockedBytes $launchSettingsLock $modified $original 'PrepareAfterLaunchSettingsTruncate'
