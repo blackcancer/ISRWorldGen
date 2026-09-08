@@ -7,10 +7,10 @@ function Assert-Refused([scriptblock]$Operation, [string]$Label) { try { & $Oper
 function Bytes([string]$Path) { [IO.File]::ReadAllBytes($Path) }
 function Equal([byte[]]$A, [byte[]]$B) { if ($A.Length -ne $B.Length) { return $false }; for ($i=0; $i -lt $A.Length; $i++) { if ($A[$i] -ne $B[$i]) { return $false } }; return $true }
 function New-Fixture([string]$Name, [string]$Arguments = '--tracelog --addModPath "$(ProjectDir)bin\$(Configuration)\Mods" --addOrigin "$(ProjectDir)assets"') {
-    $r = Join-Path $root $Name; $properties = Join-Path $r 'src\WorldGen.VintageStory\Properties'; $lab = Join-Path $r '.local\L00C'; $saves = Join-Path $r 'AppData\VintagestoryData\Saves'; [void](New-Item -ItemType Directory -Path $properties,$lab,$saves -Force); Set-Content -LiteralPath (Join-Path $lab '.isrworldgen-lab') -Value fixture -NoNewline
+    $r = Join-Path $root $Name; $properties = Join-Path $r 'src\WorldGen.VintageStory\Properties'; $mods = Join-Path $r 'src\WorldGen.VintageStory\bin\Debug\Mods'; $lab = Join-Path $r '.local\L00C'; $saves = Join-Path $r 'AppData\VintagestoryData\Saves'; [void](New-Item -ItemType Directory -Path $properties,$mods,$lab,$saves -Force); Set-Content -LiteralPath (Join-Path $lab '.isrworldgen-lab') -Value fixture -NoNewline
     $json = ('{"profiles":{"ISRWorldGen Client (authenticated user data)":{"commandName":"Executable","executablePath":"C:\\Game\\Vintagestory.exe","commandLineArgs":"__ARGS__"},"Unchanged":{"commandName":"Executable","executablePath":"C:\\Game\\Vintagestory.exe","commandLineArgs":"--safe"}}}').Replace('__ARGS__',$Arguments.Replace('\','\\').Replace('"','\"')); $launch = Join-Path $properties 'launchSettings.json'; [IO.File]::WriteAllText($launch,$json,[Text.UTF8Encoding]::new($false))
     $user = Join-Path $r 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj.user'; [IO.File]::WriteAllText($user,'<Project><PropertyGroup><ActiveDebugProfile>Unchanged</ActiveDebugProfile><Other>retain</Other></PropertyGroup></Project>',[Text.UTF8Encoding]::new($false)); $save = Join-Path $saves 'ISRWorldGen-L00C-Client.vcdbs'; [IO.File]::WriteAllText($save,'attested')
-    [pscustomobject]@{ Root=$r; Launch=$launch; User=$user; Save=$save }
+    [pscustomobject]@{ Root=$r; Launch=$launch; User=$user; Save=$save; Mods=$mods }
 }
 try {
     $good = New-Fixture good; $before = Bytes $good.Launch; $beforeUser = Bytes $good.User; $receipt = & $helper -Action Prepare -SyntheticFixtureRoot $good.Root | ConvertFrom-Json; $profile = (Get-Content -LiteralPath $good.Launch -Raw | ConvertFrom-Json).profiles.'ISRWorldGen Client (authenticated user data)'; $user = [Xml.XmlDocument]::new(); $user.Load($good.User)
@@ -20,6 +20,15 @@ try {
     $missing = New-Fixture missing; Remove-Item -LiteralPath $missing.Save -Force; Assert-Refused { & $helper -Action Prepare -SyntheticFixtureRoot $missing.Root } 'missing bootstrap save'
     $tamper = New-Fixture tamper; $prepared = & $helper -Action Prepare -SyntheticFixtureRoot $tamper.Root | ConvertFrom-Json; Add-Content -LiteralPath $tamper.Launch -Value ' '; Assert-Refused { & $helper -Action Restore -SyntheticFixtureRoot $tamper.Root -BackupDirectory $prepared.BackupDirectory } 'post-prepare mutation'
     $secret = New-Fixture secret '--addModPath "$(ProjectDir)bin\$(Configuration)\Mods" --token never'; Assert-Refused { & $helper -Action Prepare -SyntheticFixtureRoot $secret.Root } 'sensitive profile'
+    $residue = New-Fixture retired-package-residue; [void](New-Item -ItemType Directory -Path (Join-Path $residue.Mods 'isrworldgenl00clab')); Assert-Refused { & $helper -Action Prepare -SyntheticFixtureRoot $residue.Root } 'retired sibling package residue'
+    if (-not (Test-Path -LiteralPath (Join-Path $residue.Mods 'isrworldgenl00clab') -PathType Container)) { throw 'Refusal must not delete an unproven retired package.' }
+    $rollback = New-Fixture restore-second-write-failure; $rollbackLaunch = Bytes $rollback.Launch; $rollbackUser = Bytes $rollback.User; $rollbackReceipt = & $helper -Action Prepare -SyntheticFixtureRoot $rollback.Root | ConvertFrom-Json
+    $secondWriteFailure = { param($point) if ($point -eq 'RestoreLaunchAfterTruncate') { throw 'synthetic second restore write failure' } }
+    Assert-Refused { & $helper -Action Restore -SyntheticFixtureRoot $rollback.Root -BackupDirectory $rollbackReceipt.BackupDirectory -TestHook $secondWriteFailure } 'restore second write failure'
+    $preparedLaunch = Bytes $rollback.Launch; $preparedUser = Bytes $rollback.User
+    if ((Equal $rollbackLaunch $preparedLaunch) -or (Equal $rollbackUser $preparedUser)) { throw 'Failed second restore write split the selected-profile transaction instead of restoring both prepared snapshots.' }
+    & $helper -Action Restore -SyntheticFixtureRoot $rollback.Root -BackupDirectory $rollbackReceipt.BackupDirectory | Out-Null
+    if (-not (Equal $rollbackLaunch (Bytes $rollback.Launch)) -or -not (Equal $rollbackUser (Bytes $rollback.User))) { throw 'Retry after second restore write failure did not restore both original snapshots.' }
     [ordered]@{ TestId='L00-C-F5-AUTHENTICATED-PROFILE'; Status='PASS'; Scope='Synthetic profile transaction only; no real profile, login, token, or client process was used.' } | ConvertTo-Json -Compress
 }
 finally { if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force } }
