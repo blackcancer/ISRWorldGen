@@ -584,11 +584,18 @@
       "blocker": null
     },
     "L16-A": {
-      "status": "IN_PROGRESS",
-      "owner": "agent:l16-a",
+      "status": "DONE",
+      "owner": "integrator:l16-a",
       "branch": "agent/l16-a",
       "base_commit": "1c36867",
-      "evidence": [],
+      "evidence": [
+        "worklogs/L16-A.md",
+        "commit:9d6f68f",
+        "commit:f6e4aff4ad2bd7159b963208d471cc34700294b6",
+        "review:independent PASS after analytical-intensity and provenance-rejection corrections",
+        "local:.local/L16A-integrated/tests/debug/L16A-integrated-debug.trx (3/3 PASS)",
+        "local:.local/L16A-integrated/tests/release/L16A-integrated-release.trx (3/3 PASS)"
+      ],
       "blocker": null
     },
     "L16-B": {
