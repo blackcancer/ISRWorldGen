@@ -16,15 +16,21 @@ public sealed class LatitudeAxis
                 "Latitude axis components and model-length-per-degree must be finite; the scale must be positive.");
         }
 
-        double magnitude = Math.Sqrt((axisX * axisX) + (axisZ * axisZ));
-        if (!double.IsFinite(magnitude) || magnitude == 0d)
+        // Scale before squaring so finite subnormal and very large inputs do not
+        // underflow to zero or overflow during normalization.
+        double scale = Math.Max(Math.Abs(axisX), Math.Abs(axisZ));
+        if (scale == 0d)
         {
             throw new ArgumentOutOfRangeException(nameof(axisX), "Latitude axis must have non-zero finite length.");
         }
 
+        double scaledX = axisX / scale;
+        double scaledZ = axisZ / scale;
+        double normalizedMagnitude = Math.Sqrt((scaledX * scaledX) + (scaledZ * scaledZ));
+
         EquatorOrigin = equatorOrigin;
-        AxisX = axisX / magnitude;
-        AxisZ = axisZ / magnitude;
+        AxisX = scaledX / normalizedMagnitude;
+        AxisZ = scaledZ / normalizedMagnitude;
         ModelLengthPerDegree = modelLengthPerDegree;
     }
 
@@ -94,6 +100,17 @@ public readonly record struct TemperatureSample(
     double SurfaceCelsius,
     double AltitudeCorrectionCelsius);
 
+/// <summary>
+/// Immutable, self-describing Core result for future precipitation, water-budget, and native-map consumers.
+/// It carries the exact coordinate and frozen model parameters that produced the temperatures.
+/// </summary>
+public readonly record struct TemperatureEvaluation(
+    int AlgorithmVersion,
+    LatitudeAxis LatitudeAxis,
+    TemperatureSettings Settings,
+    TemperatureInput Input,
+    TemperatureSample Sample);
+
 public enum NativeAltitudeCorrection
 {
     EngineAppliesAltitude = 0,
@@ -104,7 +121,13 @@ public readonly record struct NativeTemperatureExport(double Celsius, NativeAlti
 
 public static class TemperatureField
 {
+    /// <summary>Increment only through an explicit integration/migration decision.</summary>
+    public const int AlgorithmVersion = 1;
+
     public static TemperatureSample Calculate(LatitudeAxis latitudeAxis, TemperatureSettings settings, TemperatureInput input)
+        => Evaluate(latitudeAxis, settings, input).Sample;
+
+    public static TemperatureEvaluation Evaluate(LatitudeAxis latitudeAxis, TemperatureSettings settings, TemperatureInput input)
     {
         ArgumentNullException.ThrowIfNull(latitudeAxis);
         ArgumentNullException.ThrowIfNull(settings);
@@ -126,19 +149,28 @@ public static class TemperatureField
             throw new OverflowException("Temperature calculation exceeded the finite Celsius model domain.");
         }
 
-        return new TemperatureSample(latitude, reference, surface, altitudeCorrection);
+        var sample = new TemperatureSample(latitude, reference, surface, altitudeCorrection);
+        return new TemperatureEvaluation(AlgorithmVersion, latitudeAxis, settings, input, sample);
     }
 
     public static NativeTemperatureExport ExportToNative(TemperatureSample sample, NativeAltitudeCorrection correction)
     {
-        if (!double.IsFinite(sample.ReferenceCelsius) || !double.IsFinite(sample.SurfaceCelsius))
+        if (!double.IsFinite(sample.ReferenceCelsius) || !double.IsFinite(sample.SurfaceCelsius) ||
+            !double.IsFinite(sample.AltitudeCorrectionCelsius) || !double.IsFinite(sample.LatitudeDegrees) ||
+            sample.LatitudeDegrees is < -90d or > 90d ||
+            sample.SurfaceCelsius != sample.ReferenceCelsius - sample.AltitudeCorrectionCelsius)
         {
-            throw new ArgumentOutOfRangeException(nameof(sample), "Temperature sample must be finite.");
+            throw new ArgumentOutOfRangeException(nameof(sample),
+                "Temperature sample must be finite, qualified and contain one explicit altitude correction.");
         }
 
-        return correction == NativeAltitudeCorrection.EngineAppliesAltitude
-            ? new NativeTemperatureExport(sample.ReferenceCelsius, correction)
-            : new NativeTemperatureExport(sample.SurfaceCelsius, correction);
+        return correction switch
+        {
+            NativeAltitudeCorrection.EngineAppliesAltitude => new NativeTemperatureExport(sample.ReferenceCelsius, correction),
+            NativeAltitudeCorrection.CoreAppliesAltitude => new NativeTemperatureExport(sample.SurfaceCelsius, correction),
+            _ => throw new ArgumentOutOfRangeException(nameof(correction), correction,
+                "Native altitude correction must be an explicitly supported mode.")
+        };
     }
 
     public static void EnsureNativeSeasonSupport(LatitudeAxis latitudeAxis)
