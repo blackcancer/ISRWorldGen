@@ -6,12 +6,33 @@ namespace ISRWorldGen.Core.Hydrology.Depressions;
 public enum DrainageTerminalKind { Ocean, EndorheicLake, DryBasin, OutOfDomain }
 
 /// <summary>
+/// Topological destination of a routed cell.  This deliberately carries the declared
+/// terminal rather than deriving salinity or a water body from elevation alone.
+/// </summary>
+public sealed record DrainageConnectivity(
+    long CellId,
+    long TerminalCellId,
+    DrainageTerminalKind TerminalKind,
+    long? MarineBoundaryCellId);
+
+/// <summary>Water-relevant topological state; this is not a physical fill instruction.</summary>
+public enum DrainageWaterKind { OceanConnected, ClosedLake, DryBasin, SubmarineDryBasin, OutOfDomain }
+
+/// <summary>Immutable per-cell water classification for consumers of routing.</summary>
+public sealed record DrainageWaterState(long CellId, long TerminalCellId, long? MarineBoundaryCellId, DrainageWaterKind Kind);
+
+/// <summary>
 /// Immutable input vertex for the analytical routing graph. Elevation is the physical
 /// relief; it is deliberately never changed by the routing calculation.
 /// </summary>
 public sealed record DrainageCell
 {
-    public DrainageCell(long id, double physicalElevation, IEnumerable<long> neighbours, DrainageTerminalKind? terminal = null)
+    public DrainageCell(
+        long id,
+        double physicalElevation,
+        IEnumerable<long> neighbours,
+        DrainageTerminalKind? terminal = null,
+        bool isMarineBoundary = false)
     {
         if (!double.IsFinite(physicalElevation)) throw new ArgumentOutOfRangeException(nameof(physicalElevation));
         ArgumentNullException.ThrowIfNull(neighbours);
@@ -19,12 +40,14 @@ public sealed record DrainageCell
         PhysicalElevation = physicalElevation;
         Neighbours = Array.AsReadOnly(neighbours.Distinct().OrderBy(value => value).ToArray());
         Terminal = terminal;
+        IsMarineBoundary = isMarineBoundary;
     }
 
     public long Id { get; }
     public double PhysicalElevation { get; }
     public ReadOnlyCollection<long> Neighbours { get; }
     public DrainageTerminalKind? Terminal { get; }
+    public bool IsMarineBoundary { get; }
 }
 
 public sealed record RoutedCell(long Id, double PhysicalElevation, double RoutingElevation, long? ReceiverId, DrainageTerminalKind? Terminal);
@@ -33,14 +56,25 @@ public sealed record Depression(long Id, IReadOnlyList<long> CellIds, double Spi
 
 public sealed class DrainageTopology
 {
-    internal DrainageTopology(IEnumerable<RoutedCell> cells, IEnumerable<Depression> depressions)
+    internal DrainageTopology(
+        IEnumerable<RoutedCell> cells,
+        IEnumerable<Depression> depressions,
+        IEnumerable<DrainageConnectivity> connectivity,
+        IEnumerable<DrainageWaterState> waterStates,
+        double? seaLevel)
     {
         Cells = Array.AsReadOnly(cells.OrderBy(cell => cell.Id).ToArray());
         Depressions = Array.AsReadOnly(depressions.OrderBy(item => item.Id).ToArray());
+        Connectivity = Array.AsReadOnly(connectivity.OrderBy(item => item.CellId).ToArray());
+        WaterStates = Array.AsReadOnly(waterStates.OrderBy(item => item.CellId).ToArray());
+        SeaLevel = seaLevel;
     }
 
     public ReadOnlyCollection<RoutedCell> Cells { get; }
     public ReadOnlyCollection<Depression> Depressions { get; }
+    public ReadOnlyCollection<DrainageConnectivity> Connectivity { get; }
+    public ReadOnlyCollection<DrainageWaterState> WaterStates { get; }
+    public double? SeaLevel { get; }
 }
 
 /// <summary>
@@ -50,15 +84,35 @@ public sealed class DrainageTopology
 public static class DepressionTopologyBuilder
 {
     public static DrainageTopology Build(IEnumerable<DrainageCell> source)
+        => BuildCore(source, null);
+
+    /// <summary>
+    /// Builds the immutable routing snapshot with an explicit sea level.  It permits
+    /// consumers to distinguish a connected ocean from an enclosed low dry basin
+    /// without physically filling either terrain cell.
+    /// </summary>
+    public static DrainageTopology Build(IEnumerable<DrainageCell> source, double seaLevel)
+    {
+        if (!double.IsFinite(seaLevel)) throw new ArgumentOutOfRangeException(nameof(seaLevel));
+        return BuildCore(source, seaLevel);
+    }
+
+    private static DrainageTopology BuildCore(IEnumerable<DrainageCell> source, double? seaLevel)
     {
         ArgumentNullException.ThrowIfNull(source);
-        DrainageCell[] cells = source.OrderBy(cell => cell.Id).ToArray();
+        DrainageCell[] supplied = source.ToArray();
+        if (supplied.Any(cell => cell is null)) throw new ArgumentException("Drainage cells cannot contain null.", nameof(source));
+        DrainageCell[] cells = supplied.OrderBy(cell => cell.Id).ToArray();
         if (cells.Length == 0) throw new ArgumentException("A drainage graph requires at least one cell.", nameof(source));
         if (cells.Select(cell => cell.Id).Distinct().Count() != cells.Length) throw new ArgumentException("Drainage cell IDs must be unique.", nameof(source));
 
         Dictionary<long, DrainageCell> byId = cells.ToDictionary(cell => cell.Id);
         foreach (DrainageCell cell in cells)
         {
+            if (cell.IsMarineBoundary && cell.Terminal != DrainageTerminalKind.Ocean)
+                throw new ArgumentException("A marine boundary must be an explicit ocean terminal.", nameof(source));
+            if (cell.Terminal == DrainageTerminalKind.Ocean && !cell.IsMarineBoundary)
+                throw new ArgumentException("An ocean terminal must be declared on a marine boundary.", nameof(source));
             foreach (long neighbour in cell.Neighbours)
             {
                 if (neighbour == cell.Id || !byId.ContainsKey(neighbour) || !byId[neighbour].Neighbours.Contains(cell.Id))
@@ -119,7 +173,76 @@ public static class DepressionTopologyBuilder
         }
 
         RoutedCell[] result = cells.Select(cell => new RoutedCell(cell.Id, cell.PhysicalElevation, routing[cell.Id], receivers[cell.Id], byId[cell.Id].Terminal)).ToArray();
-        return new DrainageTopology(result, BuildDepressions(cells, result));
+        DrainageConnectivity[] connectivity = BuildConnectivity(result).ToArray();
+        return new DrainageTopology(
+            result,
+            BuildDepressions(cells, result),
+            connectivity,
+            BuildWaterStates(connectivity, result, seaLevel),
+            seaLevel);
+    }
+
+    private static IEnumerable<DrainageConnectivity> BuildConnectivity(IReadOnlyList<RoutedCell> cells)
+    {
+        Dictionary<long, RoutedCell> byId = cells.ToDictionary(cell => cell.Id);
+        var resolved = new Dictionary<long, DrainageConnectivity>();
+        foreach (RoutedCell cell in cells.OrderBy(cell => cell.Id))
+        {
+            if (resolved.ContainsKey(cell.Id)) continue;
+
+            var path = new List<long>();
+            var seen = new HashSet<long>();
+            RoutedCell cursor = cell;
+            DrainageConnectivity? outcome = null;
+            while (!resolved.TryGetValue(cursor.Id, out outcome))
+            {
+                if (!seen.Add(cursor.Id)) throw new InvalidOperationException("Priority-Flood produced a drainage cycle.");
+                path.Add(cursor.Id);
+                if (cursor.ReceiverId is null)
+                {
+                    if (cursor.Terminal is null) throw new InvalidOperationException("A drainage terminal must be explicit.");
+                    outcome = new DrainageConnectivity(
+                        cursor.Id,
+                        cursor.Id,
+                        cursor.Terminal.Value,
+                        cursor.Terminal == DrainageTerminalKind.Ocean ? cursor.Id : null);
+                    resolved[cursor.Id] = outcome;
+                    break;
+                }
+
+                cursor = byId[cursor.ReceiverId.Value];
+            }
+
+            foreach (long id in path) resolved[id] = outcome!;
+        }
+
+        return resolved.Select(pair => new DrainageConnectivity(
+            pair.Key,
+            pair.Value.TerminalCellId,
+            pair.Value.TerminalKind,
+            pair.Value.MarineBoundaryCellId));
+    }
+
+    private static IEnumerable<DrainageWaterState> BuildWaterStates(
+        IReadOnlyList<DrainageConnectivity> connectivity,
+        IReadOnlyList<RoutedCell> cells,
+        double? seaLevel)
+    {
+        Dictionary<long, RoutedCell> byId = cells.ToDictionary(cell => cell.Id);
+        foreach (DrainageConnectivity item in connectivity)
+        {
+            DrainageWaterKind kind = item.TerminalKind switch
+            {
+                DrainageTerminalKind.Ocean => DrainageWaterKind.OceanConnected,
+                DrainageTerminalKind.EndorheicLake => DrainageWaterKind.ClosedLake,
+                DrainageTerminalKind.DryBasin when seaLevel is double level && byId[item.TerminalCellId].PhysicalElevation < level
+                    => DrainageWaterKind.SubmarineDryBasin,
+                DrainageTerminalKind.DryBasin => DrainageWaterKind.DryBasin,
+                DrainageTerminalKind.OutOfDomain => DrainageWaterKind.OutOfDomain,
+                _ => throw new InvalidOperationException("Unknown drainage terminal kind."),
+            };
+            yield return new DrainageWaterState(item.CellId, item.TerminalCellId, item.MarineBoundaryCellId, kind);
+        }
     }
 
     private static IEnumerable<Depression> BuildDepressions(IReadOnlyList<DrainageCell> physical, IReadOnlyList<RoutedCell> routed)
@@ -143,6 +266,8 @@ public static class DepressionTopologyBuilder
             component.Sort();
             double spill = component.Select(id => routing[id].RoutingElevation).Max();
             double capacity = component.Sum(id => routing[id].RoutingElevation - routing[id].PhysicalElevation);
+            if (!double.IsFinite(capacity))
+                throw new ArgumentOutOfRangeException(nameof(physical), "Depression capacity exceeds the supported finite numeric range.");
             long rootId = nextId++;
             yield return new Depression(rootId, Array.AsReadOnly(component.ToArray()), spill, capacity, null);
 
@@ -159,11 +284,14 @@ public static class DepressionTopologyBuilder
                     .DefaultIfEmpty(spill)
                     .Min();
                 localSpill = Math.Min(localSpill, spill);
+                double localCapacity = (localSpill - elevation) * minimumPlateau.Length;
+                if (!double.IsFinite(localCapacity))
+                    throw new ArgumentOutOfRangeException(nameof(physical), "Depression capacity exceeds the supported finite numeric range.");
                 yield return new Depression(
                     nextId++,
                     Array.AsReadOnly(minimumPlateau),
                     localSpill,
-                    (localSpill - elevation) * minimumPlateau.Length,
+                    localCapacity,
                     rootId);
             }
         }
