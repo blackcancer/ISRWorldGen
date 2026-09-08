@@ -41,8 +41,14 @@ public sealed class WaterBudgetSolverTests
         WaterBudgetCell impermeable = forward.Cells.Single(cell => cell.CellId == 1);
         WaterBudgetCell permeable = forward.Cells.Single(cell => cell.CellId == 2);
         Assert.AreEqual(impermeable.PrecipitationModelLengthPerYear, permeable.PrecipitationModelLengthPerYear, 1e-12);
-        Assert.IsGreaterThan(impermeable.RechargeModelLengthPerYear, permeable.RechargeModelLengthPerYear);
-        Assert.IsGreaterThan(permeable.RunoffModelLengthPerYear, impermeable.RunoffModelLengthPerYear);
+        Assert.IsGreaterThan(
+            lowerBound: impermeable.RechargeModelLengthPerYear,
+            value: permeable.RechargeModelLengthPerYear,
+            message: "A permeable substrate must recharge more than an impermeable substrate.");
+        Assert.IsGreaterThan(
+            lowerBound: permeable.RunoffModelLengthPerYear,
+            value: impermeable.RunoffModelLengthPerYear,
+            message: "An impermeable substrate must run off more than a permeable substrate.");
         Assert.IsTrue(forward.Cells.All(cell => double.IsFinite(cell.SoilMoistureNormalized) && cell.SoilMoistureNormalized is >= 0d and <= 1d));
     }
 
@@ -65,6 +71,27 @@ public sealed class WaterBudgetSolverTests
         CollectionAssert.AreEqual(first.Cells.ToArray(), second.Cells.ToArray());
         CollectionAssert.AreEqual(first.Transfers.ToArray(), second.Transfers.ToArray());
         Assert.IsTrue(first.Cells.All(cell => double.IsFinite(cell.RechargeModelVolumePerYear)));
+    }
+
+    [TestMethod]
+    public void T04_05_TransferAggregationIsCanonicalAcrossPermutationsIncludingNearThresholdFlows()
+    {
+        GroundwaterTransfer[] accepted =
+        [
+            new(Id(20), Id(1), Id(2), 9.87654321d, GroundwaterTransferKind.Resurgence),
+            new(Id(10), Id(1), Id(2), 8.12345679d, GroundwaterTransferKind.Loss)
+        ];
+        WaterBudgetSnapshot forward = Solve([Input(1, 1, 1d), Input(2, 2, 1d)], accepted);
+        WaterBudgetSnapshot reverse = Solve([Input(2, 2, 1d), Input(1, 1, 1d)], accepted.Reverse());
+        CollectionAssert.AreEqual(forward.Transfers.ToArray(), reverse.Transfers.ToArray());
+
+        GroundwaterTransfer[] justOverTolerance =
+        [
+            new(Id(20), Id(1), Id(2), 9.87654321d, GroundwaterTransferKind.Resurgence),
+            new(Id(10), Id(1), Id(2), 8.123474801d, GroundwaterTransferKind.Loss)
+        ];
+        Assert.ThrowsExactly<ArgumentException>(() => Solve([Input(1, 1, 1d), Input(2, 2, 1d)], justOverTolerance));
+        Assert.ThrowsExactly<ArgumentException>(() => Solve([Input(2, 2, 1d), Input(1, 1, 1d)], justOverTolerance.Reverse()));
     }
 
     private static WaterBudgetSnapshot Solve(IEnumerable<WaterBudgetInput> inputs, IEnumerable<GroundwaterTransfer> transfers) => WaterBudgetSolver.Solve(inputs, Precipitation(), Settings, transfers, 0);

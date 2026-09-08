@@ -165,7 +165,12 @@ public static class WaterBudgetSolver
 
     private static GroundwaterTransfer[] ValidateTransfers(IEnumerable<GroundwaterTransfer> source, IReadOnlyList<WaterBudgetCell> cells)
     {
-        GroundwaterTransfer[] values = source.ToArray();
+        // Canonicalize before every validation and aggregation: floating-point sums
+        // must not depend on the caller's enumeration order or scheduling.
+        GroundwaterTransfer[] values = source
+            .OrderBy(transfer => transfer.TransferId.High)
+            .ThenBy(transfer => transfer.TransferId.Low)
+            .ToArray();
         if (values.Select(transfer => transfer.TransferId).Distinct().Count() != values.Length)
             throw new ArgumentException("Groundwater transfer IDs must be unique.", nameof(source));
         HashSet<StableId> reservoirs = cells.Select(cell => cell.ReservoirId).ToHashSet();
@@ -184,7 +189,7 @@ public static class WaterBudgetSolver
             if (!double.IsFinite(transferred) || transferred > rechargeVolume + TransferTolerance(rechargeVolume))
                 throw new ArgumentException("Outgoing groundwater cannot exceed locally counted recharge; a resurgence is a transfer, not new water.", nameof(source));
         }
-        return values.OrderBy(transfer => transfer.TransferId.High).ThenBy(transfer => transfer.TransferId.Low).ToArray();
+        return values;
     }
 
     private static void EnsureBalanced(WaterBudgetCell cell)
