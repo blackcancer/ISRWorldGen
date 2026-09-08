@@ -679,10 +679,10 @@
       "blocker": null
     },
     "L19-A": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
+      "status": "IN_PROGRESS",
+      "owner": "agent:l19-a",
+      "branch": "agent/l19-a",
+      "base_commit": "089bf6f",
       "evidence": [],
       "blocker": null
     },
