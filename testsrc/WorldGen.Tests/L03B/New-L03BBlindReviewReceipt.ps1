@@ -8,25 +8,20 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'L03BBlindReviewProtocol.psm1') -Force
 
-$blind = (Resolve-Path -LiteralPath $BlindDirectory -ErrorAction Stop).Path
+$blind = [IO.Path]::GetFullPath($BlindDirectory)
 $answers = (Resolve-Path -LiteralPath $AnswersPath -ErrorAction Stop).Path
 $review = $null
 $publishing = $null
 try {
     $package = Read-L03BVerifiedBlindPackage $blind
-    if ([IO.Path]::GetFileName($blind) -cne 'blind') { throw 'BlindDirectory must be the exact blind child of an evidence terminal.' }
-    $evidenceTerminal = [IO.Path]::GetDirectoryName($blind)
-    $canonicalParent = [IO.Path]::GetDirectoryName($evidenceTerminal)
-    if (-not $canonicalParent -or -not (Test-Path -LiteralPath $canonicalParent -PathType Container)) {
-        throw 'The canonical review parent derived from BlindDirectory is absent.'
-    }
+    $canonicalParent = [string]$package.EvidenceRoot
     if ($ReviewParent) {
         $assertedParent = [IO.Path]::GetFullPath($ReviewParent).TrimEnd([IO.Path]::DirectorySeparatorChar)
-        if ($assertedParent -cne $canonicalParent.TrimEnd([IO.Path]::DirectorySeparatorChar)) {
-            throw 'ReviewParent does not match the canonical parent derived from BlindDirectory; alternate review locations are forbidden.'
+        if (-not (Test-L03BPathEquals $assertedParent $canonicalParent)) {
+            throw 'ReviewParent does not match the official L03-B evidence root; alternate review locations are forbidden.'
         }
     }
-    $review = Join-Path $canonicalParent "evidence-s-review-$($package.Binding.runId)"
+    $review = [string]$package.ReviewDirectory
     if (Test-Path -LiteralPath $review) {
         throw 'Canonical review terminal already exists; a receipt cannot be modified, replaced, or resubmitted.'
     }

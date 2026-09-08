@@ -5,6 +5,8 @@ $script:ExpectedCodes = @('S01', 'S02', 'S03', 'S04', 'S05', 'S06')
 $script:AllowedFamilies = @('RuggedRanges', 'OldMassifs', 'Plateaus', 'SedimentaryBasins', 'Plains', 'VolcanicDomains')
 $script:ReceiptProtocol = 'sha256-run-bound-blind-review-receipt-v1'
 $script:CommitmentProtocol = 'sha256-run-bound-selective-opening-v1'
+$script:RepositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
+$script:EvidenceRoot = [IO.Path]::GetFullPath((Join-Path $script:RepositoryRoot '.local/L03B'))
 
 function Get-L03BSha256Bytes {
     param([Parameter(Mandatory = $true)][byte[]]$Bytes)
@@ -19,6 +21,60 @@ function Get-L03BSha256File {
 function Test-L03BLowerHex {
     param([AllowNull()][string]$Value, [int]$Length)
     return $null -ne $Value -and $Value -cmatch "^[0-9a-f]{$Length}$"
+}
+
+function Test-L03BExactStringArray {
+    param([AllowNull()]$Value, [Parameter(Mandatory = $true)][string[]]$Expected)
+    if ($Value -isnot [object[]]) { return $false }
+    $actual = @($Value)
+    if ($actual.Count -ne $Expected.Count -or @($actual | Where-Object { $_ -isnot [string] }).Count -ne 0) { return $false }
+    return ($actual -join "`n") -ceq ($Expected -join "`n")
+}
+
+function Test-L03BPathEquals {
+    param([Parameter(Mandatory = $true)][string]$Left, [Parameter(Mandatory = $true)][string]$Right)
+    $comparison = if ([OperatingSystem]::IsWindows()) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    return [string]::Equals(
+        [IO.Path]::GetFullPath($Left).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar),
+        [IO.Path]::GetFullPath($Right).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar),
+        $comparison)
+}
+
+function Assert-L03BPlainDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Label)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "$Label must be a physical directory, not a symlink, junction, or other reparse point."
+    }
+    return $item.FullName
+}
+
+function Resolve-L03BCanonicalReviewIdentity {
+    param([Parameter(Mandatory = $true)][string]$BlindDirectory, [Parameter(Mandatory = $true)]$Binding)
+    $runPattern = '^evidence-s-staging-' + [Regex]::Escape([string]$Binding.commit) + '-[0-9a-f]{32}$'
+    if ($Binding.runId -isnot [string] -or [string]$Binding.runId -cnotmatch $runPattern) {
+        throw 'Attribution runId is not an official run identity for its bound commit.'
+    }
+    $expectedTerminal = [IO.Path]::GetFullPath((Join-Path $script:EvidenceRoot "evidence-s-terminal-$($Binding.commit)"))
+    $expectedBlind = [IO.Path]::GetFullPath((Join-Path $expectedTerminal 'blind'))
+    if (-not (Test-L03BPathEquals $BlindDirectory $expectedBlind)) {
+        throw 'BlindDirectory is not the canonical blind child of this run official evidence terminal; copied terminals are forbidden.'
+    }
+    [void](Assert-L03BPlainDirectory $script:RepositoryRoot 'Repository root')
+    [void](Assert-L03BPlainDirectory (Join-Path $script:RepositoryRoot '.local') 'Evidence .local root')
+    [void](Assert-L03BPlainDirectory $script:EvidenceRoot 'L03-B evidence root')
+    $terminal = Assert-L03BPlainDirectory $expectedTerminal 'Official evidence terminal'
+    $blind = Assert-L03BPlainDirectory $expectedBlind 'Official blind directory'
+    if (-not (Test-L03BPathEquals ([IO.Path]::GetDirectoryName($blind)) $terminal) -or
+        -not (Test-L03BPathEquals ([IO.Path]::GetDirectoryName($terminal)) $script:EvidenceRoot)) {
+        throw 'Official evidence terminal hierarchy is not a direct physical child of the L03-B evidence root.'
+    }
+    return [pscustomobject]@{
+        EvidenceRoot = $script:EvidenceRoot
+        EvidenceTerminal = $terminal
+        BlindDirectory = $blind
+        ReviewDirectory = [IO.Path]::GetFullPath((Join-Path $script:EvidenceRoot "evidence-s-review-$($Binding.runId)"))
+    }
 }
 
 function Assert-L03BExactProperties {
@@ -52,7 +108,9 @@ function Assert-L03BFixedHash {
 function Read-L03BBoundedBytes {
     param([Parameter(Mandatory = $true)][string]$Path, [int]$MaximumBytes = 1048576)
     $item = Get-Item -LiteralPath $Path -ErrorAction Stop
-    if ($item.PSIsContainer -or $item.Length -gt $MaximumBytes) { throw "Evidence file is absent, not a file, or exceeds $MaximumBytes bytes: $Path" }
+    if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or $item.Length -gt $MaximumBytes) {
+        throw "Evidence file is absent, is a reparse point, or exceeds $MaximumBytes bytes: $Path"
+    }
     return ,([IO.File]::ReadAllBytes($item.FullName))
 }
 
@@ -64,14 +122,19 @@ function Read-L03BVerifiedBlindPackage {
     $manifestBytes = Read-L03BBoundedBytes $manifestPath
     try { $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes) | ConvertFrom-Json } catch { throw 'Blind manifest is not valid JSON.' }
     Assert-L03BExactProperties $manifest @('schemaVersion', 'requirementIds', 'automatedStatus', 'qualitativeReviewStatus', 'overallStatus', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256', 'signatureScheme', 'artifacts', 'bundleSignature') 'Blind manifest'
-    if ([int]$manifest.schemaVersion -ne 1 -or (@($manifest.requirementIds) -join '|') -cne 'R03-05|R03-06' -or
-        [string]$manifest.automatedStatus -cne 'PASS' -or [string]$manifest.qualitativeReviewStatus -cne 'REVIEW_REQUIRED' -or
-        [string]$manifest.overallStatus -cne 'REVIEW_REQUIRED' -or [string]$manifest.configuration -cne 'Release' -or
-        [string]$manifest.signatureScheme -cne 'sha256-canonical-json-v1' -or
-        -not (Test-L03BLowerHex ([string]$manifest.commit) 40) -or -not (Test-L03BLowerHex ([string]$manifest.tree) 40) -or
-        -not (Test-L03BLowerHex ([string]$manifest.fixturesBlob) 40) -or
-        -not (Test-L03BLowerHex ([string]$manifest.testAssemblySha256) 64) -or
-        -not (Test-L03BLowerHex ([string]$manifest.coreAssemblySha256) 64)) {
+    if ($manifest.schemaVersion -isnot [long] -or [long]$manifest.schemaVersion -ne 1 -or
+        -not (Test-L03BExactStringArray $manifest.requirementIds @('R03-05', 'R03-06')) -or
+        $manifest.automatedStatus -isnot [string] -or [string]$manifest.automatedStatus -cne 'PASS' -or
+        $manifest.qualitativeReviewStatus -isnot [string] -or [string]$manifest.qualitativeReviewStatus -cne 'REVIEW_REQUIRED' -or
+        $manifest.overallStatus -isnot [string] -or [string]$manifest.overallStatus -cne 'REVIEW_REQUIRED' -or
+        $manifest.configuration -isnot [string] -or [string]$manifest.configuration -cne 'Release' -or
+        $manifest.signatureScheme -isnot [string] -or [string]$manifest.signatureScheme -cne 'sha256-canonical-json-v1' -or
+        $manifest.commit -isnot [string] -or -not (Test-L03BLowerHex ([string]$manifest.commit) 40) -or
+        $manifest.tree -isnot [string] -or -not (Test-L03BLowerHex ([string]$manifest.tree) 40) -or
+        $manifest.fixturesBlob -isnot [string] -or -not (Test-L03BLowerHex ([string]$manifest.fixturesBlob) 40) -or
+        $manifest.testAssemblySha256 -isnot [string] -or -not (Test-L03BLowerHex ([string]$manifest.testAssemblySha256) 64) -or
+        $manifest.coreAssemblySha256 -isnot [string] -or -not (Test-L03BLowerHex ([string]$manifest.coreAssemblySha256) 64) -or
+        $manifest.bundleSignature -isnot [string] -or $manifest.artifacts -isnot [object[]]) {
         throw 'Blind manifest is not a reviewable PASS campaign.'
     }
     $artifacts = @($manifest.artifacts)
@@ -79,6 +142,9 @@ function Read-L03BVerifiedBlindPackage {
     $artifactRows = @()
     foreach ($artifact in $artifacts) {
         Assert-L03BExactProperties $artifact @('path', 'sha256') 'Blind artifact record'
+        if ($artifact.path -isnot [string] -or $artifact.sha256 -isnot [string]) {
+            throw 'Blind artifact path and hash must be JSON strings.'
+        }
         $relative = [string]$artifact.path
         if (-not $relative.StartsWith('blind/', [StringComparison]::Ordinal) -or $relative.Contains('\') -or
             $relative.Contains('..') -or [IO.Path]::IsPathRooted($relative) -or -not (Test-L03BLowerHex ([string]$artifact.sha256) 64)) {
@@ -90,6 +156,10 @@ function Read-L03BVerifiedBlindPackage {
         if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Blind artifact is absent or escapes the package: $relative"
         }
+        $artifactItem = Get-Item -LiteralPath $path -Force
+        if (($artifactItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Blind artifact must not be a symlink or reparse point: $relative"
+        }
         Assert-L03BFixedHash (Get-L03BSha256File $path) ([string]$artifact.sha256) "Blind artifact $relative SHA-256"
         $artifactRows += [ordered]@{ path = $relative; sha256 = [string]$artifact.sha256 }
     }
@@ -98,8 +168,12 @@ function Read-L03BVerifiedBlindPackage {
         ($artifactPaths -join "`n") -cne (@($artifactPaths | Sort-Object) -join "`n")) {
         throw 'Blind artifact paths must be unique and ordinally sorted.'
     }
+    $packageItems = @(Get-ChildItem -LiteralPath $blind -Recurse -Force)
+    if (@($packageItems | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }).Count -ne 0) {
+        throw 'Blind package contains a symlink, junction, or other reparse point.'
+    }
     $expectedFiles = @('T03-06-S-manifest.json') + @($artifactPaths | ForEach-Object { $_.Substring(6) })
-    $actualFiles = @(Get-ChildItem -LiteralPath $blind -File -Recurse -Force | ForEach-Object {
+    $actualFiles = @($packageItems | Where-Object { -not $_.PSIsContainer } | ForEach-Object {
         [IO.Path]::GetRelativePath($blind, $_.FullName).Replace('\', '/')
     })
     if ((@($expectedFiles | Sort-Object) -join "`n") -cne (@($actualFiles | Sort-Object) -join "`n")) {
@@ -136,6 +210,7 @@ function Read-L03BVerifiedBlindPackage {
     if ($request.schemaVersion -isnot [long] -or [long]$request.schemaVersion -ne 2 -or
         $request.status -isnot [string] -or [string]$request.status -cne 'READY_FOR_EXTERNAL_BLIND_REVIEW' -or
         $request.trustBoundary -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$request.trustBoundary) -or
+        $request.codes -isnot [object[]] -or $request.allowedFamilies -isnot [object[]] -or $request.instructions -isnot [object[]] -or
         ($requestCodes -join '|') -cne ($script:ExpectedCodes -join '|') -or
         ($requestFamilies -join '|') -cne ($script:AllowedFamilies -join '|') -or
         @($requestCodes | Where-Object { $_ -isnot [string] }).Count -ne 0 -or
@@ -154,12 +229,22 @@ function Read-L03BVerifiedBlindPackage {
     try { $commitments = [Text.Encoding]::UTF8.GetString($commitmentsBytes) | ConvertFrom-Json } catch { throw 'Attribution commitments are not valid JSON.' }
     Assert-L03BExactProperties $commitments @('schemaVersion', 'requirementIds', 'scheme', 'binding', 'entries', 'bundleSignature') 'Attribution commitments'
     Assert-L03BExactProperties $commitments.binding @('runId', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256') 'Attribution binding'
-    if ([int]$commitments.schemaVersion -ne 1 -or (@($commitments.requirementIds) -join '|') -cne 'R03-06' -or
-        [string]$commitments.scheme -cne $script:CommitmentProtocol) { throw 'Attribution commitment header is invalid.' }
+    if ($commitments.schemaVersion -isnot [long] -or [long]$commitments.schemaVersion -ne 1 -or
+        -not (Test-L03BExactStringArray $commitments.requirementIds @('R03-06')) -or
+        $commitments.scheme -isnot [string] -or [string]$commitments.scheme -cne $script:CommitmentProtocol -or
+        $commitments.bundleSignature -isnot [string] -or $commitments.entries -isnot [object[]]) {
+        throw 'Attribution commitment header is invalid.'
+    }
+    foreach ($name in @('runId', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256')) {
+        if ($commitments.binding.$name -isnot [string]) { throw "Attribution binding $name must be a JSON string." }
+    }
     $commitmentRows = @()
     foreach ($entry in @($commitments.entries)) {
         Assert-L03BExactProperties $entry @('code', 'commitmentSha256') 'Attribution commitment entry'
-        if (-not (Test-L03BLowerHex ([string]$entry.commitmentSha256) 64)) { throw 'Attribution commitment hash is invalid.' }
+        if ($entry.code -isnot [string] -or $entry.commitmentSha256 -isnot [string] -or
+            -not (Test-L03BLowerHex ([string]$entry.commitmentSha256) 64)) {
+            throw 'Attribution commitment code or hash type is invalid.'
+        }
         $commitmentRows += [ordered]@{ code = [string]$entry.code; commitmentSha256 = [string]$entry.commitmentSha256 }
     }
     if ((@($commitmentRows | ForEach-Object { $_.code }) -join '|') -cne ($script:ExpectedCodes -join '|')) {
@@ -174,7 +259,7 @@ function Read-L03BVerifiedBlindPackage {
         testAssemblySha256 = [string]$commitments.binding.testAssemblySha256
         coreAssemblySha256 = [string]$commitments.binding.coreAssemblySha256
     }
-    if (-not $binding.runId -or $binding.runId.Length -gt 255 -or $binding.runId.Contains('..') -or
+    if (-not $binding.runId -or $binding.runId -cnotmatch ('^evidence-s-staging-' + [Regex]::Escape($binding.commit) + '-[0-9a-f]{32}$') -or
         $binding.commit -cne [string]$manifest.commit -or $binding.tree -cne [string]$manifest.tree -or
         $binding.fixturesBlob -cne [string]$manifest.fixturesBlob -or $binding.configuration -cne [string]$manifest.configuration -or
         $binding.testAssemblySha256 -cne [string]$manifest.testAssemblySha256 -or
@@ -189,8 +274,12 @@ function Read-L03BVerifiedBlindPackage {
         entries = $commitmentRows
     }
     Assert-L03BFixedHash ([string]$commitments.bundleSignature) (Get-L03BSha256Bytes (ConvertTo-L03BCanonicalBytes $commitmentPayload)) 'Attribution commitment bundle signature'
+    $identity = Resolve-L03BCanonicalReviewIdentity -BlindDirectory $blind -Binding $binding
     return [pscustomobject]@{
-        BlindDirectory = $blind
+        BlindDirectory = $identity.BlindDirectory
+        EvidenceTerminal = $identity.EvidenceTerminal
+        EvidenceRoot = $identity.EvidenceRoot
+        ReviewDirectory = $identity.ReviewDirectory
         Manifest = $manifest
         ManifestBytes = $manifestBytes
         ManifestSha256 = Get-L03BSha256Bytes $manifestBytes
@@ -271,12 +360,23 @@ function Read-L03BVerifiedReviewReceiptBytes {
     Assert-L03BExactProperties $receipt.binding @('runId', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256') 'Blind review receipt binding'
     Assert-L03BExactProperties $receipt.blindManifest @('path', 'sha256', 'bundleSignature') 'Blind review manifest binding'
     Assert-L03BExactProperties $receipt.attributionCommitments @('path', 'sha256', 'bundleSignature') 'Blind review commitment binding'
-    if ([int]$receipt.schemaVersion -ne 1 -or (@($receipt.requirementIds) -join '|') -cne 'R03-06' -or
-        [string]$receipt.status -cne 'RECORDED_BEFORE_REVEAL' -or [string]$receipt.protocol -cne $script:ReceiptProtocol) {
+    if ($receipt.schemaVersion -isnot [long] -or [long]$receipt.schemaVersion -ne 1 -or
+        -not (Test-L03BExactStringArray $receipt.requirementIds @('R03-06')) -or
+        $receipt.status -isnot [string] -or [string]$receipt.status -cne 'RECORDED_BEFORE_REVEAL' -or
+        $receipt.protocol -isnot [string] -or [string]$receipt.protocol -cne $script:ReceiptProtocol -or
+        $receipt.recordedUtc -isnot [string] -or $receipt.receiptId -isnot [string] -or
+        $receipt.entries -isnot [object[]]) {
         throw 'Blind review receipt header is invalid.'
     }
     foreach ($name in @('runId', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256')) {
-        if ([string]$receipt.binding.$name -cne [string]$BlindPackage.Binding.$name) { throw "Blind review receipt binding mismatch: $name" }
+        if ($receipt.binding.$name -isnot [string] -or [string]$receipt.binding.$name -cne [string]$BlindPackage.Binding.$name) {
+            throw "Blind review receipt binding mismatch or non-string value: $name"
+        }
+    }
+    foreach ($document in @($receipt.blindManifest, $receipt.attributionCommitments)) {
+        foreach ($name in @('path', 'sha256', 'bundleSignature')) {
+            if ($document.$name -isnot [string]) { throw "Blind review receipt document $name must be a JSON string." }
+        }
     }
     if ([string]$receipt.blindManifest.path -cne 'blind/T03-06-S-manifest.json' -or
         [string]$receipt.attributionCommitments.path -cne 'blind/T03-06-S-attribution-commitments.json') { throw 'Blind review receipt document paths are invalid.' }
@@ -316,4 +416,4 @@ function Write-L03BDurableNewFile {
     }
 }
 
-Export-ModuleMember -Function Get-L03BSha256Bytes, Get-L03BSha256File, Test-L03BLowerHex, Assert-L03BExactProperties, ConvertTo-L03BCanonicalBytes, Assert-L03BFixedHash, Read-L03BBoundedBytes, Read-L03BVerifiedBlindPackage, ConvertTo-L03BReviewEntries, New-L03BReviewReceiptBytes, Read-L03BVerifiedReviewReceiptBytes, Write-L03BDurableNewFile
+Export-ModuleMember -Function Get-L03BSha256Bytes, Get-L03BSha256File, Test-L03BLowerHex, Test-L03BExactStringArray, Test-L03BPathEquals, Assert-L03BPlainDirectory, Assert-L03BExactProperties, ConvertTo-L03BCanonicalBytes, Assert-L03BFixedHash, Read-L03BBoundedBytes, Read-L03BVerifiedBlindPackage, ConvertTo-L03BReviewEntries, New-L03BReviewReceiptBytes, Read-L03BVerifiedReviewReceiptBytes, Write-L03BDurableNewFile

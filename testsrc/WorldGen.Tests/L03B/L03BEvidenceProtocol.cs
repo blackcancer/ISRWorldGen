@@ -356,12 +356,12 @@ internal static class L03BEvidenceProtocol
         {
             schemaVersion = 2,
             status = "READY_FOR_EXTERNAL_BLIND_REVIEW",
-            trustBoundary = "The reviewer receives only a copy of the blind directory. The campaign controller retains sealed artifacts and must not read the answer key directly.",
+            trustBoundary = "The reviewer process receives read-only access to the exact blind child of the official campaign terminal and create-only access to its single canonical review sibling. Copies, aliases, symlinks, junctions, and sealed artifacts are outside the reviewer boundary.",
             instructions = new[]
             {
                 "Inspect only the immutable blind package and prepare a separate JSON answers file.",
                 "For every code, record exactly one identifiedFamilyBeforeReveal, an integer confidence0To100BeforeReveal from 0 to 100, and non-empty morphologyObservations.",
-                "Run New-L03BBlindReviewReceipt.ps1 against the terminal blind directory. It verifies every blind hash and atomically publishes the single canonical timestamped, self-hashed review terminal without reading any sealed artifact.",
+                "Run New-L03BBlindReviewReceipt.ps1 with an account or agent restricted to read the official terminal blind directory and create only the canonical review sibling. It verifies every blind hash and atomically publishes the single timestamped, self-hashed review terminal without reading any sealed artifact.",
                 "Return the printed receiptFileSha256 to the controller. Only Open-L03BBlindReview.ps1 may derive this run's canonical review terminal and reveal the mapping after it validates that exact expected hash.",
             },
             allowedFamilies = Enum.GetValues<LandscapeFamily>().Select(family => family.ToString()),
@@ -603,15 +603,33 @@ internal static class L03BEvidenceProtocol
         using JsonDocument document = JsonDocument.Parse(reviewRequestBytes);
         JsonElement root = document.RootElement;
         AssertExactProperties(root, "schemaVersion", "status", "trustBoundary", "instructions", "allowedFamilies", "codes");
-        string[] codes = root.GetProperty("codes").EnumerateArray().Select(item => item.GetString() ?? string.Empty).ToArray();
-        string[] families = root.GetProperty("allowedFamilies").EnumerateArray().Select(item => item.GetString() ?? string.Empty).ToArray();
-        string[] instructions = root.GetProperty("instructions").EnumerateArray().Select(item => item.GetString() ?? string.Empty).ToArray();
-        if (root.GetProperty("schemaVersion").ValueKind != JsonValueKind.Number ||
-            root.GetProperty("schemaVersion").GetInt32() != 2 ||
-            root.GetProperty("status").ValueKind != JsonValueKind.String ||
-            root.GetProperty("status").GetString() != "READY_FOR_EXTERNAL_BLIND_REVIEW" ||
-            root.GetProperty("trustBoundary").ValueKind != JsonValueKind.String ||
-            string.IsNullOrWhiteSpace(root.GetProperty("trustBoundary").GetString()) ||
+        JsonElement schemaVersion = root.GetProperty("schemaVersion");
+        JsonElement status = root.GetProperty("status");
+        JsonElement trustBoundary = root.GetProperty("trustBoundary");
+        JsonElement codesElement = root.GetProperty("codes");
+        JsonElement familiesElement = root.GetProperty("allowedFamilies");
+        JsonElement instructionsElement = root.GetProperty("instructions");
+        if (schemaVersion.ValueKind != JsonValueKind.Number || !schemaVersion.TryGetInt32(out int schema) || schema != 2 ||
+            status.ValueKind != JsonValueKind.String || status.GetString() != "READY_FOR_EXTERNAL_BLIND_REVIEW" ||
+            trustBoundary.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(trustBoundary.GetString()) ||
+            codesElement.ValueKind != JsonValueKind.Array || familiesElement.ValueKind != JsonValueKind.Array ||
+            instructionsElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("Blind review request schema or exact S01 through S06 code set is invalid.");
+        }
+        JsonElement[] codeItems = codesElement.EnumerateArray().ToArray();
+        JsonElement[] familyItems = familiesElement.EnumerateArray().ToArray();
+        JsonElement[] instructionItems = instructionsElement.EnumerateArray().ToArray();
+        if (codeItems.Any(item => item.ValueKind != JsonValueKind.String) ||
+            familyItems.Any(item => item.ValueKind != JsonValueKind.String) ||
+            instructionItems.Any(item => item.ValueKind != JsonValueKind.String))
+        {
+            throw new InvalidDataException("Blind review request schema or exact S01 through S06 code set is invalid.");
+        }
+        string[] codes = codeItems.Select(item => item.GetString()!).ToArray();
+        string[] families = familyItems.Select(item => item.GetString()!).ToArray();
+        string[] instructions = instructionItems.Select(item => item.GetString()!).ToArray();
+        if (
             instructions.Length == 0 || instructions.Any(string.IsNullOrWhiteSpace) ||
             !codes.SequenceEqual(ExpectedNeutralCodes, StringComparer.Ordinal) ||
             !families.SequenceEqual(Enum.GetNames<LandscapeFamily>(), StringComparer.Ordinal))

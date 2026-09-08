@@ -22,20 +22,32 @@ function Read-HeldReceiptBytes {
 
 function Read-VerifiedSealedCampaign {
     param([string]$Evidence, $BlindPackage)
+    [void](Assert-L03BPlainDirectory (Join-Path $Evidence 'sealed') 'Official sealed directory')
     $manifestPath = Join-Path $Evidence 'sealed/T03-05-06-S-manifest.json'
     $manifestBytes = Read-L03BBoundedBytes $manifestPath
     try { $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes) | ConvertFrom-Json } catch { throw 'Sealed campaign manifest is not valid JSON.' }
     Assert-L03BExactProperties $manifest @('schemaVersion', 'requirementIds', 'automatedStatus', 'qualitativeReviewStatus', 'overallStatus', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256', 'signatureScheme', 'artifacts', 'bundleSignature') 'Sealed campaign manifest'
-    if ([int]$manifest.schemaVersion -ne 1 -or (@($manifest.requirementIds) -join '|') -cne 'R03-05|R03-06' -or
-        [string]$manifest.automatedStatus -cne 'PASS' -or [string]$manifest.qualitativeReviewStatus -cne 'REVIEW_REQUIRED' -or
-        [string]$manifest.overallStatus -cne 'REVIEW_REQUIRED' -or [string]$manifest.configuration -cne 'Release' -or
-        [string]$manifest.signatureScheme -cne 'sha256-canonical-json-v1') { throw 'Sealed campaign is not a reviewable PASS publication.' }
+    if ($manifest.schemaVersion -isnot [long] -or [long]$manifest.schemaVersion -ne 1 -or
+        -not (Test-L03BExactStringArray $manifest.requirementIds @('R03-05', 'R03-06')) -or
+        $manifest.automatedStatus -isnot [string] -or [string]$manifest.automatedStatus -cne 'PASS' -or
+        $manifest.qualitativeReviewStatus -isnot [string] -or [string]$manifest.qualitativeReviewStatus -cne 'REVIEW_REQUIRED' -or
+        $manifest.overallStatus -isnot [string] -or [string]$manifest.overallStatus -cne 'REVIEW_REQUIRED' -or
+        $manifest.configuration -isnot [string] -or [string]$manifest.configuration -cne 'Release' -or
+        $manifest.signatureScheme -isnot [string] -or [string]$manifest.signatureScheme -cne 'sha256-canonical-json-v1' -or
+        $manifest.bundleSignature -isnot [string] -or $manifest.artifacts -isnot [object[]]) {
+        throw 'Sealed campaign is not a reviewable PASS publication.'
+    }
     foreach ($name in @('commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256')) {
-        if ([string]$manifest.$name -cne [string]$BlindPackage.Binding.$name) { throw "Sealed campaign binding mismatch: $name" }
+        if ($manifest.$name -isnot [string] -or [string]$manifest.$name -cne [string]$BlindPackage.Binding.$name) {
+            throw "Sealed campaign binding mismatch or non-string value: $name"
+        }
     }
     $artifacts = @()
     foreach ($artifact in @($manifest.artifacts)) {
         Assert-L03BExactProperties $artifact @('path', 'sha256') 'Sealed campaign artifact'
+        if ($artifact.path -isnot [string] -or $artifact.sha256 -isnot [string]) {
+            throw 'Sealed campaign artifact path and hash must be JSON strings.'
+        }
         $relative = [string]$artifact.path
         if ([IO.Path]::IsPathRooted($relative) -or $relative.Contains('..') -or $relative.Contains('\') -or
             -not (Test-L03BLowerHex ([string]$artifact.sha256) 64)) { throw "Invalid sealed campaign artifact path: $relative" }
@@ -43,6 +55,10 @@ function Read-VerifiedSealedCampaign {
         $prefix = $Evidence.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
         if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Sealed campaign artifact is absent or escapes the terminal: $relative"
+        }
+        $artifactItem = Get-Item -LiteralPath $path -Force
+        if (($artifactItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Sealed campaign artifact must not be a symlink or reparse point: $relative"
         }
         Assert-L03BFixedHash (Get-L03BSha256File $path) ([string]$artifact.sha256) "Sealed artifact $relative SHA-256"
         $artifacts += [ordered]@{ path = $relative; sha256 = [string]$artifact.sha256 }
@@ -80,10 +96,18 @@ function Assert-SuccessMarker {
     $path = Join-Path $Evidence 'sealed/T03-06-S-success.json'
     try { $marker = [IO.File]::ReadAllText($path) | ConvertFrom-Json } catch { throw 'Campaign success marker is not valid JSON.' }
     Assert-L03BExactProperties $marker @('schemaVersion', 'status', 'runId', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256', 'reportSha256', 'blindManifestSha256', 'reviewKeySha256', 'commitmentsSha256') 'Campaign success marker'
-    if ([int]$marker.schemaVersion -ne 1 -or [string]$marker.status -cne 'COMPLETE' -or
-        [string]$marker.runId -cne [string]$BlindPackage.Binding.runId) { throw 'Campaign success marker is incomplete or belongs to another run.' }
+    if ($marker.schemaVersion -isnot [long] -or [long]$marker.schemaVersion -ne 1 -or
+        $marker.status -isnot [string] -or [string]$marker.status -cne 'COMPLETE' -or
+        $marker.runId -isnot [string] -or [string]$marker.runId -cne [string]$BlindPackage.Binding.runId) {
+        throw 'Campaign success marker is incomplete or belongs to another run.'
+    }
     foreach ($name in @('commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256')) {
-        if ([string]$marker.$name -cne [string]$BlindPackage.Binding.$name) { throw "Campaign success marker binding mismatch: $name" }
+        if ($marker.$name -isnot [string] -or [string]$marker.$name -cne [string]$BlindPackage.Binding.$name) {
+            throw "Campaign success marker binding mismatch or non-string value: $name"
+        }
+    }
+    foreach ($name in @('reportSha256', 'blindManifestSha256', 'reviewKeySha256', 'commitmentsSha256')) {
+        if ($marker.$name -isnot [string]) { throw "Campaign success marker $name must be a JSON string." }
     }
     $expected = @{
         reportSha256 = Get-L03BSha256File (Join-Path $Evidence 'sealed/T03-05-06-S.json')
@@ -93,8 +117,11 @@ function Assert-SuccessMarker {
     }
     foreach ($name in $expected.Keys) { Assert-L03BFixedHash ([string]$marker.$name) ([string]$expected[$name]) "Campaign success marker $name" }
     try { $report = [IO.File]::ReadAllText((Join-Path $Evidence 'sealed/T03-05-06-S.json')) | ConvertFrom-Json } catch { throw 'Campaign report is not valid JSON.' }
-    if ([string]$report.automatedStatus -cne 'PASS' -or [string]$report.qualitativeReviewStatus -cne 'REVIEW_REQUIRED' -or
-        [string]$report.overallStatus -cne 'REVIEW_REQUIRED') { throw 'Campaign report is not a reviewable PASS result.' }
+    if ($report.automatedStatus -isnot [string] -or [string]$report.automatedStatus -cne 'PASS' -or
+        $report.qualitativeReviewStatus -isnot [string] -or [string]$report.qualitativeReviewStatus -cne 'REVIEW_REQUIRED' -or
+        $report.overallStatus -isnot [string] -or [string]$report.overallStatus -cne 'REVIEW_REQUIRED') {
+        throw 'Campaign report is not a reviewable PASS result.'
+    }
     return $marker
 }
 
@@ -107,10 +134,15 @@ function Read-VerifiedReviewKey {
     try { $key = [Text.Encoding]::UTF8.GetString($keyBytes) | ConvertFrom-Json } catch { throw 'Sealed review key is not valid JSON.' }
     Assert-L03BExactProperties $key @('schemaVersion', 'status', 'protocol', 'binding', 'blindManifestSha256', 'attributionCommitmentsSha256', 'nonce', 'entries') 'Sealed review key'
     Assert-L03BExactProperties $key.binding @('runId', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256') 'Sealed review key binding'
-    if ([int]$key.schemaVersion -ne 3 -or [string]$key.status -cne 'SEALED_AWAITING_VERIFIED_RECEIPT' -or
-        [string]$key.protocol -cne 'sha256-run-bound-blind-review-receipt-v1') { throw 'Sealed review key header is invalid.' }
+    if ($key.schemaVersion -isnot [long] -or [long]$key.schemaVersion -ne 3 -or
+        $key.status -isnot [string] -or [string]$key.status -cne 'SEALED_AWAITING_VERIFIED_RECEIPT' -or
+        $key.protocol -isnot [string] -or [string]$key.protocol -cne 'sha256-run-bound-blind-review-receipt-v1' -or
+        $key.blindManifestSha256 -isnot [string] -or $key.attributionCommitmentsSha256 -isnot [string] -or
+        $key.nonce -isnot [string] -or $key.entries -isnot [object[]]) { throw 'Sealed review key header is invalid.' }
     foreach ($name in @('runId', 'commit', 'tree', 'fixturesBlob', 'configuration', 'testAssemblySha256', 'coreAssemblySha256')) {
-        if ([string]$key.binding.$name -cne [string]$BlindPackage.Binding.$name) { throw "Sealed review key binding mismatch: $name" }
+        if ($key.binding.$name -isnot [string] -or [string]$key.binding.$name -cne [string]$BlindPackage.Binding.$name) {
+            throw "Sealed review key binding mismatch or non-string value: $name"
+        }
     }
     Assert-L03BFixedHash ([string]$key.blindManifestSha256) ([string]$BlindPackage.ManifestSha256) 'Sealed review key blind manifest SHA-256'
     Assert-L03BFixedHash ([string]$key.attributionCommitmentsSha256) ([string]$BlindPackage.CommitmentsSha256) 'Sealed review key commitment SHA-256'
@@ -119,6 +151,7 @@ function Read-VerifiedReviewKey {
     $keyRows = @()
     foreach ($entry in @($key.entries)) {
         Assert-L03BExactProperties $entry @('code', 'family') 'Sealed review key entry'
+        if ($entry.code -isnot [string] -or $entry.family -isnot [string]) { throw 'Sealed review key entry values must be JSON strings.' }
         $keyRows += [ordered]@{ code = [string]$entry.code; family = [string]$entry.family }
     }
     $codes = @($keyRows | ForEach-Object { $_.code })
@@ -150,18 +183,21 @@ function Read-VerifiedReviewKey {
     return $keyRows
 }
 
-$evidence = (Resolve-Path -LiteralPath $EvidenceDirectory -ErrorAction Stop).Path
+$evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
 $blindPackage = Read-L03BVerifiedBlindPackage (Join-Path $evidence 'blind')
-$canonicalParent = [IO.Path]::GetDirectoryName($evidence)
-if (-not $canonicalParent) { throw 'Evidence terminal has no canonical review parent.' }
-$review = Join-Path $canonicalParent "evidence-s-review-$($blindPackage.Binding.runId)"
+$evidence = [string]$blindPackage.EvidenceTerminal
+$review = [string]$blindPackage.ReviewDirectory
 if (-not (Test-Path -LiteralPath $review -PathType Container)) { throw 'Canonical review terminal is absent for this blind run.' }
+$review = Assert-L03BPlainDirectory $review 'Canonical review terminal'
 $reveal = "$evidence-review-reveal"
 $revealParent = [IO.Path]::GetDirectoryName($reveal)
 if (-not $revealParent -or -not (Test-Path -LiteralPath $revealParent -PathType Container)) { throw 'Reveal directory parent must already exist.' }
 $reviewFiles = @(Get-ChildItem -LiteralPath $review -File -Recurse -Force)
 if ($reviewFiles.Count -ne 1 -or $reviewFiles[0].Name -cne 'T03-06-S-review-receipt.json' -or $reviewFiles[0].DirectoryName -cne $review) {
     throw 'Review directory must contain exactly one atomic receipt and no replacement or partial file.'
+}
+if (($reviewFiles[0].Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw 'Canonical blind review receipt must be a physical file, not a symlink or reparse point.'
 }
 
 $receiptPath = $reviewFiles[0].FullName

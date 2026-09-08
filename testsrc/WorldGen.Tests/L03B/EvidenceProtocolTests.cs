@@ -313,14 +313,23 @@ public sealed class EvidenceProtocolTests
         string submitScript = Path.Combine(repository, "testsrc", "WorldGen.Tests", "L03B", "New-L03BBlindReviewReceipt.ps1");
         string revealScript = Path.Combine(repository, "testsrc", "WorldGen.Tests", "L03B", "Open-L03BBlindReview.ps1");
         string temporaryRoot = Path.Combine(Path.GetTempPath(), "isr-l03b-blind-review-" + Guid.NewGuid().ToString("N"));
-        string evidence = Path.Combine(temporaryRoot, "terminal");
+        string evidenceRoot = Path.Combine(repository, ".local", "L03B");
+        string evidence = Path.Combine(evidenceRoot, $"evidence-s-terminal-{Commit}");
         string blind = Path.Combine(evidence, "blind");
         string sealedDirectory = Path.Combine(evidence, "sealed");
         string answersPath = Path.Combine(temporaryRoot, "answers.json");
-        string reviewDirectory = Path.Combine(temporaryRoot, $"evidence-s-review-{RunId}");
+        string reviewDirectory = Path.Combine(evidenceRoot, $"evidence-s-review-{RunId}");
         string revealDirectory = evidence + "-review-reveal";
+        string otherCommit = new('1', 40);
+        string otherRunId = $"evidence-s-staging-{otherCommit}-{new string('2', 32)}";
+        string otherEvidence = Path.Combine(evidenceRoot, $"evidence-s-terminal-{otherCommit}");
+        string replayReview = Path.Combine(evidenceRoot, $"evidence-s-review-{otherRunId}");
         try
         {
+            Assert.IsFalse(Directory.Exists(evidence), $"Synthetic official terminal already exists: {evidence}");
+            Assert.IsFalse(Directory.Exists(reviewDirectory), $"Synthetic canonical review already exists: {reviewDirectory}");
+            Assert.IsFalse(Directory.Exists(revealDirectory), $"Synthetic reveal already exists: {revealDirectory}");
+            Directory.CreateDirectory(temporaryRoot);
             Directory.CreateDirectory(blind);
             Directory.CreateDirectory(sealedDirectory);
             byte[] commitments = Commitments(RunId, Nonce);
@@ -357,14 +366,25 @@ public sealed class EvidenceProtocolTests
             });
             File.WriteAllBytes(answersPath, answers);
 
+            string copiedTerminal = Path.Combine(temporaryRoot, "copied-terminal");
+            CopyDirectory(evidence, copiedTerminal);
+            ProcessResult copiedSubmission = RunPowerShell(submitScript,
+                "-BlindDirectory", Path.Combine(copiedTerminal, "blind"), "-AnswersPath", answersPath,
+                "-ReviewParent", temporaryRoot);
+            Assert.AreNotEqual(0, copiedSubmission.ExitCode);
+            StringAssert.Contains(copiedSubmission.StandardError, "not the canonical blind child");
+            Assert.IsFalse(Directory.Exists(Path.Combine(temporaryRoot, $"evidence-s-review-{RunId}")));
+
+            ProbeRealJunctionRejection(submitScript, revealScript, evidence, blind, answersPath, temporaryRoot);
+
             ProcessResult submitted = RunPowerShell(submitScript,
-                "-BlindDirectory", blind, "-AnswersPath", answersPath, "-ReviewParent", temporaryRoot);
+                "-BlindDirectory", blind, "-AnswersPath", answersPath, "-ReviewParent", evidenceRoot);
             Assert.AreEqual(0, submitted.ExitCode, submitted.Diagnostic);
             string receiptPath = Path.Combine(reviewDirectory, L03BEvidenceProtocol.ReviewReceiptFileName);
             Assert.IsTrue(File.Exists(receiptPath));
             CollectionAssert.AreEqual(new[] { L03BEvidenceProtocol.ReviewReceiptFileName },
                 Directory.GetFiles(reviewDirectory).Select(Path.GetFileName).ToArray());
-            Assert.IsFalse(Directory.GetDirectories(temporaryRoot)
+            Assert.IsFalse(Directory.GetDirectories(evidenceRoot)
                 .Any(path => Path.GetFileName(path).StartsWith($"evidence-s-review-{RunId}-publishing-", StringComparison.Ordinal)),
                 "Atomic receipt publication must not leave a partial sibling.");
             string alternateParent = Path.Combine(temporaryRoot, "alternate-review-parent");
@@ -372,7 +392,7 @@ public sealed class EvidenceProtocolTests
             ProcessResult alternateSubmission = RunPowerShell(submitScript,
                 "-BlindDirectory", blind, "-AnswersPath", answersPath, "-ReviewParent", alternateParent);
             Assert.AreNotEqual(0, alternateSubmission.ExitCode);
-            StringAssert.Contains(alternateSubmission.StandardError, "ReviewParent does not match the canonical parent");
+            StringAssert.Contains(alternateSubmission.StandardError, "ReviewParent does not match the official L03-B evidence root");
             Assert.IsFalse(Directory.Exists(Path.Combine(alternateParent, $"evidence-s-review-{RunId}")));
             byte[] receipt = File.ReadAllBytes(receiptPath);
             string receiptFileSha256 = L03BTestSupport.Sha256(receipt);
@@ -446,12 +466,23 @@ public sealed class EvidenceProtocolTests
             Assert.IsFalse(rogueSelection.StandardError.Contains("Sealed review key", StringComparison.Ordinal),
                 "The controller must derive the canonical review terminal instead of selecting an arbitrary matching hash elsewhere.");
 
+            const string invalidKeySentinel = "INVALID-KEY-MUST-NOT-BE-PARSED-BEFORE-RECEIPT";
+            File.WriteAllText(keyPath, invalidKeySentinel);
+            JsonObject fractionalReceipt = JsonNode.Parse(receipt)!.AsObject();
+            fractionalReceipt["schemaVersion"] = 1.5;
+            File.WriteAllBytes(receiptPath, JsonSerializer.SerializeToUtf8Bytes(fractionalReceipt));
+            File.SetLastWriteTimeUtc(receiptPath, verified.RecordedUtc.UtcDateTime);
+            ProcessResult receiptType = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidence, "-ExpectedReceiptSha256", L03BTestSupport.Sha256(File.ReadAllBytes(receiptPath)));
+            Assert.AreNotEqual(0, receiptType.ExitCode);
+            StringAssert.Contains(receiptType.StandardError, "Blind review receipt header is invalid");
+            Assert.IsFalse(receiptType.StandardError.Contains("Sealed review key", StringComparison.Ordinal));
+            Assert.IsFalse(receiptType.StandardError.Contains(invalidKeySentinel, StringComparison.Ordinal));
+
             JsonObject tamperedReceipt = JsonNode.Parse(receipt)!.AsObject();
             tamperedReceipt["entries"]![0]!["confidence0To100BeforeReveal"] = 1;
             File.WriteAllBytes(receiptPath, JsonSerializer.SerializeToUtf8Bytes(tamperedReceipt));
             File.SetLastWriteTimeUtc(receiptPath, verified.RecordedUtc.UtcDateTime);
-            const string invalidKeySentinel = "INVALID-KEY-MUST-NOT-BE-PARSED-BEFORE-RECEIPT";
-            File.WriteAllText(keyPath, invalidKeySentinel);
             string tamperedReceiptHash = L03BTestSupport.Sha256(File.ReadAllBytes(receiptPath));
             ProcessResult replacedBeforeReveal = RunPowerShell(revealScript,
                 "-EvidenceDirectory", evidence, "-ExpectedReceiptSha256", receiptFileSha256);
@@ -478,8 +509,8 @@ public sealed class EvidenceProtocolTests
             Assert.AreEqual(6, reveal.RootElement.GetProperty("correctIdentifications").GetInt32());
             Assert.AreEqual(verified.ReceiptId, reveal.RootElement.GetProperty("receipt").GetProperty("receiptId").GetString());
             Assert.IsFalse(File.Exists(evidence + "-review-controller.lock"));
-            Assert.IsFalse(Directory.GetDirectories(temporaryRoot)
-                .Any(path => Path.GetFileName(path).StartsWith("terminal-review-reveal-publishing-", StringComparison.Ordinal)),
+            Assert.IsFalse(Directory.GetDirectories(evidenceRoot)
+                .Any(path => Path.GetFileName(path).StartsWith($"evidence-s-terminal-{Commit}-review-reveal-publishing-", StringComparison.Ordinal)),
                 "Atomic reveal publication must not leave a partial sibling.");
 
             ProcessResult repeatedReveal = RunPowerShell(revealScript,
@@ -493,14 +524,13 @@ public sealed class EvidenceProtocolTests
             Assert.AreNotEqual(0, modifiedAfterReveal.ExitCode);
             StringAssert.Contains(modifiedAfterReveal.StandardError, "modified or replaced after reveal");
             ProcessResult repeatedReview = RunPowerShell(submitScript,
-                "-BlindDirectory", blind, "-AnswersPath", answersPath, "-ReviewParent", temporaryRoot);
+                "-BlindDirectory", blind, "-AnswersPath", answersPath, "-ReviewParent", evidenceRoot);
             Assert.AreNotEqual(0, repeatedReview.ExitCode);
             StringAssert.Contains(repeatedReview.StandardError, "cannot be modified, replaced, or resubmitted");
 
-            string otherEvidence = Path.Combine(temporaryRoot, "other-terminal");
             string otherBlind = Path.Combine(otherEvidence, "blind");
             Directory.CreateDirectory(otherBlind);
-            byte[] otherCommitments = Commitments(RunId + "-other", Nonce);
+            byte[] otherCommitments = Commitments(otherRunId, Nonce, otherCommit);
             File.WriteAllBytes(Path.Combine(otherBlind, "T03-06-S-attribution-commitments.json"), otherCommitments);
             File.WriteAllBytes(Path.Combine(otherBlind, "T03-06-S-review-request.json"), request);
             File.WriteAllBytes(Path.Combine(otherBlind, "T03-06-S01.bmp"), map);
@@ -511,9 +541,8 @@ public sealed class EvidenceProtocolTests
                 new("blind/T03-06-S01.bmp", L03BTestSupport.Sha256(map)),
             ];
             byte[] otherManifest = Manifest(1, "PASS", "REVIEW_REQUIRED", "REVIEW_REQUIRED",
-                Commit, Tree, FixturesBlob, "Release", TestHash, CoreHash, otherArtifacts);
+                otherCommit, Tree, FixturesBlob, "Release", TestHash, CoreHash, otherArtifacts);
             File.WriteAllBytes(Path.Combine(otherBlind, "T03-06-S-manifest.json"), otherManifest);
-            string replayReview = Path.Combine(temporaryRoot, $"evidence-s-review-{RunId}-other");
             Directory.CreateDirectory(replayReview);
             File.WriteAllBytes(Path.Combine(replayReview, L03BEvidenceProtocol.ReviewReceiptFileName), receipt);
             ProcessResult replay = RunPowerShell(revealScript,
@@ -526,6 +555,13 @@ public sealed class EvidenceProtocolTests
         finally
         {
             if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, recursive: true);
+            if (Directory.Exists(revealDirectory)) Directory.Delete(revealDirectory, recursive: true);
+            if (Directory.Exists(reviewDirectory)) Directory.Delete(reviewDirectory, recursive: true);
+            if (Directory.Exists(evidence)) Directory.Delete(evidence, recursive: true);
+            if (Directory.Exists(replayReview)) Directory.Delete(replayReview, recursive: true);
+            if (Directory.Exists(otherEvidence)) Directory.Delete(otherEvidence, recursive: true);
+            string controllerLock = evidence + "-review-controller.lock";
+            if (File.Exists(controllerLock)) File.Delete(controllerLock);
         }
     }
 
@@ -536,9 +572,21 @@ public sealed class EvidenceProtocolTests
         string repository = L03BTestSupport.FindRepositoryRoot();
         string submitScript = Path.Combine(repository, "testsrc", "WorldGen.Tests", "L03B", "New-L03BBlindReviewReceipt.ps1");
         string temporaryRoot = Path.Combine(Path.GetTempPath(), "isr-l03b-review-negative-" + Guid.NewGuid().ToString("N"));
+        string evidenceRoot = Path.Combine(repository, ".local", "L03B");
+        string terminalName = $"evidence-s-terminal-{Commit}";
+        string evidence = Path.Combine(evidenceRoot, terminalName);
+        string[] invalidRuns =
+        [
+            $"evidence-s-staging-{Commit}-{new string('1', 32)}",
+            $"evidence-s-staging-{Commit}-{new string('2', 32)}",
+            $"evidence-s-staging-{Commit}-{new string('3', 32)}",
+            $"evidence-s-staging-{Commit}-{new string('4', 32)}",
+            $"evidence-s-staging-{Commit}-{new string('5', 32)}",
+        ];
         try
         {
             Directory.CreateDirectory(temporaryRoot);
+            Assert.IsFalse(Directory.Exists(evidence), $"Synthetic official terminal already exists: {evidence}");
             byte[] validRequest = L03BEvidenceProtocol.CreateBlindReviewRequest(BlindOrder.Select(item => item.Code).ToArray());
             JsonObject baseAnswers = new()
             {
@@ -554,44 +602,88 @@ public sealed class EvidenceProtocolTests
 
             JsonObject subsetRequest = JsonNode.Parse(validRequest)!.AsObject();
             subsetRequest["codes"]!.AsArray().RemoveAt(5);
-            string subsetRun = RunId + "-subset";
+            string subsetRun = invalidRuns[0];
             string subsetBlind = CreateSyntheticBlindTerminal(
-                temporaryRoot, "subset-terminal", subsetRun, JsonSerializer.SerializeToUtf8Bytes(subsetRequest));
+                evidenceRoot, terminalName, subsetRun, JsonSerializer.SerializeToUtf8Bytes(subsetRequest));
             string subsetAnswers = Path.Combine(temporaryRoot, "subset-answers.json");
             File.WriteAllBytes(subsetAnswers, JsonSerializer.SerializeToUtf8Bytes(baseAnswers));
             ProcessResult subset = RunPowerShell(submitScript,
-                "-BlindDirectory", subsetBlind, "-AnswersPath", subsetAnswers, "-ReviewParent", temporaryRoot);
+                "-BlindDirectory", subsetBlind, "-AnswersPath", subsetAnswers, "-ReviewParent", evidenceRoot);
             Assert.AreNotEqual(0, subset.ExitCode);
             StringAssert.Contains(subset.StandardError, "exact S01 through S06 code set is invalid");
-            Assert.IsFalse(Directory.Exists(Path.Combine(temporaryRoot, $"evidence-s-review-{subsetRun}")));
+            Assert.IsFalse(Directory.Exists(Path.Combine(evidenceRoot, $"evidence-s-review-{subsetRun}")));
+            Directory.Delete(evidence, recursive: true);
 
             JsonObject fractionalAnswers = JsonNode.Parse(baseAnswers.ToJsonString())!.AsObject();
             fractionalAnswers["entries"]![0]!["confidence0To100BeforeReveal"] = 70.6;
-            string fractionalRun = RunId + "-fractional";
-            string fractionalBlind = CreateSyntheticBlindTerminal(temporaryRoot, "fractional-terminal", fractionalRun, validRequest);
+            string fractionalRun = invalidRuns[1];
+            string fractionalBlind = CreateSyntheticBlindTerminal(evidenceRoot, terminalName, fractionalRun, validRequest);
             string fractionalPath = Path.Combine(temporaryRoot, "fractional-answers.json");
             File.WriteAllBytes(fractionalPath, JsonSerializer.SerializeToUtf8Bytes(fractionalAnswers));
             ProcessResult fractional = RunPowerShell(submitScript,
-                "-BlindDirectory", fractionalBlind, "-AnswersPath", fractionalPath, "-ReviewParent", temporaryRoot);
+                "-BlindDirectory", fractionalBlind, "-AnswersPath", fractionalPath, "-ReviewParent", evidenceRoot);
             Assert.AreNotEqual(0, fractional.ExitCode);
             StringAssert.Contains(fractional.StandardError, "types must be string, string, integer, and string");
-            Assert.IsFalse(Directory.Exists(Path.Combine(temporaryRoot, $"evidence-s-review-{fractionalRun}")));
+            Assert.IsFalse(Directory.Exists(Path.Combine(evidenceRoot, $"evidence-s-review-{fractionalRun}")));
+            Directory.Delete(evidence, recursive: true);
 
             JsonObject numericObservationAnswers = JsonNode.Parse(baseAnswers.ToJsonString())!.AsObject();
             numericObservationAnswers["entries"]![0]!["morphologyObservations"] = 123;
-            string observationRun = RunId + "-numeric-observation";
-            string observationBlind = CreateSyntheticBlindTerminal(temporaryRoot, "observation-terminal", observationRun, validRequest);
+            string observationRun = invalidRuns[2];
+            string observationBlind = CreateSyntheticBlindTerminal(evidenceRoot, terminalName, observationRun, validRequest);
             string observationPath = Path.Combine(temporaryRoot, "observation-answers.json");
             File.WriteAllBytes(observationPath, JsonSerializer.SerializeToUtf8Bytes(numericObservationAnswers));
             ProcessResult numericObservation = RunPowerShell(submitScript,
-                "-BlindDirectory", observationBlind, "-AnswersPath", observationPath, "-ReviewParent", temporaryRoot);
+                "-BlindDirectory", observationBlind, "-AnswersPath", observationPath, "-ReviewParent", evidenceRoot);
             Assert.AreNotEqual(0, numericObservation.ExitCode);
             StringAssert.Contains(numericObservation.StandardError, "types must be string, string, integer, and string");
-            Assert.IsFalse(Directory.Exists(Path.Combine(temporaryRoot, $"evidence-s-review-{observationRun}")));
+            Assert.IsFalse(Directory.Exists(Path.Combine(evidenceRoot, $"evidence-s-review-{observationRun}")));
+            Directory.Delete(evidence, recursive: true);
+
+            string manifestTypeRun = invalidRuns[3];
+            string manifestTypeBlind = CreateSyntheticBlindTerminal(evidenceRoot, terminalName, manifestTypeRun, validRequest);
+            string manifestPath = Path.Combine(manifestTypeBlind, "T03-06-S-manifest.json");
+            JsonObject fractionalManifest = JsonNode.Parse(File.ReadAllBytes(manifestPath))!.AsObject();
+            fractionalManifest["schemaVersion"] = 1.5;
+            File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(fractionalManifest));
+            ProcessResult manifestType = RunPowerShell(submitScript,
+                "-BlindDirectory", manifestTypeBlind, "-AnswersPath", observationPath, "-ReviewParent", evidenceRoot);
+            Assert.AreNotEqual(0, manifestType.ExitCode);
+            StringAssert.Contains(manifestType.StandardError, "Blind manifest is not a reviewable PASS campaign");
+            Assert.IsFalse(Directory.Exists(Path.Combine(evidenceRoot, $"evidence-s-review-{manifestTypeRun}")));
+            Directory.Delete(evidence, recursive: true);
+
+            string commitmentsTypeRun = invalidRuns[4];
+            string commitmentsTypeBlind = CreateSyntheticBlindTerminal(evidenceRoot, terminalName, commitmentsTypeRun, validRequest);
+            string commitmentsPath = Path.Combine(commitmentsTypeBlind, "T03-06-S-attribution-commitments.json");
+            JsonObject fractionalCommitments = JsonNode.Parse(File.ReadAllBytes(commitmentsPath))!.AsObject();
+            fractionalCommitments["schemaVersion"] = 1.5;
+            byte[] fractionalCommitmentsBytes = JsonSerializer.SerializeToUtf8Bytes(fractionalCommitments);
+            File.WriteAllBytes(commitmentsPath, fractionalCommitmentsBytes);
+            byte[] map = Encoding.ASCII.GetBytes("synthetic-neutral-map");
+            byte[] commitmentsTypeManifest = Manifest(1, "PASS", "REVIEW_REQUIRED", "REVIEW_REQUIRED",
+                Commit, Tree, FixturesBlob, "Release", TestHash, CoreHash,
+                [
+                    new(L03BEvidenceProtocol.CommitmentsArtifactPath, L03BTestSupport.Sha256(fractionalCommitmentsBytes)),
+                    new(L03BEvidenceProtocol.ReviewRequestArtifactPath, L03BTestSupport.Sha256(validRequest)),
+                    new("blind/T03-06-S01.bmp", L03BTestSupport.Sha256(map)),
+                ]);
+            File.WriteAllBytes(Path.Combine(commitmentsTypeBlind, "T03-06-S-manifest.json"), commitmentsTypeManifest);
+            ProcessResult commitmentsType = RunPowerShell(submitScript,
+                "-BlindDirectory", commitmentsTypeBlind, "-AnswersPath", observationPath, "-ReviewParent", evidenceRoot);
+            Assert.AreNotEqual(0, commitmentsType.ExitCode);
+            StringAssert.Contains(commitmentsType.StandardError, "Attribution commitment header is invalid");
+            Assert.IsFalse(Directory.Exists(Path.Combine(evidenceRoot, $"evidence-s-review-{commitmentsTypeRun}")));
         }
         finally
         {
             if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, recursive: true);
+            if (Directory.Exists(evidence)) Directory.Delete(evidence, recursive: true);
+            foreach (string runId in invalidRuns)
+            {
+                string review = Path.Combine(evidenceRoot, $"evidence-s-review-{runId}");
+                if (Directory.Exists(review)) Directory.Delete(review, recursive: true);
+            }
         }
     }
 
@@ -843,8 +935,11 @@ public sealed class EvidenceProtocolTests
         Assert.IsFalse(module.Contains("nonce", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(submit.Contains("[string]$ReviewDirectory", StringComparison.Ordinal));
         Assert.IsFalse(controller.Contains("[string]$ReviewDirectory", StringComparison.Ordinal));
-        StringAssert.Contains(submit, "evidence-s-review-$($package.Binding.runId)");
-        StringAssert.Contains(controller, "evidence-s-review-$($blindPackage.Binding.runId)");
+        StringAssert.Contains(submit, "$review = [string]$package.ReviewDirectory");
+        StringAssert.Contains(controller, "$review = [string]$blindPackage.ReviewDirectory");
+        StringAssert.Contains(module, "evidence-s-terminal-$($Binding.commit)");
+        StringAssert.Contains(module, "copied terminals are forbidden");
+        StringAssert.Contains(module, "[IO.FileAttributes]::ReparsePoint");
 
         int receiptHeld = controller.IndexOf("Read-HeldReceiptBytes", StringComparison.Ordinal);
         int receiptVerified = controller.LastIndexOf("Read-L03BVerifiedReviewReceiptBytes", StringComparison.Ordinal);
@@ -859,10 +954,10 @@ public sealed class EvidenceProtocolTests
         StringAssert.Contains(controller, "Reveal publication already exists");
     }
 
-    private static byte[] Commitments(string runId, string nonce) =>
+    private static byte[] Commitments(string runId, string nonce, string commit = Commit) =>
         L03BEvidenceProtocol.CreateAttributionCommitments(
             runId,
-            Commit,
+            commit,
             Tree,
             FixturesBlob,
             "Release",
@@ -918,6 +1013,120 @@ public sealed class EvidenceProtocolTests
             throw new AssertFailedException("Blind review CLI exceeded its bounded integration timeout.");
         }
         return new ProcessResult(process.ExitCode, stdout.GetAwaiter().GetResult(), stderr.GetAwaiter().GetResult());
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (string directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
+        }
+        foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            File.Copy(file, Path.Combine(destination, Path.GetRelativePath(source, file)));
+        }
+    }
+
+    private static void ProbeRealJunctionRejection(
+        string submitScript,
+        string revealScript,
+        string evidence,
+        string blind,
+        string answersPath,
+        string temporaryRoot)
+    {
+        string evidenceAlias = Path.Combine(temporaryRoot, "official-terminal-alias");
+        try
+        {
+            CreateDirectoryReparsePoint(evidenceAlias, evidence);
+            ProcessResult aliasedSubmission = RunPowerShell(submitScript,
+                "-BlindDirectory", Path.Combine(evidenceAlias, "blind"), "-AnswersPath", answersPath,
+                "-ReviewParent", Path.GetDirectoryName(evidence)!);
+            Assert.AreNotEqual(0, aliasedSubmission.ExitCode);
+            StringAssert.Contains(aliasedSubmission.StandardError, "not the canonical blind child");
+            ProcessResult aliasedController = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidenceAlias, "-ExpectedReceiptSha256", new string('0', 64));
+            Assert.AreNotEqual(0, aliasedController.ExitCode);
+            StringAssert.Contains(aliasedController.StandardError, "not the canonical blind child");
+        }
+        finally
+        {
+            if (Directory.Exists(evidenceAlias)) Directory.Delete(evidenceAlias);
+        }
+
+        string blindTarget = evidence + "-blind-junction-target-" + Guid.NewGuid().ToString("N");
+        Directory.Move(blind, blindTarget);
+        try
+        {
+            CreateDirectoryReparsePoint(blind, blindTarget);
+            ProcessResult junctionBlind = RunPowerShell(submitScript,
+                "-BlindDirectory", blind, "-AnswersPath", answersPath,
+                "-ReviewParent", Path.GetDirectoryName(evidence)!);
+            Assert.AreNotEqual(0, junctionBlind.ExitCode);
+            StringAssert.Contains(junctionBlind.StandardError, "Official blind directory must be a physical directory");
+        }
+        finally
+        {
+            if (Directory.Exists(blind)) Directory.Delete(blind);
+            Directory.Move(blindTarget, blind);
+        }
+
+        string evidenceTarget = evidence + "-junction-target-" + Guid.NewGuid().ToString("N");
+        Directory.Move(evidence, evidenceTarget);
+        try
+        {
+            CreateDirectoryReparsePoint(evidence, evidenceTarget);
+            ProcessResult junctionSubmission = RunPowerShell(submitScript,
+                "-BlindDirectory", blind, "-AnswersPath", answersPath,
+                "-ReviewParent", Path.GetDirectoryName(evidence)!);
+            Assert.AreNotEqual(0, junctionSubmission.ExitCode);
+            StringAssert.Contains(junctionSubmission.StandardError, "Official evidence terminal must be a physical directory");
+            ProcessResult junctionController = RunPowerShell(revealScript,
+                "-EvidenceDirectory", evidence, "-ExpectedReceiptSha256", new string('0', 64));
+            Assert.AreNotEqual(0, junctionController.ExitCode);
+            StringAssert.Contains(junctionController.StandardError, "Official evidence terminal must be a physical directory");
+        }
+        finally
+        {
+            if (Directory.Exists(evidence)) Directory.Delete(evidence);
+            Directory.Move(evidenceTarget, evidence);
+        }
+    }
+
+    private static void CreateDirectoryReparsePoint(string link, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Directory.CreateSymbolicLink(link, target);
+        }
+        else
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo("cmd.exe")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                },
+            };
+            process.StartInfo.ArgumentList.Add("/d");
+            process.StartInfo.ArgumentList.Add("/c");
+            process.StartInfo.ArgumentList.Add("mklink");
+            process.StartInfo.ArgumentList.Add("/J");
+            process.StartInfo.ArgumentList.Add(link);
+            process.StartInfo.ArgumentList.Add(target);
+            process.Start();
+            string stdout = process.StandardOutput.ReadToEnd();
+            string stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            Assert.AreEqual(0, process.ExitCode, $"Could not create NTFS junction. stdout=[{stdout}] stderr=[{stderr}]");
+        }
+        FileAttributes attributes = File.GetAttributes(link);
+        Assert.AreNotEqual((FileAttributes)0, attributes & FileAttributes.ReparsePoint,
+            "The filesystem alias probe must be a real reparse point.");
     }
 
     private static string CreateSyntheticBlindTerminal(string root, string terminalName, string runId, byte[] request)

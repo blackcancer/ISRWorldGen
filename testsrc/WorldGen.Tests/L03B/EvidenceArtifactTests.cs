@@ -395,9 +395,9 @@ public sealed class EvidenceArtifactTests
                             requestPath = RelativeArtifactPath(output, reviewRequestPath),
                             requestSha256 = L03BTestSupport.Sha256(reviewRequestBytes),
                             requiredPrerevealFields = new[] { "identifiedFamilyBeforeReveal", "confidence0To100BeforeReveal", "morphologyObservations" },
-                            reviewerCommand = "New-L03BBlindReviewReceipt.ps1 -BlindDirectory <terminal/blind> -AnswersPath <answers.json> [-ReviewParent <canonical-terminal-parent>]",
+                            reviewerCommand = "New-L03BBlindReviewReceipt.ps1 -BlindDirectory <repo/.local/L03B/evidence-s-terminal-commit/blind> -AnswersPath <answers.json>",
                             controllerCommand = "Open-L03BBlindReview.ps1 -EvidenceDirectory <terminal> -ExpectedReceiptSha256 <reviewer-reported-sha256>",
-                            trustBoundary = "The reviewer receives only blind/. The controller retains sealed/ and the reveal tool rejects absent, changed, replayed, or mismatched receipts before parsing the key.",
+                            trustBoundary = "The reviewer process can read only the official terminal blind/ and create only its canonical review sibling. The controller retains sealed/ and rejects copied, aliased, absent, changed, replayed, or mismatched receipts before parsing the key.",
                         },
                         separateKey = new
                         {
