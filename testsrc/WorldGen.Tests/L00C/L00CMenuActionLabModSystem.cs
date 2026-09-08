@@ -17,6 +17,7 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
     // This token never exposes an API. It is only a cancellation capability for
     // the short bootstrap listener and becomes inert before controller handoff.
     private L00CManagerLeaseToken? pendingLease;
+    private ICoreClientAPI? levelFinalizeApi;
 
     /// <inheritdoc />
     public override void StartClientSide(ICoreClientAPI api)
@@ -29,6 +30,8 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         // reflection lock, debugger state, save, profile, or session.
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) return;
         string root = RequireLaboratoryRoot();
+        api.Event.LevelFinalize += OnLevelFinalize;
+        levelFinalizeApi = api;
         pendingLease = L00CProcessCampaignController.InstallOrSignal(api, root);
         Mod.Logger.Notification("L00C_INPROCESS_HARNESS_READY: process-lifetime ScreenManager pump installed or signalled.");
 #endif
@@ -38,12 +41,17 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
     public override void Dispose()
     {
 #if DEBUG
+        ICoreClientAPI? subscribed = levelFinalizeApi;
+        levelFinalizeApi = null;
+        if (subscribed is not null) subscribed.Event.LevelFinalize -= OnLevelFinalize;
         L00CManagerLeaseToken? retained = pendingLease;
         pendingLease = null;
         retained?.Cancel();
 #endif
         base.Dispose();
     }
+
+    private void OnLevelFinalize() => L00CProcessCampaignController.SignalLevelFinalize();
 
     private static string RequireLaboratoryRoot()
     {

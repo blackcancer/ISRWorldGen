@@ -8,12 +8,14 @@ $controller = Join-Path $PSScriptRoot 'L00CProcessCampaignController.cs'
 $laboratoryHost = Join-Path $PSScriptRoot 'L00CMenuActionLaboratoryHost.cs'
 $bootstrap = Join-Path $PSScriptRoot 'L00CFixtureBootstrap.cs'
 $driver = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
-foreach ($file in @($controller, $laboratoryHost, $bootstrap, $driver)) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing process campaign source: $file" } }
+$modSystem = Join-Path $PSScriptRoot 'L00CMenuActionLabModSystem.cs'
+foreach ($file in @($controller, $laboratoryHost, $bootstrap, $driver, $modSystem)) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing process campaign source: $file" } }
 
 $text = Get-Content -LiteralPath $controller -Raw
 $driverText = Get-Content -LiteralPath $driver -Raw
 $hostText = Get-Content -LiteralPath $laboratoryHost -Raw
 $bootstrapText = Get-Content -LiteralPath $bootstrap -Raw
+$modSystemText = Get-Content -LiteralPath $modSystem -Raw
 function Assert-Contains([string]$Value, [string]$Needle, [string]$Label) { if (-not $Value.Contains($Needle, [StringComparison]::Ordinal)) { throw "$Label is missing: $Needle" } }
 function Assert-Before([string]$Value, [string]$First, [string]$Second, [string]$Label) {
     $a = $Value.IndexOf($First, [StringComparison]::Ordinal); $b = $Value.IndexOf($Second, [StringComparison]::Ordinal)
@@ -53,6 +55,14 @@ Assert-Contains $bootstrapText 'WaitPrimaryMenu' 'Primary bootstrap state'
 Assert-Contains $bootstrapText 'WaitSecondaryCell' 'Secondary bootstrap state'
 Assert-Contains $bootstrapText 'L00CMenuActionDriver.EnterSingleplayerMenu(menu);' 'Native menu transition for live cell binding'
 Assert-Contains $bootstrapText 'ReadUniqueSaveCell' 'Observed save-cell binding'
+Assert-Contains $modSystemText 'api.Event.LevelFinalize += OnLevelFinalize;' 'Native LevelFinalize subscription'
+Assert-Contains $modSystemText 'subscribed.Event.LevelFinalize -= OnLevelFinalize;' 'Native LevelFinalize unsubscription'
+Assert-Contains $modSystemText 'L00CProcessCampaignController.SignalLevelFinalize();' 'LevelFinalize forwarding'
+Assert-Contains $text 'internal static void SignalLevelFinalize()' 'Process-level finalization signal'
+Assert-Contains $text 'active.bootstrap?.SignalLevelFinalize();' 'Bootstrap receives finalization signal'
+Assert-Contains $bootstrapText 'internal void SignalLevelFinalize()' 'Fixture finalization latch'
+Assert-Contains $bootstrapText 'fixture.LevelFinalizeObserved' 'Finalization latch required before return'
+if ($bootstrapText.Contains('clientPlayingFired` is the audited client-side LevelFinalize gate')) { throw 'Player-ready flag must not be mislabeled as LevelFinalize.' }
 Assert-Contains $hostText 'expectedRole' 'Role rejection'
 Assert-Contains $hostText 'distinct marked saves and distinct confirmed menu cells' 'Distinct role/cell rejection'
 

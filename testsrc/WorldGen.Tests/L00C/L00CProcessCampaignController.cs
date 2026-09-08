@@ -60,6 +60,20 @@ internal sealed class L00CProcessCampaignController
         }
     }
 
+    // The session ModSystem forwards IClientEventAPI.LevelFinalize here. The
+    // process pump owns fixture state, so a disposed world cannot retain it.
+    internal static void SignalLevelFinalize()
+    {
+        lock (Gate)
+        {
+            if (installTransaction.Active is L00CProcessCampaignController active && !active.terminal)
+            {
+                active.bootstrap?.SignalLevelFinalize();
+                active.QueuePump();
+            }
+        }
+    }
+
     // Invoked at the ModSystem disposal boundary. This cannot hand off a campaign;
     // it only makes a pending session listener terminal and clears all references.
 

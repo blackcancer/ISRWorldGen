@@ -86,12 +86,8 @@ internal static class L00CMenuActionDriver
         return Invoke(screenManager, "ConnectToSingleplayer", new[] { args }, "create-" + role + "-world", false);
     }
 
-    /// <summary>
-    /// Refuses to leave a just-created single-player world until the native client
-    /// has consumed its LevelFinalize path and the running screen still owns the
-    /// exact new-world arguments.  A merely allocated ClientMain is not readiness.
-    /// </summary>
-    internal static bool TryFindFinalizedNewWorldSession(object screenManager, string expectedSavePath, out object? clientMain)
+    /// <summary>Requires a separately subscribed native LevelFinalize event, then checks the playable client state.</summary>
+    internal static bool TryFindFinalizedNewWorldSession(object screenManager, string expectedSavePath, bool levelFinalizeObserved, out object? clientMain)
     {
         clientMain = null;
         if (string.IsNullOrWhiteSpace(expectedSavePath)) throw new ArgumentException("L00-C expected save path is required.", nameof(expectedSavePath));
@@ -113,11 +109,22 @@ internal static class L00CMenuActionDriver
         if (runningScreen is null) return false;
         FieldInfo serverArgs = RequireDeclaredInstanceField(runningType, "serverargs", argsType, true, 0x1073);
         object? nativeArgs = serverArgs.GetValue(runningScreen);
-        if (nativeArgs is null || !ReadStartServerArgsString(nativeArgs, "SaveFileLocation", 0x0f0e).Equals(Path.GetFullPath(expectedSavePath), StringComparison.OrdinalIgnoreCase)) return false;
-        if (ReadStartServerArgsBool(nativeArgs, "IsNew", 0x0f1b) is not true) return false;
+        bool argsPresent = nativeArgs is not null;
+        bool pathMatches = argsPresent && ReadStartServerArgsString(nativeArgs!, "SaveFileLocation", 0x0f0e).Equals(Path.GetFullPath(expectedSavePath), StringComparison.OrdinalIgnoreCase);
+        bool isNew = argsPresent && ReadStartServerArgsBool(nativeArgs!, "IsNew", 0x0f1b) is true;
+        if (!IsNewWorldReadinessSatisfied(levelFinalizeObserved, true, true, true, true, true, true, argsPresent, pathMatches, isNew)) return false;
         clientMain = main;
         return true;
     }
+
+    // Executable oracle seam. The production caller supplies the first argument
+    // from IClientEventAPI.LevelFinalize; this function never infers it from a
+    // convenient-but-unrelated readiness flag.
+    internal static bool IsNewWorldReadinessSatisfied(bool levelFinalizeObserved, bool clientPlayingFired, bool spawned,
+        bool assetsReceived, bool blocksReceivedAndLoaded, bool doneColorMaps, bool doneBlockAndItemShapeLoading,
+        bool serverArgsPresent, bool savePathMatches, bool isNew)
+        => levelFinalizeObserved && clientPlayingFired && spawned && assetsReceived && blocksReceivedAndLoaded &&
+           doneColorMaps && doneBlockAndItemShapeLoading && serverArgsPresent && savePathMatches && isNew;
 
     internal static L00CMenuActionReceipt ReturnToMainMenu(object clientMain, object screenManager)
     {
@@ -288,6 +295,28 @@ internal static class L00CMenuActionDriver
     private static object CreateStartServerArgs(string role, string savePath)
     {
         Type type = RequireStartServerArgsType();
+        return CreateStartServerArgsCore(type, role, savePath, getter => ReadClientSetting(type, getter, getter switch
+        {
+            "get_PlayerName" => 0x282b, "get_DisabledMods" => 0x28c3, "get_ModPaths" => 0x28c1, "get_Language" => 0x2869,
+            _ => throw new InvalidOperationException("L00-C bootstrap refused: unexpected ClientSettings getter " + getter + ".")
+        }));
+    }
+
+    // Linked production source tests this against the real 1.22.7 argument type
+    // without reading a user profile or starting a Vintage Story process.
+    internal static object CreateStartServerArgsForOracle(Type type, string role, string savePath, object? playerName,
+        IEnumerable<string> disabledMods, IEnumerable<string> clientModPaths, string language)
+        => CreateStartServerArgsCore(type, role, savePath, getter => getter switch
+        {
+            "get_PlayerName" => playerName,
+            "get_DisabledMods" => disabledMods,
+            "get_ModPaths" => clientModPaths,
+            "get_Language" => language,
+            _ => throw new InvalidOperationException("L00-C oracle received an unexpected ClientSettings getter.")
+        });
+
+    private static object CreateStartServerArgsCore(Type type, string role, string savePath, Func<string, object?> readSetting)
+    {
         object args = Activator.CreateInstance(type) ?? throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs has no usable parameterless constructor.");
         // This mapping mirrors GuiScreenSingleplayerNewWorld.CreateWorld in 1.22.7.
         // The private assembly fields are intentionally audited by name/type/token,
@@ -301,10 +330,10 @@ internal static class L00CMenuActionDriver
         SetStartServerArgsField(args, "WorldType", "standard", 0x0f13, true);
         SetStartServerArgsField(args, "WorldConfiguration", CreateLaboratoryWorldConfiguration(type), 0x0f14, true);
         SetStartServerArgsField(args, "MapSizeY", (int?)256, 0x0f15, true);
-        SetStartServerArgsField(args, "CreatedByPlayerName", ReadClientSetting(type, "get_PlayerName", 0x282b), 0x0f16, false);
-        SetStartServerArgsField(args, "DisabledMods", CloneStringList(type, ReadClientSetting(type, "get_DisabledMods", 0x28c3)), 0x0f17, false);
-        SetStartServerArgsField(args, "ClientModPaths", CloneStringList(type, ReadClientSetting(type, "get_ModPaths", 0x28c1)), 0x0f19, false);
-        SetStartServerArgsField(args, "Language", ReadClientSetting(type, "get_Language", 0x2869), 0x0f1a, true);
+        SetStartServerArgsField(args, "CreatedByPlayerName", readSetting("get_PlayerName"), 0x0f16, false);
+        SetStartServerArgsField(args, "DisabledMods", CloneStringList(type, readSetting("get_DisabledMods")), 0x0f17, false);
+        SetStartServerArgsField(args, "ClientModPaths", CloneStringList(type, readSetting("get_ModPaths")), 0x0f19, false);
+        SetStartServerArgsField(args, "Language", readSetting("get_Language"), 0x0f1a, true);
         SetStartServerArgsField(args, "IsNew", true, 0x0f1b, true);
         return args;
     }

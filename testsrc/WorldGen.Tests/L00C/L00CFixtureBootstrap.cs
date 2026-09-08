@@ -45,7 +45,7 @@ internal sealed class L00CFixtureBootstrap
         {
             case State.WaitPrimaryMenu:
                 if (!StableMenu(screenManager)) return false;
-                Create(screenManager, primary); state = State.WaitPrimaryWorld; return false;
+                state = State.WaitPrimaryWorld; Create(screenManager, primary); return false;
             case State.WaitPrimaryWorld:
                 if (!StableFinalizedNewWorld(screenManager, primary, out object? main)) return false;
                 L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("primary-created-returned", primary, "return-main-menu"); state = State.WaitPrimaryCell; return false;
@@ -54,7 +54,7 @@ internal sealed class L00CFixtureBootstrap
                 Publish(primary); Receipt("primary-cell-confirmed", primary, "GuiScreenSingleplayer.entries"); state = State.WaitSecondaryMenu; return false;
             case State.WaitSecondaryMenu:
                 if (!StableMenu(screenManager)) return false;
-                Create(screenManager, secondary); state = State.WaitSecondaryWorld; return false;
+                state = State.WaitSecondaryWorld; Create(screenManager, secondary); return false;
             case State.WaitSecondaryWorld:
                 if (!StableFinalizedNewWorld(screenManager, secondary, out main)) return false;
                 L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("secondary-created-returned", secondary, "return-main-menu"); state = State.WaitSecondaryCell; return false;
@@ -70,6 +70,7 @@ internal sealed class L00CFixtureBootstrap
 
     private void Create(object screenManager, Fixture fixture)
     {
+        fixture.LevelFinalizeObserved = false;
         L00CMenuActionReceipt receipt = L00CMenuActionDriver.CreateFixtureWorld(screenManager, fixture.Role, fixture.SavePath);
         Receipt(receipt.Action, fixture, receipt.TargetMethod);
     }
@@ -80,10 +81,9 @@ internal sealed class L00CFixtureBootstrap
     }
     private bool StableFinalizedNewWorld(object screenManager, Fixture fixture, out object? main)
     {
-        // `clientPlayingFired` is the audited client-side LevelFinalize gate;
-        // the helper also requires all native ready flags and the exact local
-        // StartServerArgs path before it can issue the first return action.
-        if (!L00CMenuActionDriver.TryFindFinalizedNewWorldSession(screenManager, fixture.SavePath, out main) || main is null)
+        // The process controller records IClientEventAPI.LevelFinalize. It is
+        // required in addition to the native playable flags and exact local args.
+        if (!L00CMenuActionDriver.TryFindFinalizedNewWorldSession(screenManager, fixture.SavePath, fixture.LevelFinalizeObserved, out main) || main is null)
         {
             stableTicks = 0;
             return false;
@@ -107,6 +107,12 @@ internal sealed class L00CFixtureBootstrap
         stableTicks = 0; bindingMenuRequested = false; fixture.CellIndex = ReadUniqueSaveCell(screen, fixture.SavePath); return true;
     }
     private bool ResetStable() { stableTicks = 0; return true; }
+    // Called only by the process-wide controller's IClientEventAPI.LevelFinalize callback.
+    internal void SignalLevelFinalize()
+    {
+        if (state == State.WaitPrimaryWorld) primary.LevelFinalizeObserved = true;
+        else if (state == State.WaitSecondaryWorld) secondary.LevelFinalizeObserved = true;
+    }
     private static int ReadUniqueSaveCell(object screen, string savePath)
     {
         Type type = screen.GetType();
@@ -151,5 +157,5 @@ internal sealed class L00CFixtureBootstrap
     private static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
     private static void RequireDebugLaboratory() { if (!Debugger.IsAttached || !string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) throw new InvalidOperationException("L00-C bootstrap requires Debugger.IsAttached and ISR_L00C_LAB=1."); }
     private enum State { WaitPrimaryMenu, WaitPrimaryWorld, WaitPrimaryCell, WaitSecondaryMenu, WaitSecondaryWorld, WaitSecondaryCell, Completed }
-    private sealed class Fixture { internal Fixture(string role, string savePath) { Role = role; SavePath = Path.GetFullPath(savePath); } internal string Role { get; } internal string SavePath { get; } internal int CellIndex { get; set; } = -1; }
+    private sealed class Fixture { internal Fixture(string role, string savePath) { Role = role; SavePath = Path.GetFullPath(savePath); } internal string Role { get; } internal string SavePath { get; } internal int CellIndex { get; set; } = -1; internal bool LevelFinalizeObserved { get; set; } }
 }

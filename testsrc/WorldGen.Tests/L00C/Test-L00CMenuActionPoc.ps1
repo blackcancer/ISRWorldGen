@@ -26,6 +26,8 @@ function Assert-Calls([string]$type, [string]$methodName, [string]$target) {
 Assert-Calls 'Vintagestory.Client.GuiCompositeMainMenuLeft' 'OnSingleplayer' 'ScreenManager::LoadAndCacheScreen'
 Assert-Calls 'Vintagestory.Client.GuiScreenSingleplayer' 'OnClickCellLeft' 'ScreenManager::ConnectToSingleplayer'
 Assert-Calls 'Vintagestory.Client.ScreenManager' 'ConnectToSingleplayer' 'ScreenManager::StartGame'
+$startup = $module.GetType('Vintagestory.Client.NoObf.ClientSystemStartup').Methods | Where-Object { $_.Name -eq 'HandleLevelFinalize' } | Select-Object -First 1
+if ($null -eq $startup -or -not ($startup.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.FullName -eq 'System.Void Vintagestory.Client.NoObf.ClientEventAPI::TriggerLevelFinalize()' })) { throw 'Audited LevelFinalize packet path no longer triggers IClientEventAPI.LevelFinalize.' }
 $newWorld = $module.GetType('Vintagestory.Client.GuiScreenSingleplayerNewWorld')
 $createWorld = $newWorld.Methods | Where-Object Name -eq 'CreateWorld' | Select-Object -First 1
 if ($null -eq $createWorld) { throw 'Audited native CreateWorld is absent.' }
