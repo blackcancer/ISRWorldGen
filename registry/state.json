@@ -693,10 +693,10 @@
       "blocker": null
     },
     "L19-B": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
+      "status": "IN_PROGRESS",
+      "owner": "agent:l19-b",
+      "branch": "agent/l19-b",
+      "base_commit": "0c13f0b",
       "evidence": [],
       "blocker": null
     },
