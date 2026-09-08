@@ -10,6 +10,15 @@ using Vintagestory.API.Client;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
+/// <summary>Abort capability retained by a session ModSystem; it never exposes an API.</summary>
+internal sealed class L00CManagerLeaseToken
+{
+    private Action? cancel;
+    internal L00CManagerLeaseToken(Action cancelAction) { cancel = cancelAction; }
+    internal void Cancel() { Action? action = cancel; cancel = null; action?.Invoke(); }
+    internal void Complete() { cancel = null; }
+}
+
 internal sealed class L00CProcessCampaignController
 {
     private static readonly object Gate = new();
@@ -31,39 +40,43 @@ internal sealed class L00CProcessCampaignController
         bootstrap = new L00CFixtureBootstrap(root, evidence);
     }
 
-    internal static void InstallOrSignal(ICoreClientAPI api, string laboratoryRoot)
+    internal static L00CManagerLeaseToken? InstallOrSignal(ICoreClientAPI api, string laboratoryRoot)
     {
         RequireDebugLaboratory();
         if (api is null) throw new ArgumentNullException(nameof(api));
         string root = Path.GetFullPath(laboratoryRoot);
         lock (Gate)
         {
-            if (active is not null) { RequireSameRoot(active.root, root); active.SignalSessionReady(); return; }
-            if (bootstrapLease is not null) { RequireSameRoot(bootstrapLease.Root, root); return; }
+            if (active is not null) { RequireSameRoot(active.root, root); active.SignalSessionReady(); return null; }
+            if (bootstrapLease is not null) { RequireSameRoot(bootstrapLease.Root, root); return null; }
             L00CManagerResolution resolution;
             try { resolution = L00CMenuActionDriver.ResolveScreenManagerFromClientApi(api); }
-            catch (Exception exception) { WriteLeaseReceipt(root, "resolver-fault", exception.GetType().Name); return; }
-            if (resolution.Status == L00CManagerResolutionStatus.Ready) { InstallResolvedLocked(root, resolution.ScreenManager!); return; }
-            if (resolution.Status == L00CManagerResolutionStatus.ApiTypeMismatch) { WriteLeaseReceipt(root, "api-type-mismatch", resolution.Status.ToString()); return; }
-            bootstrapLease = new L00CManagerBootstrapLease(api, root);
-            try { bootstrapLease.Start(); WriteLeaseReceipt(root, "waiting", resolution.Status.ToString()); }
+            catch (Exception exception) { WriteLeaseReceipt(root, "resolver-fault", exception.GetType().Name); return null; }
+            if (resolution.Status == L00CManagerResolutionStatus.Ready) { TryInstallResolvedLocked(root, resolution.ScreenManager!, "immediate"); return null; }
+            if (resolution.Status == L00CManagerResolutionStatus.ApiTypeMismatch) { WriteLeaseReceipt(root, "api-type-mismatch", resolution.Status.ToString()); return null; }
+            L00CManagerBootstrapLease lease = new(api, root);
+            bootstrapLease = lease;
+            L00CManagerLeaseToken token = new(() => CancelLease(lease));
+            lease.SetToken(token);
+            try { lease.Start(); WriteLeaseReceipt(root, "waiting", resolution.Status.ToString()); }
             catch (Exception exception)
             {
-                bootstrapLease.Stop(); bootstrapLease = null;
+                lease.Stop(); bootstrapLease = null; token.Complete();
                 WriteLeaseReceipt(root, "listener-register-fault", exception.GetType().Name);
             }
+            return bootstrapLease is null ? null : token;
         }
     }
 
     // Invoked at the ModSystem disposal boundary. This cannot hand off a campaign;
     // it only makes a pending session listener terminal and clears all references.
-    internal static void DisposeSession(ICoreClientAPI api)
+    private static void CancelLease(L00CManagerBootstrapLease? lease)
     {
         lock (Gate)
         {
-            if (bootstrapLease is null || !bootstrapLease.Owns(api)) return;
-            string root = bootstrapLease.Root;
-            bool unregistered = bootstrapLease.Stop(); bootstrapLease = null;
+            if (lease is null || !ReferenceEquals(bootstrapLease, lease)) return;
+            string root = lease.Root;
+            bool unregistered = lease.Stop(); bootstrapLease = null;
             WriteLeaseReceipt(root, unregistered ? "disposed" : "dispose-unregister-fault", "session-dispose");
         }
     }
@@ -85,8 +98,8 @@ internal sealed class L00CProcessCampaignController
                 // complete before the controller is created. Failure means no campaign.
                 if (!lease.Stop()) { bootstrapLease = null; WriteLeaseReceipt(root, "handoff-unregister-fault", "no-controller-installed"); return; }
                 bootstrapLease = null;
-                InstallResolvedLocked(root, resolution.ScreenManager!);
-                WriteLeaseReceipt(root, "ready", "listener-unregistered-before-controller");
+                if (TryInstallResolvedLocked(root, resolution.ScreenManager!, "callback"))
+                    WriteLeaseReceipt(root, "ready", "listener-unregistered-before-controller");
                 return;
             }
             if (resolution.Status == L00CManagerResolutionStatus.ApiTypeMismatch)
@@ -101,11 +114,25 @@ internal sealed class L00CProcessCampaignController
         WriteLeaseReceipt(root, unregistered ? status : status + "-unregister-fault", detail);
     }
 
-    private static void InstallResolvedLocked(string laboratoryRoot, object manager)
+    private static bool TryInstallResolvedLocked(string laboratoryRoot, object manager, string phase)
     {
-        if (manager is null) throw new ArgumentNullException(nameof(manager));
-        active = new L00CProcessCampaignController(manager, laboratoryRoot);
-        active.SignalSessionReady(); active.QueuePump();
+        if (manager is null) { WriteLeaseReceipt(laboratoryRoot, "install-fault", "null-manager"); return false; }
+        L00CProcessCampaignController? candidate = null;
+        try
+        {
+            candidate = new L00CProcessCampaignController(manager, laboratoryRoot);
+            candidate.SignalSessionReady();
+            active = candidate;
+            candidate.QueuePump();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            if (ReferenceEquals(active, candidate)) active = null;
+            candidate?.UnregisterAndClearSingleton();
+            WriteLeaseReceipt(laboratoryRoot, "install-pump-fault", phase + "-" + exception.GetType().Name);
+            return false;
+        }
     }
 
     private static void RequireSameRoot(string expected, string actual)
@@ -170,6 +197,7 @@ internal sealed class L00CProcessCampaignController
         private readonly DateTimeOffset deadlineUtc = DateTimeOffset.UtcNow.AddSeconds(30);
         private ICoreClientAPI? api;
         private Action<float>? tick;
+        private L00CManagerLeaseToken? token;
         private long listenerId;
         private int attempts;
         private bool terminal;
@@ -179,6 +207,7 @@ internal sealed class L00CProcessCampaignController
         internal ICoreClientAPI? Api => api;
         internal bool IsTerminal => terminal;
         internal bool Owns(ICoreClientAPI candidate) => ReferenceEquals(api, candidate);
+        internal void SetToken(L00CManagerLeaseToken value) { token = value; }
         internal void Start()
         {
             if (terminal || api is null) throw new InvalidOperationException("L00-C bootstrap lease is already terminal.");
@@ -197,7 +226,7 @@ internal sealed class L00CProcessCampaignController
             terminal = true; ICoreClientAPI? retainedApi = api; long retainedId = listenerId;
             try { if (retainedApi is not null && retainedId != 0) retainedApi.Event.UnregisterGameTickListener(retainedId); return true; }
             catch { return false; }
-            finally { listenerId = 0; tick = null; api = null; }
+            finally { listenerId = 0; tick = null; api = null; token?.Complete(); token = null; }
         }
         void IDisposable.Dispose() { _ = Stop(); }
     }

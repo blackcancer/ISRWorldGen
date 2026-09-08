@@ -14,7 +14,9 @@ namespace ISRWorldGen.L00C.Laboratory;
 /// </summary>
 public sealed class L00CMenuActionLabModSystem : ModSystem
 {
-    private ICoreClientAPI? sessionApi;
+    // This token never exposes an API. It is only a cancellation capability for
+    // the short bootstrap listener and becomes inert before controller handoff.
+    private L00CManagerLeaseToken? pendingLease;
 
     /// <inheritdoc />
     public override void StartClientSide(ICoreClientAPI api)
@@ -27,8 +29,7 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         // reflection lock, debugger state, save, profile, or session.
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) return;
         string root = RequireLaboratoryRoot();
-        sessionApi = api;
-        L00CProcessCampaignController.InstallOrSignal(api, root);
+        pendingLease = L00CProcessCampaignController.InstallOrSignal(api, root);
         Mod.Logger.Notification("L00C_INPROCESS_HARNESS_READY: process-lifetime ScreenManager pump installed or signalled.");
 #endif
     }
@@ -37,9 +38,9 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
     public override void Dispose()
     {
 #if DEBUG
-        ICoreClientAPI? retained = sessionApi;
-        sessionApi = null;
-        if (retained is not null) L00CProcessCampaignController.DisposeSession(retained);
+        L00CManagerLeaseToken? retained = pendingLease;
+        pendingLease = null;
+        retained?.Cancel();
 #endif
         base.Dispose();
     }
