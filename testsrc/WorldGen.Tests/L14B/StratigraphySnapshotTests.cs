@@ -13,12 +13,16 @@ public sealed class StratigraphySnapshotTests
     {
         GeologyVolumeSnapshot volume = Fixture();
         GeologyVolumeSnapshot normalInvertedMutant = Fixture(faultNormalX: -1d);
+        GeologyVolumeSnapshot priorityOracle = Fixture(competingIntrusions: true);
+        GeologyVolumeSnapshot priorityInvertedMutant = Fixture(competingIntrusions: true, granitePriority: 4, basaltPriority: 5);
 
         Assert.AreEqual("shale", volume.SampleRock(20, 69, 0).RockKey);
         Assert.AreEqual("basalt", volume.SampleRock(20, 39, 0).RockKey);
         Assert.AreEqual("granite", volume.SampleRock(0, 40, 0).RockKey);
         Assert.AreEqual("basalt", volume.SampleRock(1, 31, 0).RockKey);
         Assert.AreEqual("shale", normalInvertedMutant.SampleRock(1, 31, 0).RockKey);
+        Assert.AreEqual("granite", priorityOracle.SampleRock(0, 40, 0).RockKey);
+        Assert.AreEqual("basalt", priorityInvertedMutant.SampleRock(0, 40, 0).RockKey);
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new StratigraphicLayer(Id(99), "shale", 0, new(0, 0, 0), 0));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new StratigraphicSurface(double.NaN, 0, 0));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new StratigraphicFault(Id(98), 0, 0, 0, 0, 0, 1));
@@ -57,10 +61,11 @@ public sealed class StratigraphySnapshotTests
         RegionObservation[] reorderedWorkers = fixture.Sample(volume, reverseOrder: true, parallel: true);
         RegionObservation[] shiftedRegionMutant = fixture.Sample(volume, shiftedRegion: (0, 0), xOffset: -1, assertExpected: false);
 
-        CollectionAssert.AreEqual(new[] { "shale", "basalt", "shale", "shale" }, canonical.Select(value => value.RockKey).ToArray());
+        CollectionAssert.AreEqual(new[] { "shale", "shale", "shale", "basalt" }, canonical.Select(value => value.RockKey).ToArray());
         CollectionAssert.AreEqual(canonical, reorderedWorkers);
+        Assert.AreEqual(RegionFixture.Digest(canonical), RegionFixture.Digest(reorderedWorkers));
         Assert.AreNotEqual(RegionFixture.Digest(canonical), RegionFixture.Digest(shiftedRegionMutant));
-        Assert.AreEqual("shale", shiftedRegionMutant[1].RockKey);
+        Assert.AreEqual("shale", shiftedRegionMutant[3].RockKey);
     }
 
     [TestMethod]
@@ -77,7 +82,7 @@ public sealed class StratigraphySnapshotTests
         Assert.ThrowsExactly<InvalidOperationException>(() => consumer.RequireCompatible(stale));
     }
 
-    private static GeologyVolumeSnapshot Fixture(bool reverse = false, string revision = "geo-r1", double faultNormalX = 1d)
+    private static GeologyVolumeSnapshot Fixture(bool reverse = false, string revision = "geo-r1", double faultNormalX = 1d, bool competingIntrusions = false, int granitePriority = 5, int basaltPriority = 4)
     {
         ContentCatalogSnapshot catalog = new("catalog-r1", "vintagestory-1.22.7", "asset-r1", Hash256.Compute("catalog-r1"u8),
         [
@@ -87,7 +92,9 @@ public sealed class StratigraphySnapshotTests
         ]);
         StratigraphicLayer[] layers = [new(Id(1), "shale", 1, new(60, 0.5, 0), 30), new(Id(2), "basalt", 0, new(30, 0.5, 0), 90)];
         StratigraphicFault[] faults = [new(Id(3), 1, 0, 0, faultNormalX, 0, 10)];
-        IntrusionVolume[] intrusions = [new(Id(4), "granite", 5, 0, 40, 0, 3, 5, 3)];
+        IntrusionVolume[] intrusions = competingIntrusions
+            ? [new(Id(4), "granite", granitePriority, 0, 40, 0, 3, 5, 3), new(Id(5), "basalt", basaltPriority, 0, 40, 0, 3, 5, 3)]
+            : [new(Id(4), "granite", granitePriority, 0, 40, 0, 3, 5, 3)];
         return new(revision, catalog, "blocks-r1", -100, 120, reverse ? layers.Reverse() : layers, reverse ? faults.Reverse() : faults, reverse ? intrusions.Reverse() : intrusions);
     }
 
@@ -114,8 +121,7 @@ public sealed class StratigraphySnapshotTests
         public RegionObservation[] Sample(IGeologyVolumeQuery volume, bool reverseOrder = false, bool parallel = false, (int X, int Z)? shiftedRegion = null, int xOffset = 0, bool assertExpected = true)
         {
             RegionPoint[] ordered = (reverseOrder ? points.Reverse() : points).ToArray();
-            if (parallel) ordered = ordered.AsParallel().AsOrdered().ToArray();
-            RegionObservation[] observations = ordered.Select(point =>
+            Func<RegionPoint, RegionObservation> samplePoint = point =>
             {
                 long x = ((long)point.RegionX * regionSize) + point.LocalX;
                 if (shiftedRegion == (point.RegionX, point.RegionZ)) x += xOffset;
@@ -123,8 +129,11 @@ public sealed class StratigraphySnapshotTests
                 GeologySample sample = volume.SampleRock(x, point.Y, z);
                 if (assertExpected) Assert.AreEqual(point.ExpectedRock, sample.RockKey, "Analytic regional fixture mismatch.");
                 return new RegionObservation(point.RegionX, point.RegionZ, x, point.Y, z, sample.RockKey);
-            }).ToArray();
-            return reverseOrder ? observations.Reverse().ToArray() : observations;
+            };
+            IEnumerable<RegionObservation> observations = parallel
+                ? ordered.AsParallel().WithDegreeOfParallelism(2).Select(samplePoint).ToArray()
+                : ordered.Select(samplePoint);
+            return observations.OrderBy(value => value.RegionZ).ThenBy(value => value.RegionX).ThenBy(value => value.WorldZ).ThenBy(value => value.WorldX).ToArray();
         }
         public static Hash256 Digest(IEnumerable<RegionObservation> observations) => Hash256.Compute(Encoding.UTF8.GetBytes(string.Join('\n', observations.Select(value => $"{value.RegionX}|{value.RegionZ}|{value.WorldX}|{value.Y}|{value.WorldZ}|{value.RockKey}"))));
     }
