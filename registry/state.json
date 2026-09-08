@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-08T07:18:50.3280828Z",
-  "integrated_commit": "43950f8bec66ad82fa208f070688b2ec3c86371b",
+  "updated_utc": "2026-09-08T07:34:22.9023765Z",
+  "integrated_commit": "66e59d8393b8cab5666ebaa74f95d4300394ec77",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -186,12 +186,17 @@
         "commit:35f13074aebca6fe1772ada7ac491d58d1dad58d",
         "commit:0c6ca2d5ca9622dbaa71d226c5c2046d98a318af",
         "commit:43950f8bec66ad82fa208f070688b2ec3c86371b",
+        "commit:3774e842d92c8d19bae05f42d294ee7418673163",
+        "commit:7877af6",
+        "commit:bd6b617",
         "local:.local/L03C-integrated/tests/debug/L03C-integrated-debug.trx",
         "local:.local/L03C-integrated/tests/release/L03C-integrated-release.trx",
         "local:.local/L03C-integrated/tests/l03a-release/L03A-after-L03C-release.trx",
         "local:.local/L03C-enriched/tests/debug/L03C-enriched-integrated-debug.trx",
         "local:.local/L03C-enriched/tests/release/L03C-enriched-integrated-release.trx",
-        "local:.local/L03C-enriched/tests/l03a-release/L03A-after-L03C-enrichment-release.trx"
+        "local:.local/L03C-enriched/tests/l03a-release/L03A-after-L03C-enrichment-release.trx",
+        "local:.local/L03C-downstream/tests/debug/L03C-downstream-integrated-debug.trx",
+        "local:.local/L03C-downstream/tests/release/L03C-downstream-integrated-release.trx"
       ],
       "blocker": null
     },
@@ -204,8 +209,12 @@
         "worklogs/L04-A.md",
         "commit:3637030d1efcb5b9791ef814560120fc3ec8483f",
         "commit:0c6a21d090c68aed089987977e1f51f93565ea9f",
+        "commit:f9ef7372d2a8e2ca488193ee5dbcdbccba339cc4",
+        "commit:2ebf817cac52872cf22696b260e3df9d236a4d3a",
         "local:.local/L04A-integrated/tests/debug/L04A-integrated-debug.trx",
-        "local:.local/L04A-integrated/tests/release/L04A-integrated-release.trx"
+        "local:.local/L04A-integrated/tests/release/L04A-integrated-release.trx",
+        "local:.local/L04A-enriched/tests/debug/L04A-enriched-integrated-debug.trx",
+        "local:.local/L04A-enriched/tests/release/L04A-enriched-integrated-release.trx"
       ],
       "blocker": "T04-01 et T04-02 moteur restent BLOCKED : aucun adaptateur climat ni processus Vintage Story n'est encore disponible dans ce sous-lot."
     },
@@ -235,8 +244,13 @@
         "commit:9dc0366cbd12b7f6a7ea5c44525d6f6f9a34b0b8",
         "commit:3755f8d",
         "commit:4fe80f950243e801da4fc038136ee68f8b31437d",
+        "commit:5f69a928d45e23560f757e95f697a80fb42d593e",
+        "commit:ea7e28e9e3fbfcc7931a36578cc237a40c9c82df",
+        "commit:66e59d8393b8cab5666ebaa74f95d4300394ec77",
         "local:.local/L05A-integrated/tests/debug/L05A-integrated-debug.trx",
-        "local:.local/L05A-integrated/tests/release/L05A-integrated-release.trx"
+        "local:.local/L05A-integrated/tests/release/L05A-integrated-release.trx",
+        "local:.local/L05A-enriched/tests/debug/L05A-enriched-integrated-debug.trx",
+        "local:.local/L05A-enriched/tests/release/L05A-enriched-integrated-release.trx"
       ],
       "blocker": null
     },
