@@ -30,7 +30,7 @@ Mesurer Release sans debugger, matériel/OS/runtime et paramètres enregistrés.
 Injecter des défauts connus pour vérifier la suite : montée de rivière d’un bloc, site isolé, accès bouché, budget dupliqué, snapshot tronqué, codec de climat faux, mauvais fond marin. Si les tests ne les détectent pas, réparer les oracles avant de qualifier le générateur.
 
 ## Procès-verbal
-La V1 nécessite gates G0–G5 closes, rapports complets, tous les cas bloquants PASS, aucune fonctionnalité revendiquée sans preuve et installation propre. Une réserve cosmétique mineure peut être conservée avec validation explicite ; pas une corruption, un accès impossible ou une incohérence de drainage. Utiliser le modèle `templates/RELEASE-REVIEW.md` et conserver les sources des résultats.
+La V1 nécessite gates G0–G5 closes, rapports complets, tous les cas bloquants PASS, aucune fonctionnalité revendiquée sans preuve et installation propre. L19 est contrôlé comme passation documentaire V1 ; L20 et T20 relèvent exclusivement de G6 après la version 1.0.0 et ne peuvent pas bloquer G5. Une réserve cosmétique mineure peut être conservée avec validation explicite ; pas une corruption, un accès impossible ou une incohérence de drainage. Utiliser le modèle `templates/RELEASE-REVIEW.md` et conserver les sources des résultats.
 
 ## Complément obligatoire 1.2 — distributions
 Les suites T05U, T14, T15, T16, T17 et T18 ajoutent 48 scénarios bloquants ; le corpus total comporte 132 scénarios principaux. Les résultats historiques restent ceux du dépôt réel. Tous les nouveaux scénarios sont NOT_RUN dans cette livraison.

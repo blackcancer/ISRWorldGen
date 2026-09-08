@@ -1,15 +1,15 @@
-# Vérification de la livraison ISRWorldGen 1.2
+# Vérification de la livraison ISRWorldGen 1.3
 **8 septembre 2026 · portée : documentation et outils de préparation uniquement.**
 
 ## Structure contrôlée
-Le plan comprend **19 lots, 61 sous-lots, 132 exigences, 132 scénarios principaux, 13 contrats et 6 gates**. Les 42 anciens identifiants sont conservés ; les 19 ajouts couvrent L05-D et les cinq lots spécialisés. Les 48 scénarios nouveaux s’ajoutent aux 84 historiques. Le corpus hérité garde 256 seeds, séparées entre calibration et holdout.
+Le plan comprend **21 lots, 69 sous-lots, 152 exigences, 152 scénarios principaux, 13 contrats et 7 gates**. Les identifiants historiques sont conservés ; L19 apporte une passation documentaire V1 et L20 un chantier TreeGen explicitement Post‑V1. Le corpus hérité garde 256 seeds, séparées entre calibration et holdout.
 
-Le validateur a contrôlé unicité/références des IDs, acyclicité du DAG, propriété de chaque exigence/test, rattachement aux gates, présence des documents, liens relatifs et budgets des capsules. Résultat : PASS, sans erreur. Voir [rapport JSON](../artifacts/spec-validation.json).
+Le validateur contrôle unicité/références des IDs, acyclicité du DAG, propriété de chaque exigence/test, rattachement aux gates, présence des documents, liens relatifs, budgets des capsules et, en 1.3, séparation V1/Post‑V1 (`requires_gates`, exclusion L20/T20 de G5). Le résultat courant doit être régénéré après chaque adoption : voir [rapport JSON](../artifacts/spec-validation.json).
 
-Les capsules calculées sont comprises entre 21503 et 45075 octets UTF-8, donc sous 48 Kio (49 152 octets). Ce budget concerne la documentation explicitement chargée, pas les fichiers C# et preuves qui restent à consulter de façon ciblée. Le script Windows a été étendu pour accepter les suffixes D ; son motif est testé statiquement contre les 61 IDs.
+Les capsules doivent rester sous 48 Kio (49 152 octets). Ce budget concerne la documentation explicitement chargée, pas les fichiers C# et preuves qui restent à consulter de façon ciblée. Le script Windows accepte les suffixes D et refuse par défaut une capsule Post‑V1 sans déclaration explicite de gate qualifiée.
 
 ## Outils testés
-Les auto-tests du validateur couvrent le dossier cohérent, la source manquante, les cycles, les tests inconnus, les exigences sans propriétaire, le dépassement de contexte, les liens cassés, le corpus dupliqué et l’ignorance des sorties générées. Voir les sources [validate_spec.py](../tools/validate_spec.py) et [test_documentation_tools.py](../tools/test_documentation_tools.py).
+Les auto-tests du validateur couvrent le dossier cohérent, la source manquante, les cycles, les tests inconnus, les exigences sans propriétaire, le dépassement de contexte, les liens cassés, le corpus dupliqué, l’ignorance des sorties générées et les violations de périmètre G5/Post‑V1. Voir les sources [validate_spec.py](../tools/validate_spec.py) et [test_documentation_tools.py](../tools/test_documentation_tools.py).
 
 Les **14 auto-tests de préparation de mise à jour** couvrent le dépôt actif inchangé, la conservation de l’état, les conflits Markdown, la sortie hors dépôt, les collisions d’ID et la séparation des preuves précoces/finales. Leur source est [test_plan_update.py](../tools/test_plan_update.py) ; les fixtures d’adoption sont synthétiques et ne décrivent pas le dépôt de l’utilisateur. Le script ne possède pas de mode d’application automatique.
 

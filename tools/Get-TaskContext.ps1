@@ -4,6 +4,8 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^L[0-9]{2}-[A-Z]$')]
     [string]$TaskId,
+    [switch]$IncludePostV1,
+    [string[]]$QualifiedGate = @(),
     [ValidateRange(1024, 1048576)]
     [int]$MaxBytes = 49152
 )
@@ -15,6 +17,16 @@ $manifest = [IO.File]::ReadAllText($manifestPath, [Text.Encoding]::UTF8) | Conve
 $matches = @($manifest.tasks | Where-Object { $_.id -eq $TaskId })
 if ($matches.Count -ne 1) { throw "Task not found or duplicated: $TaskId" }
 $task = $matches[0]
+$scopePath = Join-Path $root 'registry/plan-scopes-r13.json'
+if (Test-Path -LiteralPath $scopePath -PathType Leaf) {
+    $scope = [IO.File]::ReadAllText($scopePath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($task.release_scope -eq 'POST_V1') {
+        if (-not $IncludePostV1) { throw "Post-V1 task refused by default: $TaskId. Use -IncludePostV1 only after the required gate is qualified." }
+        foreach ($gate in @($task.requires_gates)) {
+            if ($QualifiedGate -notcontains $gate) { throw "Post-V1 task $TaskId requires qualified gate $gate." }
+        }
+    }
+}
 $limit = [Math]::Min($MaxBytes, [int]$task.context_max_bytes)
 $parts = New-Object 'System.Collections.Generic.List[string]'
 $parts.Add("# Context: $TaskId`n`nDocumentation capsule. Read relative links from each original source path. Code and upstream handoffs are not included automatically.`n")

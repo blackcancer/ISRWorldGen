@@ -107,3 +107,9 @@ Un seul détenteur modifie chaque contrat ou fichier de projet. Les tests exigé
 Le modèle physique n’est pas recalculé à l’apparition de chaque chunk. Une évolution de bilan/sol/roche impose une itération préparatoire cohérente ; les ports publiés ne changent pas pour faire entrer un détail local. Les réglages qui changent le monde sont versionnés et gelés pour une sauvegarde.
 
 Voir [propriété des passes](11-PROPRIETE-DES-PASSES.md), [recette](../tests/00-RECETTE.md), [registre exact du DAG](../registry/tasks.json) et [traçabilité](06-TRACABILITE.md). Aucune durée de développement ni performance atteinte n’est présumée.
+
+## Révision 1.3 — L19 et L20
+
+L19 est une passation documentaire V1 pour un futur mod animalier, sans implémenter d’animaux, de POI runtime, de service, de simulation ou de contrat C# animalier. L19-A peut démarrer après L05-D ; L19-B dépend de L19-A ; L19-C dépend de L19-B, L11-C et L12-C. L13-A reçoit L19-C comme dépendance documentaire.
+
+L20 est un chantier TreeGen **postérieur à ISRWorldGen 1.0.0**. Il dépend d’une G5 qualifiée et relève de G6 : aucun lot V1 ni aucun scénario de recette V1 ne dépend de L20/T20. Voir [l’intégration détaillée](13-INTEGRATION-L19-L20.md), [la vérification API arbres](14-VERIFICATION-API-ARBRES.md) et [la politique de périmètre](../registry/plan-scopes-r13.json).

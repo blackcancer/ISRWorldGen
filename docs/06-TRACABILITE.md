@@ -136,3 +136,30 @@ Les identifiants historiques sont conservés. Les nouveaux cas ajoutent des obli
 | [R05U-03](../specs/S05U.md) | L05-D | T05U-03 |
 | [R15-08](../specs/S15.md) | L15-B | T15-08 |
 | [R17-10](../specs/S17.md) | L17-C | T17-10 |
+
+## Révision 1.3 — passation L19 et chantier post‑V1 L20
+
+| Exigence | Lot propriétaire | Scénario |
+|---|---|---|
+| [R19-01](../specs/S19.md) | L19-A | T19-01 |
+| [R19-02](../specs/S19.md) | L19-A | T19-02 |
+| [R19-03](../specs/S19.md) | L19-A | T19-03 |
+| [R19-04](../specs/S19.md) | L19-B | T19-04 |
+| [R19-05](../specs/S19.md) | L19-B | T19-05 |
+| [R19-06](../specs/S19.md) | L19-B | T19-06 |
+| [R19-07](../specs/S19.md) | L19-C | T19-07 |
+| [R19-08](../specs/S19.md) | L19-C | T19-08 |
+| [R20-01](../specs/S20.md) | L20-A | T20-01 |
+| [R20-02](../specs/S20.md) | L20-A | T20-02 |
+| [R20-03](../specs/S20.md) | L20-B | T20-03 |
+| [R20-04](../specs/S20.md) | L20-B | T20-04 |
+| [R20-05](../specs/S20.md) | L20-B | T20-05 |
+| [R20-06](../specs/S20.md) | L20-C | T20-06 |
+| [R20-07](../specs/S20.md) | L20-C | T20-07 |
+| [R20-08](../specs/S20.md) | L20-D | T20-08 |
+| [R20-09](../specs/S20.md) | L20-D | T20-09 |
+| [R20-10](../specs/S20.md) | L20-E | T20-10 |
+| [R20-11](../specs/S20.md) | L20-E | T20-11 |
+| [R20-12](../specs/S20.md) | L20-E | T20-12 |
+
+L19 appartient au périmètre documentaire V1. L20/T20 appartiennent au périmètre Post‑V1 et sont exclus de G5 ; voir [l’intégration](13-INTEGRATION-L19-L20.md).

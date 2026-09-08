@@ -840,7 +840,147 @@
       "text": "L’adaptateur végétal doit prouver les appels, initialisations et ownership sur fixtures natives avant assemblage complet.",
       "source": "specs/S17.md",
       "introduced_in": "1.2"
+    },
+    {
+      "id": "R19-01",
+      "module": "S19",
+      "text": "L19 doit rester documentaire : aucune modification du runtime, des comportements animaux, des sauvegardes, des assets du jeu ou de leur génération n’est introduite.",
+      "source": "specs/S19.md",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "R19-02",
+      "module": "S19",
+      "text": "L’inventaire doit couvrir relief, hydrologie, climat, sols, végétation, neige/glace et refuges potentiels, en distinguant les usages futurs sans les implémenter.",
+      "source": "specs/S19.md",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "R19-03",
+      "module": "S19",
+      "text": "Chaque information doit porter une source identifiable et un statut explicite : implémentée et vérifiée, documentée mais non vérifiée localement, prévue, ou absente.",
+      "source": "specs/S19.md",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "R19-04",
+      "module": "S19",
+      "text": "Le dossier doit distinguer habitat potentiel, POI candidat, accessibilité par une espèce et disponibilité courante ; aucune de ces notions ne doit être déduite automatiquement des autres.",
+      "source": "specs/S19.md",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "R19-05",
+      "module": "S19",
+      "text": "Le dictionnaire documentaire doit préciser coordonnées et dimension, unité ou catégorie, résolution, validité temporelle, propriétaire, provenance et signification des valeurs manquantes.",
+      "source": "specs/S19.md",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "R19-06",
+      "module": "S19",
+      "text": "La passation doit attribuer au futur consommateur validation locale, stock courant, invalidation, navigation et besoins ; elle ne doit créer ni index spatial, ni service, ni contrat C# d’exécution dans ce lot.",
+      "source": "specs/S19.md",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "R19-07",
+      "module": "S19",
+      "text": "La revue finale doit relier les informations déclarées disponibles aux contrats et preuves du commit de référence, en conservant explicitement les données absentes ou non vérifiées.",
+      "source": "specs/S19.md",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "R19-08",
+      "module": "S19",
+      "text": "Le dossier final doit être exploitable sans la conversation initiale et sans ajouter de dépendance technique du futur mod animalier à la release ISRWorldGen 1.0.0.",
+      "source": "specs/S19.md",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "R20-01",
+      "module": "S20",
+      "text": "L’implémentation L20 doit commencer seulement après G5 qualifié sur une baseline ISRWorldGen 1.0.0 identifiée ; aucune tâche V1 ne dépend de L20.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-02",
+      "module": "S20",
+      "text": "Les points d’intégration doivent être vérifiés sur l’API et les assemblages locaux ; les données contextuelles propres à ISRWorldGen ne sont pas présentées comme des champs natifs.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-03",
+      "module": "S20",
+      "text": "L’adaptation doit consommer le contexte partagé de L17, des sols, du climat et de l’hydrologie, et distinguer notamment berge, lisière et versant sans reconstituer un monde parallèle.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-04",
+      "module": "S20",
+      "text": "L’amélioration doit conserver l’identité en blocs du jeu, varier les silhouettes et adapter branches/houppiers aux contraintes ; elle exclut racines détaillées, maillages de branches et simulation biologique.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-05",
+      "module": "S20",
+      "text": "La planification doit être reproductible pour les mêmes entrées versionnées, avec budgets d’emprise, essais, profondeur et allocations bornés, et sans dépendance à l’ordre d’arrivée des chunks.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-06",
+      "module": "S20",
+      "text": "Une seule chaîne de placement doit gérer l’arbre et ses effets natifs, avec ownership déterministe, respect des blocs protégés et absence de double sol forestier ou sous-bois.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-07",
+      "module": "S20",
+      "text": "L’intégration doit préserver les chunks joués et la politique de génération versionnée ; activer une option ne doit ni régénérer le terrain ni modifier silencieusement le contrat d’une sauvegarde existante.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-08",
+      "module": "S20",
+      "text": "Le diagnostic doit reproduire un arbre à partir de son générateur, de sa seed et de son contexte/version, et exposer les causes des rejets et les métriques utiles sans exiger l’exploration manuelle du monde.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-09",
+      "module": "S20",
+      "text": "Les écritures de diagnostic doivent être explicites, autorisées, bornées et limitées au monde de test ; une prévisualisation ne modifie rien et aucune annulation non prouvée ne doit être annoncée.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-10",
+      "module": "S20",
+      "text": "La qualification doit couvrir vanilla, vanilla avec le pack ISRTreeGen réel, ISRWorldGen seul et ISRWorldGen avec le pack, sans dépendance obligatoire du pack vers ISRWorldGen.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-11",
+      "module": "S20",
+      "text": "La campagne doit prouver préservation des plantations, récoltes, comportements saisonniers et ressources natives, ainsi que respect des budgets CPU/mémoire validés sur les cas représentatifs.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "R20-12",
+      "module": "S20",
+      "text": "L’acceptation doit comparer les paysages et arbres natifs/améliorés sur un corpus figé, montrer l’intérêt des variations régionales et refuser les coutures de chunks, effets de verger ou promesses de nouvelles essences non livrées.",
+      "source": "specs/S20.md",
+      "release_scope": "POST_V1"
     }
   ],
-  "spec_version": "1.2"
+  "spec_version": "1.3"
 }

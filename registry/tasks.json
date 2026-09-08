@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "spec_version": "1.2",
+  "spec_version": "1.3",
   "tasks": [
     {
       "id": "L00-A",
@@ -1331,7 +1331,8 @@
         "L09-C",
         "L11-C",
         "L12-C",
-        "L10-C"
+        "L10-C",
+        "L19-C"
       ],
       "required_read": [
         "AGENTS.md",
@@ -2101,6 +2102,303 @@
         "T18-10"
       ],
       "context_max_bytes": 49152
+    },
+    {
+      "id": "L19-A",
+      "lot": "L19",
+      "title": "Inventorier les informations utiles au futur mod animalier",
+      "document": "tasks/L19/L19-A.md",
+      "depends_on": [
+        "L05-D"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-A.md",
+        "specs/S19.md",
+        "tests/T19.md"
+      ],
+      "allowed_write_paths": [
+        "docs/future-fauna/inventaire.md",
+        "worklogs/L19-A.md"
+      ],
+      "requirements": [
+        "R19-01",
+        "R19-02",
+        "R19-03"
+      ],
+      "tests": [
+        "T19-01",
+        "T19-02",
+        "T19-03"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG",
+      "release_scope": "V1_DOCUMENTATION",
+      "requires_gates": []
+    },
+    {
+      "id": "L19-B",
+      "lot": "L19",
+      "title": "Décrire les données, POI candidats et responsabilités",
+      "document": "tasks/L19/L19-B.md",
+      "depends_on": [
+        "L19-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-B.md",
+        "specs/S19.md",
+        "tests/T19.md"
+      ],
+      "allowed_write_paths": [
+        "docs/future-fauna/dictionnaire.md",
+        "docs/future-fauna/poi-candidats.md",
+        "docs/future-fauna/responsabilites.md",
+        "worklogs/L19-B.md"
+      ],
+      "requirements": [
+        "R19-04",
+        "R19-05",
+        "R19-06"
+      ],
+      "tests": [
+        "T19-04",
+        "T19-05",
+        "T19-06"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG",
+      "release_scope": "V1_DOCUMENTATION",
+      "requires_gates": []
+    },
+    {
+      "id": "L19-C",
+      "lot": "L19",
+      "title": "Revoir et transmettre le dossier animalier sur la baseline V1",
+      "document": "tasks/L19/L19-C.md",
+      "depends_on": [
+        "L19-B",
+        "L11-C",
+        "L12-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-C.md",
+        "specs/S19.md",
+        "tests/T19.md"
+      ],
+      "allowed_write_paths": [
+        "docs/future-fauna/",
+        "worklogs/L19-C.md"
+      ],
+      "requirements": [
+        "R19-07",
+        "R19-08"
+      ],
+      "tests": [
+        "T19-07",
+        "T19-08"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG",
+      "release_scope": "V1_DOCUMENTATION",
+      "requires_gates": []
+    },
+    {
+      "id": "L20-A",
+      "lot": "L20",
+      "title": "Auditer la frontière L17 / pack / adaptation après V1",
+      "document": "tasks/L20/L20-A.md",
+      "depends_on": [
+        "L13-C",
+        "L17-D"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L20/L20-A.md",
+        "specs/S20.md",
+        "tests/T20.md",
+        "contracts/C11.md",
+        "docs/14-VERIFICATION-API-ARBRES.md"
+      ],
+      "allowed_write_paths": [
+        "docs/treegen/audit.md",
+        "docs/treegen/architecture.md",
+        "docs/treegen/recette.md",
+        "worklogs/L20-A.md"
+      ],
+      "requirements": [
+        "R20-01",
+        "R20-02"
+      ],
+      "tests": [
+        "T20-01",
+        "T20-02"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG",
+      "release_scope": "POST_V1",
+      "requires_gates": [
+        "G5"
+      ]
+    },
+    {
+      "id": "L20-B",
+      "lot": "L20",
+      "title": "Adapter les formes en blocs au contexte et aux obstacles",
+      "document": "tasks/L20/L20-B.md",
+      "depends_on": [
+        "L20-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L20/L20-B.md",
+        "specs/S20.md",
+        "tests/T20.md",
+        "contracts/C11.md",
+        "docs/14-VERIFICATION-API-ARBRES.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Vegetation/ContextualTrees/",
+        "testsrc/WorldGen.Tests/L20B/",
+        "worklogs/L20-B.md"
+      ],
+      "requirements": [
+        "R20-03",
+        "R20-04",
+        "R20-05"
+      ],
+      "tests": [
+        "T20-03",
+        "T20-04",
+        "T20-05"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG",
+      "release_scope": "POST_V1",
+      "requires_gates": [
+        "G5"
+      ]
+    },
+    {
+      "id": "L20-C",
+      "lot": "L20",
+      "title": "Raccorder le générateur contextuel à la chaîne native",
+      "document": "tasks/L20/L20-C.md",
+      "depends_on": [
+        "L20-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L20/L20-C.md",
+        "specs/S20.md",
+        "tests/T20.md",
+        "contracts/C11.md",
+        "docs/14-VERIFICATION-API-ARBRES.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Materialization/Vegetation/ContextualTrees/",
+        "testsrc/WorldGen.Tests/L20C/",
+        "worklogs/L20-C.md"
+      ],
+      "requirements": [
+        "R20-06",
+        "R20-07"
+      ],
+      "tests": [
+        "T20-06",
+        "T20-07"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG",
+      "release_scope": "POST_V1",
+      "requires_gates": [
+        "G5"
+      ]
+    },
+    {
+      "id": "L20-D",
+      "lot": "L20",
+      "title": "Fournir un diagnostic d’arbres reproductible et sûr",
+      "document": "tasks/L20/L20-D.md",
+      "depends_on": [
+        "L20-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L20/L20-D.md",
+        "specs/S20.md",
+        "tests/T20.md",
+        "contracts/C11.md",
+        "docs/14-VERIFICATION-API-ARBRES.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.VintageStory/Diagnostics/Trees/",
+        "testsrc/WorldGen.Tests/L20D/",
+        "docs/treegen/diagnostic.md",
+        "worklogs/L20-D.md"
+      ],
+      "requirements": [
+        "R20-08",
+        "R20-09"
+      ],
+      "tests": [
+        "T20-08",
+        "T20-09"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG",
+      "release_scope": "POST_V1",
+      "requires_gates": [
+        "G5"
+      ]
+    },
+    {
+      "id": "L20-E",
+      "lot": "L20",
+      "title": "Qualifier compatibilité, usages et paysages améliorés",
+      "document": "tasks/L20/L20-E.md",
+      "depends_on": [
+        "L20-C",
+        "L20-D"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L20/L20-E.md",
+        "specs/S20.md",
+        "tests/T20.md",
+        "contracts/C11.md",
+        "docs/14-VERIFICATION-API-ARBRES.md"
+      ],
+      "allowed_write_paths": [
+        "testsrc/WorldGen.Tests/L20E/",
+        "docs/treegen/qualification/",
+        "worklogs/L20-E.md"
+      ],
+      "requirements": [
+        "R20-10",
+        "R20-11",
+        "R20-12"
+      ],
+      "tests": [
+        "T20-10",
+        "T20-11",
+        "T20-12"
+      ],
+      "context_max_bytes": 49152,
+      "state": "BACKLOG",
+      "release_scope": "POST_V1",
+      "requires_gates": [
+        "G5"
+      ]
     }
   ],
   "product": "ISRWorldGen",

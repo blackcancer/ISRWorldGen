@@ -46,6 +46,14 @@ def validate(root: Path) -> dict[str, Any]:
     rids = unique(requirements, "requirement")
     testids = unique(tests, "test")
     by_task = {t["id"]: t for t in tasks}
+    gate_by_id = {gate["id"]: gate for gate in gates}
+    scope_path = root / "registry/plan-scopes-r13.json"
+    scopes: dict[str, Any] | None = None
+    if scope_path.is_file():
+        try:
+            scopes = load(root, "registry/plan-scopes-r13.json")
+        except (OSError, ValueError) as exc:
+            errors.append(f"Invalid release scope policy: {exc}")
     assigned_r: set[str] = set()
     assigned_t: set[str] = set()
     coverage: set[str] = set()
@@ -67,6 +75,9 @@ def validate(root: Path) -> dict[str, Any]:
             if size > t["context_max_bytes"]: errors.append(f"Context budget exceeded: {t['id']} ({size})")
         except (OSError, ValueError) as exc:
             errors.append(f"Context failure {t['id']}: {exc}")
+        for gate_id in t.get("requires_gates", []):
+            if gate_id not in gate_by_id:
+                errors.append(f"Unknown required gate {gate_id} in {t['id']}")
     colors: dict[str, int] = {}
     def visit(tid: str) -> None:
         if colors.get(tid) == 1:
@@ -99,6 +110,39 @@ def validate(root: Path) -> dict[str, Any]:
             if tid not in tids: errors.append(f"Unknown gate task {tid}")
     covered_gate_tasks = {tid for gate in gates for tid in gate["tasks"]}
     for missing in sorted(tids - covered_gate_tasks): errors.append(f"Task not in a gate: {missing}")
+    if scopes is not None:
+        v1_tasks = set(scopes.get("v1_tasks", []))
+        post_v1_tasks = set(scopes.get("post_v1_tasks", []))
+        v1_gates = set(scopes.get("v1_gates", []))
+        post_v1_gates = set(scopes.get("post_v1_gates", []))
+        required_gate = scopes.get("post_v1_requires_qualified_gate")
+        if v1_tasks | post_v1_tasks != tids or v1_tasks & post_v1_tasks:
+            errors.append("Release scope policy does not partition all tasks")
+        if not v1_gates.issubset(gate_by_id) or not post_v1_gates.issubset(gate_by_id):
+            errors.append("Release scope policy references an unknown gate")
+        if required_gate not in gate_by_id:
+            errors.append("Post-V1 qualified gate is missing")
+        for tid, task in by_task.items():
+            expected_scope = "POST_V1" if tid in post_v1_tasks else "V1_DOCUMENTATION" if tid.startswith("L19-") else None
+            if expected_scope is not None and task.get("release_scope") != expected_scope:
+                errors.append(f"Unexpected release scope for {tid}")
+            if tid in post_v1_tasks:
+                if required_gate not in task.get("requires_gates", []):
+                    errors.append(f"Post-V1 task lacks required gate {required_gate}: {tid}")
+            elif any(dep in post_v1_tasks for dep in task["depends_on"]):
+                errors.append(f"V1 task depends on Post-V1 task: {tid}")
+        for gate in gates:
+            gate_scope = gate.get("release_scope")
+            task_ids = set(gate["tasks"])
+            if gate["id"] in v1_gates and task_ids & post_v1_tasks:
+                errors.append(f"Post-V1 task included in V1 gate {gate['id']}")
+            if gate["id"] in post_v1_gates:
+                if gate_scope != "POST_V1":
+                    errors.append(f"Post-V1 gate lacks POST_V1 scope: {gate['id']}")
+                if required_gate not in gate.get("requires_gates", []):
+                    errors.append(f"Post-V1 gate lacks required gate {required_gate}: {gate['id']}")
+                if not task_ids or not task_ids.issubset(post_v1_tasks):
+                    errors.append(f"Post-V1 gate contains non-Post-V1 tasks: {gate['id']}")
     full = fixtures["full_seeds"]
     if len(full) != len(set(full)): errors.append("Duplicate corpus seeds")
     if any(not isinstance(s, int) or not -(1 << 31) <= s < (1 << 31) for s in full): errors.append("Seed outside native int32 range")
@@ -122,7 +166,8 @@ def validate(root: Path) -> dict[str, Any]:
     if dist.get("status") != "FROZEN": warnings.append("Distribution-specific budgets not frozen; no final game qualification claimed.")
     warnings.append("PowerShell runtime, C# compilation, installed game and MCP were not exercised by this documentation validator.")
     ready = [] if state_is_template else sorted(t["id"] for t in tasks if states[t["id"]]["status"] in {"BACKLOG", "READY"} and all(states[d]["status"] == "DONE" for d in t["depends_on"] if d in states))
-    return {"status": "PASS" if not errors else "FAIL", "scope": "DOCUMENTATION_ONLY", "generated_utc": datetime.now(timezone.utc).isoformat(), "counts": {"tasks": len(tasks), "requirements": len(requirements), "test_scenarios": len(tests), "gates": len(gates), "seeds": len(full), "markdown_documents": markdown_count}, "candidate_tasks_by_declared_status_only_not_requalification": ready, "active_state_available": not state_is_template, "context_bytes": context_sizes, "errors": errors, "warnings": warnings}
+    v1_ready = ready if scopes is None else [tid for tid in ready if tid not in set(scopes.get("post_v1_tasks", []))]
+    return {"status": "PASS" if not errors else "FAIL", "scope": "DOCUMENTATION_ONLY", "generated_utc": datetime.now(timezone.utc).isoformat(), "counts": {"tasks": len(tasks), "requirements": len(requirements), "test_scenarios": len(tests), "gates": len(gates), "seeds": len(full), "markdown_documents": markdown_count}, "candidate_tasks_by_declared_status_only_not_requalification": ready, "v1_candidate_tasks_excluding_post_v1": v1_ready, "active_state_available": not state_is_template, "context_bytes": context_sizes, "errors": errors, "warnings": warnings}
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)

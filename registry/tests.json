@@ -1632,7 +1632,267 @@
       "introduced_in": "1.2",
       "default_execution_state": "NOT_RUN",
       "blocking": true
+    },
+    {
+      "id": "T19-01",
+      "module": "S19",
+      "title": "Périmètre strictement documentaire",
+      "requirements": [
+        "R19-01"
+      ],
+      "level": "Revue documentaire",
+      "state": "NOT_RUN",
+      "source": "tests/T19.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "T19-02",
+      "module": "S19",
+      "title": "Couverture des informations",
+      "requirements": [
+        "R19-02"
+      ],
+      "level": "Revue documentaire",
+      "state": "NOT_RUN",
+      "source": "tests/T19.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "T19-03",
+      "module": "S19",
+      "title": "Provenance et disponibilité",
+      "requirements": [
+        "R19-03"
+      ],
+      "level": "Revue documentaire",
+      "state": "NOT_RUN",
+      "source": "tests/T19.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "T19-04",
+      "module": "S19",
+      "title": "Potentiel versus état courant",
+      "requirements": [
+        "R19-04"
+      ],
+      "level": "Revue documentaire",
+      "state": "NOT_RUN",
+      "source": "tests/T19.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "T19-05",
+      "module": "S19",
+      "title": "Dictionnaire non ambigu",
+      "requirements": [
+        "R19-05"
+      ],
+      "level": "Revue documentaire",
+      "state": "NOT_RUN",
+      "source": "tests/T19.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "T19-06",
+      "module": "S19",
+      "title": "Responsabilités futures",
+      "requirements": [
+        "R19-06"
+      ],
+      "level": "Revue documentaire",
+      "state": "NOT_RUN",
+      "source": "tests/T19.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "T19-07",
+      "module": "S19",
+      "title": "Revue finale sur baseline",
+      "requirements": [
+        "R19-07"
+      ],
+      "level": "Revue documentaire",
+      "state": "NOT_RUN",
+      "source": "tests/T19.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "T19-08",
+      "module": "S19",
+      "title": "Dossier autonome et release",
+      "requirements": [
+        "R19-08"
+      ],
+      "level": "Revue documentaire",
+      "state": "NOT_RUN",
+      "source": "tests/T19.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "V1_DOCUMENTATION"
+    },
+    {
+      "id": "T20-01",
+      "module": "S20",
+      "title": "Barrière après V1",
+      "requirements": [
+        "R20-01"
+      ],
+      "level": "Revue de lancement",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-02",
+      "module": "S20",
+      "title": "API et contrats locaux",
+      "requirements": [
+        "R20-02"
+      ],
+      "level": "Audit technique",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-03",
+      "module": "S20",
+      "title": "Contexte commun et écotones",
+      "requirements": [
+        "R20-03"
+      ],
+      "level": "Tests de contrat et fixtures",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-04",
+      "module": "S20",
+      "title": "Silhouettes en blocs et obstacles",
+      "requirements": [
+        "R20-04"
+      ],
+      "level": "Fixtures et revue visuelle",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-05",
+      "module": "S20",
+      "title": "Déterminisme, limites et chunks",
+      "requirements": [
+        "R20-05"
+      ],
+      "level": "Propriétés et stress borné",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-06",
+      "module": "S20",
+      "title": "Placement natif et ownership",
+      "requirements": [
+        "R20-06"
+      ],
+      "level": "Intégration native réelle",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-07",
+      "module": "S20",
+      "title": "Sauvegarde et absence de régénération",
+      "requirements": [
+        "R20-07"
+      ],
+      "level": "Sauvegarde réelle",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-08",
+      "module": "S20",
+      "title": "Reproduction de diagnostic",
+      "requirements": [
+        "R20-08"
+      ],
+      "level": "Outil réel",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-09",
+      "module": "S20",
+      "title": "Sûreté de l’atelier",
+      "requirements": [
+        "R20-09"
+      ],
+      "level": "Cas négatifs en monde isolé",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-10",
+      "module": "S20",
+      "title": "Matrice du pack réel",
+      "requirements": [
+        "R20-10"
+      ],
+      "level": "Installations réelles",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-11",
+      "module": "S20",
+      "title": "Usages natifs, saisons et budgets",
+      "requirements": [
+        "R20-11"
+      ],
+      "level": "Parcours réels et performance",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
+    },
+    {
+      "id": "T20-12",
+      "module": "S20",
+      "title": "Paysages et intérêt d’exploration",
+      "requirements": [
+        "R20-12"
+      ],
+      "level": "Revue visuelle indépendante",
+      "state": "NOT_RUN",
+      "source": "tests/T20.md",
+      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
+      "release_scope": "POST_V1"
     }
   ],
-  "spec_version": "1.2"
+  "spec_version": "1.3"
 }

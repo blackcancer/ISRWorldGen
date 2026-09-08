@@ -14,7 +14,7 @@ class DocumentationToolTests(unittest.TestCase):
         shutil.copytree(
             ROOT,
             self.root,
-            ignore=shutil.ignore_patterns(".git", ".local", "artifacts", "bin", "obj", "__pycache__"),
+            ignore=shutil.ignore_patterns(".git", ".vs", ".local", "artifacts", "bin", "obj", "__pycache__"),
         )
         # Preserve the small evidence files referenced by delivery notes, but not
         # generated maps, contexts or large future game artifacts.
@@ -57,5 +57,16 @@ class DocumentationToolTests(unittest.TestCase):
     def test_duplicate_seeds(self):
         self.edit("registry/fixtures.json", lambda x: x["full_seeds"].append(0))
         self.assertIn("Duplicate corpus seeds", self.errors())
+    def test_post_v1_task_requires_g5(self):
+        def change(x):
+            next(t for t in x["tasks"] if t["id"] == "L20-A")["requires_gates"] = []
+        self.edit("registry/tasks.json", change)
+        self.assertIn("Post-V1 task lacks required gate G5: L20-A", self.errors())
+    def test_post_v1_task_cannot_enter_v1_gate(self):
+        self.edit("registry/gates.json", lambda x: next(g for g in x["gates"] if g["id"] == "G5")["tasks"].append("L20-A"))
+        self.assertIn("Post-V1 task included in V1 gate G5", self.errors())
+    def test_v1_task_cannot_depend_on_post_v1_task(self):
+        self.edit("registry/tasks.json", lambda x: next(t for t in x["tasks"] if t["id"] == "L13-A")["depends_on"].append("L20-A"))
+        self.assertIn("V1 task depends on Post-V1 task: L13-A", self.errors())
 
 if __name__ == "__main__": unittest.main()

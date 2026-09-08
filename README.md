@@ -1,15 +1,15 @@
-# ISRWorldGen — Cahier des charges et plan intercalé 1.2
+# ISRWorldGen — Cahier des charges et plan intercalé 1.3
 **8 septembre 2026 · C# · Visual Studio Community 2026 · Codex + MCP Visual Studio**
 
 Cette révision intègre les cinq distributions demandées : strates/roches, sols/fertilité, minerais/gisements/prospection, végétation, neige/glace. Le développement ayant été signalé à **L05-C**, les identifiants et travaux existants sont conservés. Ce dossier est un plan documentaire, pas une nouvelle implémentation ni un registre d’avancement reconstruit.
 
 ## Entrée immédiate
-Lire [la migration depuis L05-C](docs/10-MIGRATION-DEPUIS-L05-C.md), puis [le plan consolidé](docs/01-PLAN.md). La session principale reçoit [le prompt d’adoption](prompts/ADOPTER-PLAN-1.2.md) et le [mandat d’orchestrateur](prompts/DEMARRAGE-CODEX.md). Ce dernier pilote le projet entier ; les fiches de sous-lots restent des missions d’agents.
+Lire [la migration depuis L05-C](docs/10-MIGRATION-DEPUIS-L05-C.md), puis [le plan consolidé](docs/01-PLAN.md). La session principale reçoit [le prompt d’adoption](prompts/ADOPTER-PLAN-1.2.md) et le [mandat d’orchestrateur](prompts/DEMARRAGE-CODEX.md). Ce dernier pilote le projet entier ; les fiches de sous-lots restent des missions d’agents. La révision 1.3 est décrite dans [l’intégration L19/L20](docs/13-INTEGRATION-L19-L20.md).
 
 **Extraire à côté du dépôt, pas par-dessus.** Aucun `registry/state.json`, code ni worklog de développement n’est livré. Le [modèle d’état](registry/state.template.json) n’est pas à copier sur l’état réel. Le script de préparation décrit dans [les outils](tools/README.md) produit un rapport et des candidats hors dépôt, sans les appliquer. Toute modification locale doit être fusionnée/revue ; ne pas effacer les preuves existantes.
 
 ## Organisation
-Le dossier contient 19 lots et 61 tâches (42 existantes conservées, 19 ajouts dont L05-D), 132 exigences et 132 scénarios principaux (84 historiques, 48 nouveaux), ainsi que 13 contrats C00–C12. Les nouveaux numéros L14–L18 ne définissent pas un ordre après L13 : le DAG les intercale avant les consommateurs.
+Le dossier contient 21 lots et 69 tâches, 152 exigences et 152 scénarios principaux, ainsi que 13 contrats C00–C12. L19 est une passation documentaire incluse dans V1 ; L20 est explicitement post-V1 et reste exclu de sa qualification. Les numéros ne définissent pas l’ordre : le DAG les intercale selon les dépendances.
 
 Le socle [02-SOCLE](docs/02-SOCLE.md) reste commun. Les nouveaux modules sont [S14 strates](specs/S14.md), [S15 sols](specs/S15.md), [S16 minerais](specs/S16.md), [S17 végétation](specs/S17.md), [S18 neige/glace](specs/S18.md). Les [tâches](tasks/INDEX.md) donnent objectif, lectures limitées, périmètre et tests ; les [contrats](contracts/README.md) et [recette](tests/00-RECETTE.md) assurent la traçabilité.
 

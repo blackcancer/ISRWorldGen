@@ -1,8 +1,12 @@
 # Orchestration Codex et agents
 ## Principe
-Le cahier des charges est divisé en 19 lots et 61 sous-lots. Un sous-lot constitue une mission délégable, pas un chunk de terrain. Il doit produire un résultat testable avec un périmètre d’écriture limité. L’ordre numérique aide à lire ; les dépendances de `registry/tasks.json` déterminent l’ordre d’exécution réel.
+Le cahier des charges est divisé en 21 lots et 69 sous-lots. Un sous-lot constitue une mission délégable, pas un chunk de terrain. Il doit produire un résultat testable avec un périmètre d’écriture limité. L’ordre numérique aide à lire ; les dépendances de `registry/tasks.json` déterminent l’ordre d’exécution réel.
 
 Le point d’entrée principal est [DEMARRAGE-CODEX](../prompts/DEMARRAGE-CODEX.md). L05-D est l’étape obligatoire d’adoption du plan 1.2 après L05-C réellement accepté : il préserve l’historique, ajoute les tâches L14–L18 et requalifie les sorties touchées. Les lots L14–L18 sont intercalés dans le DAG, pas reportés après L13.
+
+## Portée de release 1.3
+
+L19 est V1 documentaire : il prépare le futur mod animalier sans créer de système, contrat C#, POI runtime, service ni simulation animale dans ISRWorldGen. L20 est Post‑V1 ; son lancement exige une baseline G5 qualifiée, et ses scénarios T20 sont exclus de G5/V1. Le sélecteur de capsule refuse L20 par défaut et le validateur contrôle cette séparation à partir de `registry/plan-scopes-r13.json`.
 
 L’orchestrateur lit le plan, le registre et la fiche active. Un agent d’implémentation ne lit que AGENTS, le socle, sa fiche, la spécification du module, les contrats indiqués et ses tests. Un relecteur reçoit le diff, les mêmes exigences et les preuves pertinentes, non tous les journaux du projet. Les dépendances amont ne sont pas chargées récursivement : leurs contrats et leur statut intégré suffisent, sauf bug à investiguer.
 

@@ -677,6 +677,70 @@
       "base_commit": null,
       "evidence": [],
       "blocker": null
+    },
+    "L19-A": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L19-B": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L19-C": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": null
+    },
+    "L20-A": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": "POST_V1: requires qualified G5"
+    },
+    "L20-B": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": "POST_V1: requires qualified G5"
+    },
+    "L20-C": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": "POST_V1: requires qualified G5"
+    },
+    "L20-D": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": "POST_V1: requires qualified G5"
+    },
+    "L20-E": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base_commit": null,
+      "evidence": [],
+      "blocker": "POST_V1: requires qualified G5"
     }
   }
 }

@@ -94,10 +94,14 @@
         "L15-C",
         "L16-D",
         "L17-D",
-        "L18-D"
+        "L18-D",
+        "L19-A",
+        "L19-B",
+        "L19-C"
       ],
-      "decision": "Accès finaux certifiés, reprise après crash, contenu vanilla, configuration et diagnostics prêts. Candidat de recette, non encore version validée. Agriculture, minerais/prospection, récoltes/plantations et cycles neige/gel/dégel ont leurs preuves réelles.",
-      "qualification_version": "1.2"
+      "decision": "Accès finaux certifiés, reprise après crash, contenu vanilla, configuration et diagnostics prêts. Candidat de recette, non encore version validée. Agriculture, minerais/prospection, récoltes/plantations et cycles neige/gel/dégel ont leurs preuves réelles. Révision 1.3 : dossier L19 accepté uniquement sur ses contrôles documentaires ; aucune implémentation animale requise.",
+      "qualification_version": "1.2",
+      "criteria_revision": "1.3"
     },
     {
       "id": "G5",
@@ -107,9 +111,27 @@
         "L13-B",
         "L13-C"
       ],
-      "decision": "Corpus, revue, endurance, jeu/serveur et installation propre validés. Tous les tests bloquants effectivement exécutés. Tous les cas supplémentaires T14 à T18 et T05U sont inclus ; un ancien rapport 1.1 ne certifie pas la recette 1.2.",
-      "qualification_version": "1.2"
+      "decision": "Corpus, revue, endurance, jeu/serveur et installation propre validés. Tous les tests bloquants effectivement exécutés. Tous les cas supplémentaires T14 à T18 et T05U sont inclus ; un ancien rapport 1.1 ne certifie pas la recette 1.2. Révision 1.3 : passation documentaire L19 incluse ; L20 et T20 exclus de la qualification ISRWorldGen 1.0.0.",
+      "qualification_version": "1.2",
+      "criteria_revision": "1.3"
+    },
+    {
+      "id": "G6",
+      "title": "Amélioration contextuelle des arbres qualifiée après 1.0.0",
+      "tasks": [
+        "L20-A",
+        "L20-B",
+        "L20-C",
+        "L20-D",
+        "L20-E"
+      ],
+      "decision": "Après preuve G5 sur une baseline 1.0.0 identifiée : adaptation des arbres, protections, diagnostic reproductible, compatibilité et campagne visuelle/performance validés. Cette gate ne requalifie pas rétroactivement la release 1.0.0.",
+      "qualification_version": "1.3",
+      "release_scope": "POST_V1",
+      "requires_gates": [
+        "G5"
+      ]
     }
   ],
-  "spec_version": "1.2"
+  "spec_version": "1.3"
 }
