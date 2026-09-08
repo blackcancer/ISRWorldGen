@@ -14,6 +14,8 @@ Décrire ce qui a été effectivement développé, les choix importants et les c
 
 Ajouter métriques, unités et conditions froid/chaud, avec seed/config/commit. Un test prévu mais non exécuté reste NOT_RUN. Ne pas inclure de secrets ou dumps personnels.
 
+Pour toute sortie spatiale, référencer les PNG et `manifest.json` produits suivant [la cartographie de recette](../docs/15-CARTOGRAPHIE-DE-RECETTE.md), avec leur chemin, hash, emprise, palette et l’oracle numérique associé. Une image seule ne vaut pas preuve de conformité.
+
 ## Contrats et impacts
 Aucun changement / proposition précise. Lister consommateurs touchés, besoin de re-générer goldens ou modifier schéma/version. Ne pas présenter un changement silencieux de contrat comme une simple refactorisation.
 

@@ -19,6 +19,10 @@ Chaque famille de relief et chaque thème fantastique est évalué sur cinq axes
 
 Observer cartes à plusieurs zooms, minimap native, altitude du joueur et coupes souterraines. Varier les vues et conditions d’éclairage ; ne pas montrer uniquement les merveilles. Comparer aux témoins défectueux F16. Une chaîne orientée par une tectonique cohérente n’est pas une erreur simplement parce qu’elle produit une anisotropie.
 
+## Cartes de diagnostic
+
+Toute sortie spatiale testée produit les images pertinentes et leur manifeste de provenance selon [la cartographie de recette](../docs/15-CARTOGRAPHIE-DE-RECETTE.md). Heightmaps, humidité, précipitations, vents, hydrologie, géologie, fertilité, minerais, végétation et neige/glace sont exportés dès que le sous-lot les calcule ou les transforme. Le raster est une preuve complémentaire : l’oracle numérique, les tests négatifs et, quand requis, le jeu réel restent bloquants.
+
 ## Parcours de jeu obligatoires
 Un parcours de surface couvre spawn sûr, collecte de ressources de départ, traversée de plusieurs reliefs, lecture d’affluents et descente d’un bassin vers son embouchure. Un parcours souterrain couvre accès naturel, embranchements, réseau humide/sec, découverte d’un site fantastique et possibilité d’identifier une route de retour selon le profil. Un parcours serveur fait explorer simultanément une frontière par deux clients et valide sauvegarde/rechargement.
 

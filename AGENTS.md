@@ -15,6 +15,8 @@ Pas de génération globale dans chaque chunk, de `Random` partagé, de `GetHash
 
 Les distributions de roches/strates, sols/fertilité, minerais/prospection, végétation et neige/glace sont désormais normatives. Une géologie unique alimente érosion, cavernes, minerais et prospection ; un seul modèle de sol/fertilité alimente distribution et adaptation native ; les états saisonniers ne régénèrent jamais les décisions structurelles selon la première visite. Le budget annuel L05-C est conservé lorsque L18 introduit stockage et fonte.
 
+Lorsqu’un test produit un champ spatial, il génère les cartes de diagnostic pertinentes (heightmap, humidité, vents, etc.) avec manifeste, seed, emprise, unités, palette et hash, conformément à [la cartographie de recette](docs/15-CARTOGRAPHIE-DE-RECETTE.md). Une image complète les assertions et n’est jamais, seule, un PASS.
+
 ## Collaboration et sécurité
 La politique détaillée de profils, d’escalade et de communication est dans [docs/03-ORCHESTRATION.md](docs/03-ORCHESTRATION.md). Par défaut, l’orchestrateur et le développeur de lot utilisent GPT-5.6 Terra Medium. Une difficulté algorithmique, numérique, concurrente ou de performance bornée peut recevoir directement une expertise GPT-5.6 Sol Medium ou xHigh ; Astra ne peut être choisi que s’il est réellement exposé par l’installation. Un relecteur distinct de l’auteur est obligatoire et son profil est adapté au risque.
 
