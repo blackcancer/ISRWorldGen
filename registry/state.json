@@ -693,11 +693,15 @@
       "blocker": null
     },
     "L19-B": {
-      "status": "IN_PROGRESS",
-      "owner": "l19_b_r14",
-      "branch": "agent/l19-b-r14",
+      "status": "DONE",
+      "owner": null,
+      "branch": null,
       "base_commit": null,
-      "evidence": [],
+      "evidence": [
+        "worklogs/L19-B.md",
+        "commit:6caa41e",
+        "review:ACCEPT"
+      ],
       "blocker": null
     },
     "L19-C": {

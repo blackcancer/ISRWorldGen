@@ -1,21 +1,17 @@
 {
   "status": "PASS",
   "scope": "DOCUMENTATION_ONLY",
-  "generated_utc": "2026-09-08T12:25:11.376526+00:00",
+  "generated_utc": "2026-09-08T12:35:21.459846+00:00",
   "counts": {
     "tasks": 72,
     "requirements": 192,
     "test_scenarios": 192,
     "gates": 7,
     "seeds": 256,
-    "markdown_documents": 247
+    "markdown_documents": 252
   },
-  "candidate_tasks_by_declared_status_only_not_requalification": [
-    "L19-B"
-  ],
-  "v1_candidate_tasks_excluding_post_v1": [
-    "L19-B"
-  ],
+  "candidate_tasks_by_declared_status_only_not_requalification": [],
+  "v1_candidate_tasks_excluding_post_v1": [],
   "active_state_available": true,
   "context_bytes": {
     "L00-A": 39045,
