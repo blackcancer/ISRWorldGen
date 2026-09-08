@@ -191,6 +191,27 @@ public sealed class MaterialSnapshotTests
         Assert.ThrowsExactly<ArgumentNullException>(() => new MaterialExposure(snapshot, null!));
     }
 
+    [TestMethod]
+    public void DownstreamReadersReceiveVersionedIdentityStableBoundsAndReadOnlyStructures()
+    {
+        MaterialSnapshot forward = SyntheticSnapshot();
+        MaterialSnapshot reordered = new(Catalog(), forward.Layers.Reverse(), forward.Fractures.Reverse());
+        IMaterialQuery waterOrErosionReader = forward;
+        IMaterialStructureQuery caveReader = forward;
+
+        Assert.AreEqual(MaterialSnapshotFormat.SchemaVersion, waterOrErosionReader.Descriptor.SchemaVersion);
+        Assert.AreEqual(forward.ContentChecksum, waterOrErosionReader.Descriptor.ContentChecksum);
+        Assert.AreEqual(forward.Descriptor, reordered.Descriptor);
+        Assert.AreEqual(0, waterOrErosionReader.Descriptor.VerticalBounds.BottomInclusiveY);
+        Assert.AreEqual(90, waterOrErosionReader.Descriptor.VerticalBounds.TopExclusiveY);
+        Assert.IsTrue(waterOrErosionReader.TryQuery(long.MinValue, 20, long.MaxValue, out MaterialSample lowerInterface));
+        Assert.AreEqual(GeologicalMaterialCode.Limestone, lowerInterface.MaterialCode);
+        Assert.IsFalse(waterOrErosionReader.TryQuery(0, 90, 0, out _));
+        Assert.HasCount(3, caveReader.Layers);
+        Assert.HasCount(1, caveReader.Fractures);
+        Assert.ThrowsExactly<NotSupportedException>(() => ((IList<FractureZone>)caveReader.Fractures).Add(new FractureZone(Id(99), 0, 0, 1, 0, 1, 0.1)));
+    }
+
     private static MaterialSnapshot SyntheticSnapshot() => new(
         Catalog(),
         [

@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
@@ -203,9 +202,59 @@ public readonly record struct MaterialSample(
     MaterialProperties Properties,
     bool IsFractured);
 
+/// <summary>Published vertical extent, using the same semi-open convention as strata.</summary>
+public readonly record struct MaterialVerticalBounds
+{
+    public MaterialVerticalBounds(int bottomInclusiveY, int topExclusiveY)
+    {
+        if (topExclusiveY <= bottomInclusiveY)
+        {
+            throw new ArgumentOutOfRangeException(nameof(topExclusiveY), "Material bounds must be non-empty and semi-open.");
+        }
+
+        BottomInclusiveY = bottomInclusiveY;
+        TopExclusiveY = topExclusiveY;
+    }
+
+    public int BottomInclusiveY { get; }
+
+    public int TopExclusiveY { get; }
+
+    public bool Contains(int y) => y >= BottomInclusiveY && y < TopExclusiveY;
+}
+
+/// <summary>
+/// Versioned identity carried with every published material view. Consumers can
+/// reject a different schema or source snapshot before combining their results.
+/// </summary>
+public readonly record struct MaterialSnapshotDescriptor(
+    int SchemaVersion,
+    Hash256 ContentChecksum,
+    MaterialVerticalBounds VerticalBounds);
+
+public static class MaterialSnapshotFormat
+{
+    public const int SchemaVersion = 1;
+}
+
 public interface IMaterialQuery
 {
+    MaterialSnapshotDescriptor Descriptor { get; }
+
     MaterialSample Query(long x, int y, long z);
+
+    bool TryQuery(long x, int y, long z, out MaterialSample sample);
+}
+
+/// <summary>
+/// Read-only geological structure view for cave planning. It adds no game assets
+/// and exposes the exact stable layer/fracture IDs used by the snapshot query.
+/// </summary>
+public interface IMaterialStructureQuery : IMaterialQuery
+{
+    IReadOnlyList<StratigraphicLayer> Layers { get; }
+
+    IReadOnlyList<FractureZone> Fractures { get; }
 }
 
 /// <summary>Minimal Core hand-off used by erosion, cavern, or resource code without selecting any game asset.</summary>
@@ -340,7 +389,7 @@ public sealed class MaterialExposure
 /// Immutable columnar material snapshot. Querying is a pure world-coordinate lookup;
 /// erosion and excavation remove voxels but never repaint the remaining strata.
 /// </summary>
-public sealed class MaterialSnapshot : IMaterialQuery
+public sealed class MaterialSnapshot : IMaterialStructureQuery
 {
     private readonly StratigraphicLayer[] layers;
     private readonly FractureZone[] fractures;
@@ -378,24 +427,41 @@ public sealed class MaterialSnapshot : IMaterialQuery
         Layers = Array.AsReadOnly(this.layers);
         Fractures = Array.AsReadOnly(this.fractures);
         ContentChecksum = Hash256.Compute(Encoding.UTF8.GetBytes(CanonicalText()));
+        Descriptor = new MaterialSnapshotDescriptor(
+            MaterialSnapshotFormat.SchemaVersion,
+            ContentChecksum,
+            new MaterialVerticalBounds(this.layers[^1].BottomInclusiveY, this.layers[0].TopExclusiveY));
     }
 
     public MaterialCatalog Catalog { get; }
 
-    public ReadOnlyCollection<StratigraphicLayer> Layers { get; }
+    public IReadOnlyList<StratigraphicLayer> Layers { get; }
 
-    public ReadOnlyCollection<FractureZone> Fractures { get; }
+    public IReadOnlyList<FractureZone> Fractures { get; }
 
     public Hash256 ContentChecksum { get; }
 
+    public MaterialSnapshotDescriptor Descriptor { get; }
+
     public MaterialSample Query(long x, int y, long z)
     {
-        StratigraphicLayer layer = layers.FirstOrDefault(layer => layer.Contains(y));
-        if (!layer.Contains(y))
+        if (!TryQuery(x, y, z, out MaterialSample sample))
         {
             throw new ArgumentOutOfRangeException(nameof(y), y, "The requested elevation lies outside the published material column.");
         }
 
+        return sample;
+    }
+
+    public bool TryQuery(long x, int y, long z, out MaterialSample sample)
+    {
+        if (!Descriptor.VerticalBounds.Contains(y))
+        {
+            sample = default;
+            return false;
+        }
+
+        StratigraphicLayer layer = layers.First(layer => layer.Contains(y));
         bool fractured = fractures.Any(fracture => fracture.Contains(x, z));
         MaterialProperties baseProperties = Catalog.Get(layer.MaterialCode);
         MaterialProperties properties = fractured
@@ -404,12 +470,13 @@ public sealed class MaterialSnapshot : IMaterialQuery
                 baseProperties.SolubilityNormalized,
                 Math.Max(baseProperties.PermeabilityNormalized, fractures.Where(fracture => fracture.Contains(x, z)).Max(fracture => fracture.PermeabilityBoostNormalized)))
             : baseProperties;
-        return new MaterialSample(layer.MaterialCode, layer.LayerId, properties, fractured);
+        sample = new MaterialSample(layer.MaterialCode, layer.LayerId, properties, fractured);
+        return true;
     }
 
     private string CanonicalText()
     {
-        var builder = new StringBuilder("ISRW-MATERIAL-SNAPSHOT-V1\n").Append(Catalog.ContentChecksum).Append('\n');
+        var builder = new StringBuilder("ISRW-MATERIAL-SNAPSHOT-V").Append(MaterialSnapshotFormat.SchemaVersion).Append('\n').Append(Catalog.ContentChecksum).Append('\n');
         foreach (StratigraphicLayer layer in layers)
         {
             builder.Append(layer.LayerId).Append('|').Append(layer.BottomInclusiveY).Append('|').Append(layer.TopExclusiveY).Append('|').Append((int)layer.MaterialCode).Append('\n');
