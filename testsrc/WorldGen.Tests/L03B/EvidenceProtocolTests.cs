@@ -248,42 +248,125 @@ public sealed class EvidenceProtocolTests
         string repository = L03BTestSupport.FindRepositoryRoot();
         string runnerPath = Path.Combine(repository, "testsrc", "WorldGen.Tests", "L03B", "Run-L03BEvidenceS.ps1");
         string runner = File.ReadAllText(runnerPath);
-        int functionsStart = runner.IndexOf("function Get-EvidenceSha256", StringComparison.Ordinal);
+        int functionsStart = runner.IndexOf("function Protect-EvidenceDiagnostic", StringComparison.Ordinal);
         int functionsEnd = runner.IndexOf("[void][IO.Directory]::CreateDirectory($localRoot)", functionsStart, StringComparison.Ordinal);
         Assert.IsTrue(functionsStart >= 0 && functionsEnd > functionsStart);
 
         string temporaryRoot = Path.Combine(Path.GetTempPath(), "isr-l03b-failure-protocol-" + Guid.NewGuid().ToString("N"));
         string staging = Path.Combine(temporaryRoot, RunId);
-        string failurePublishing = Path.Combine(temporaryRoot, "failure-publishing");
         string failureTerminal = Path.Combine(temporaryRoot, "failure-terminal");
-        string trxStaging = Path.Combine(temporaryRoot, "trx-staging");
+        string resultPath = Path.Combine(temporaryRoot, "timeout-result.json");
         const string secretSentinel = "complete-review-key-secret-sentinel";
         try
         {
-            Directory.CreateDirectory(Path.Combine(staging, "blind"));
-            Directory.CreateDirectory(Path.Combine(staging, "sealed"));
-            Directory.CreateDirectory(trxStaging);
-            File.WriteAllBytes(Path.Combine(staging, L03BEvidenceProtocol.CommitmentsArtifactPath.Replace('/', Path.DirectorySeparatorChar)),
-                Commitments(RunId, Nonce));
-            File.WriteAllText(Path.Combine(staging, "sealed", "T03-06-S-review-key.json"), secretSentinel);
-            File.WriteAllText(Path.Combine(staging, L03BEvidenceProtocol.SuccessMarkerArtifactPath.Replace('/', Path.DirectorySeparatorChar)), "{\"status\":\"COMPLETE\"}");
-            File.WriteAllText(Path.Combine(staging, "sealed", "T03-05-06-S.json"), "{\"overallStatus\":\"RUNNING\"}");
-            File.WriteAllText(Path.Combine(staging, "blind", "T03-06-S-manifest.json"), "{\"overallStatus\":\"RUNNING\"}");
-            File.WriteAllText(Path.Combine(staging, "blind", "T03-06-S05.bmp"), "partial-map");
-            File.WriteAllText(Path.Combine(trxStaging, "T03-05-06-S.trx"),
-                "<TestRun><ResultSummary><Counters total=\"1\" executed=\"0\" passed=\"0\" failed=\"0\" /></ResultSummary>");
+            Directory.CreateDirectory(temporaryRoot);
+            File.WriteAllBytes(Path.Combine(temporaryRoot, "commitments-source.json"), Commitments(RunId, Nonce));
+
+            string childPath = Path.Combine(temporaryRoot, "controlled-post-key-child.ps1");
+            string child = """
+                $ErrorActionPreference = 'Stop'
+                $base = $env:ISR_L03B_PROTOCOL_TEST_ROOT
+                $runId = $env:ISR_L03B_PROTOCOL_TEST_RUN
+                $secret = $env:ISR_L03B_PROTOCOL_TEST_SECRET
+                $staging = Join-Path $base $runId
+                $trxStaging = Join-Path $base 'trx-staging'
+                [void][IO.Directory]::CreateDirectory((Join-Path $staging 'blind'))
+                [void][IO.Directory]::CreateDirectory((Join-Path $staging 'sealed'))
+                [void][IO.Directory]::CreateDirectory($trxStaging)
+                function Write-ChildAtomicText {
+                    param([string]$Path, [string]$Content)
+                    $temporaryPath = "$Path.tmp"
+                    [IO.File]::WriteAllText($temporaryPath, $Content)
+                    [IO.File]::Move($temporaryPath, $Path, $true)
+                }
+                $commitmentsPath = Join-Path $staging 'blind/T03-06-S-attribution-commitments.json'
+                [IO.File]::Copy((Join-Path $base 'commitments-source.json'), "$commitmentsPath.tmp", $false)
+                [IO.File]::Move("$commitmentsPath.tmp", $commitmentsPath, $true)
+                Write-ChildAtomicText -Path (Join-Path $staging 'sealed/T03-05-06-S.json') -Content '{"overallStatus":"RUNNING"}'
+                Write-ChildAtomicText -Path (Join-Path $staging 'blind/T03-06-S-manifest.json') -Content '{"overallStatus":"RUNNING"}'
+                Write-ChildAtomicText -Path (Join-Path $staging 'blind/T03-06-S05.bmp') -Content 'partial-map'
+                Write-ChildAtomicText -Path (Join-Path $trxStaging 'T03-05-06-S.trx') -Content '<TestRun><ResultSummary><Counters total="1" executed="0" passed="0" failed="0" /></ResultSummary></TestRun>'
+                Write-ChildAtomicText -Path (Join-Path $staging 'sealed/T03-06-S-success.json') -Content '{"status":"COMPLETE"}'
+                Write-ChildAtomicText -Path (Join-Path $staging 'sealed/T03-06-S-review-key.json') -Content $secret
+                Write-ChildAtomicText -Path (Join-Path $staging 'child-pid.txt') -Content ([string]$PID)
+                Write-ChildAtomicText -Path (Join-Path $staging 'post-key-ready.txt') -Content 'READY'
+                Start-Sleep -Seconds 30
+                """;
+            File.WriteAllText(childPath, child, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
             string functionText = runner[functionsStart..functionsEnd];
             string harnessPath = Path.Combine(temporaryRoot, "failure-harness.ps1");
-            string harness = "$ErrorActionPreference = 'Stop'\n" + functionText + "\n" +
-                "function Assert-Provenance { param([string]$ExpectedHead, [string]$ExpectedTree); return [pscustomobject]@{ Head=$ExpectedHead; Tree=$ExpectedTree } }\n" +
-                "$base = $env:ISR_L03B_PROTOCOL_TEST_ROOT\n" +
-                "$published = Publish-EvidenceFailure -StagingPath (Join-Path $base '" + RunId + "') " +
-                "-FailureStagingPath (Join-Path $base 'failure-publishing') -FailureTerminalPath (Join-Path $base 'failure-terminal') " +
-                "-TrxStagingPath (Join-Path $base 'trx-staging') -TrxName 'T03-05-06-S.trx' " +
-                "-Head '" + Commit + "' -Tree '" + Tree + "' -FixturesBlob '" + FixturesBlob + "' " +
-                "-TestAssemblyHash '" + TestHash + "' -CoreAssemblyHash '" + CoreHash + "'\n" +
-                "if (-not $published) { throw 'Failure terminal was not published.' }\n";
+            string harness = "$ErrorActionPreference = 'Stop'\n" + functionText + "\n" + """
+                function Assert-Provenance {
+                    param([string]$ExpectedHead, [string]$ExpectedTree)
+                    return [pscustomobject]@{ Head = $ExpectedHead; Tree = $ExpectedTree }
+                }
+                $base = $env:ISR_L03B_PROTOCOL_TEST_ROOT
+                $root = $base
+                $stagingPath = Join-Path $base $env:ISR_L03B_PROTOCOL_TEST_RUN
+                $failureStagingPath = Join-Path $base 'failure-publishing'
+                $failureTerminalPath = Join-Path $base 'failure-terminal'
+                $trxStagingPath = Join-Path $base 'trx-staging'
+                $childPath = Join-Path $base 'controlled-post-key-child.ps1'
+                $lockPath = Join-Path $base 'evidence-s-runner.lock'
+                $runLock = $null
+                $terminalPublished = $false
+                $timedOut = $false
+                $postKeyReached = $false
+                $childProcessId = $null
+                try {
+                    $runLock = [IO.FileStream]::new($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None, 1, [IO.FileOptions]::DeleteOnClose)
+                    try {
+                        try {
+                            [void](Invoke-EvidenceProcess -FileName pwsh -Arguments @('-NoProfile', '-NonInteractive', '-File', $childPath) -TimeoutSeconds 3 -Secrets @($env:ISR_L03B_PROTOCOL_TEST_SECRET))
+                            throw 'Controlled child unexpectedly completed before timeout.'
+                        } catch {
+                            if (-not $_.Exception.Message.Contains('timed out after 3 seconds')) { throw }
+                            $timedOut = $true
+                            $readyPath = Join-Path $stagingPath 'post-key-ready.txt'
+                            $keyPath = Join-Path $stagingPath 'sealed/T03-06-S-review-key.json'
+                            $pidPath = Join-Path $stagingPath 'child-pid.txt'
+                            $postKeyReached = (Test-Path -LiteralPath $readyPath -PathType Leaf) -and
+                                (Test-Path -LiteralPath $keyPath -PathType Leaf) -and
+                                ([IO.File]::ReadAllText($keyPath) -eq $env:ISR_L03B_PROTOCOL_TEST_SECRET)
+                            if (-not $postKeyReached) { throw 'Controlled child did not reach the post-key state before timeout.' }
+                            $childProcessId = [int][IO.File]::ReadAllText($pidPath)
+                            $terminalPublished = Publish-EvidenceFailure -StagingPath $stagingPath -FailureStagingPath $failureStagingPath -FailureTerminalPath $failureTerminalPath `
+                                -TrxStagingPath $trxStagingPath -TrxName 'T03-05-06-S.trx' -Head $env:ISR_L03B_PROTOCOL_TEST_COMMIT `
+                                -Tree $env:ISR_L03B_PROTOCOL_TEST_TREE -FixturesBlob $env:ISR_L03B_PROTOCOL_TEST_FIXTURES `
+                                -TestAssemblyHash $env:ISR_L03B_PROTOCOL_TEST_TEST_HASH -CoreAssemblyHash $env:ISR_L03B_PROTOCOL_TEST_CORE_HASH
+                            throw
+                        }
+                    } catch {
+                        if (-not $timedOut -or -not $terminalPublished) { throw }
+                    } finally {
+                        if (Test-Path -LiteralPath $stagingPath) { Remove-Item -LiteralPath $stagingPath -Recurse -Force }
+                        if (Test-Path -LiteralPath $failureStagingPath) { Remove-Item -LiteralPath $failureStagingPath -Recurse -Force }
+                        if (Test-Path -LiteralPath $trxStagingPath) { Remove-Item -LiteralPath $trxStagingPath -Recurse -Force }
+                    }
+                } finally {
+                    if ($null -ne $runLock) { $runLock.Dispose() }
+                    if (Test-Path -LiteralPath $lockPath) { Remove-Item -LiteralPath $lockPath -Force }
+                }
+                $childTerminated = $null -eq (Get-Process -Id $childProcessId -ErrorAction SilentlyContinue)
+                $sourceClean = -not (Test-Path -LiteralPath $stagingPath)
+                $failurePublishingClean = -not (Test-Path -LiteralPath $failureStagingPath)
+                $trxClean = -not (Test-Path -LiteralPath $trxStagingPath)
+                $lockClean = -not (Test-Path -LiteralPath $lockPath)
+                if (-not $childTerminated -or -not $sourceClean -or -not $failurePublishingClean -or -not $trxClean -or -not $lockClean) {
+                    throw 'Timeout reconciliation did not terminate the child and clean every non-terminal path.'
+                }
+                $result = [ordered]@{
+                    timedOut = $timedOut
+                    postKeyReached = $postKeyReached
+                    childTerminated = $childTerminated
+                    sourceClean = $sourceClean
+                    failurePublishingClean = $failurePublishingClean
+                    trxClean = $trxClean
+                    lockClean = $lockClean
+                }
+                [IO.File]::WriteAllText((Join-Path $base 'timeout-result.json'), ($result | ConvertTo-Json))
+                """;
             File.WriteAllText(harnessPath, harness, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
             using var process = new Process
@@ -301,11 +384,30 @@ public sealed class EvidenceProtocolTests
             process.StartInfo.ArgumentList.Add("-File");
             process.StartInfo.ArgumentList.Add(harnessPath);
             process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_ROOT"] = temporaryRoot;
+            process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_RUN"] = RunId;
+            process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_SECRET"] = secretSentinel;
+            process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_COMMIT"] = Commit;
+            process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_TREE"] = Tree;
+            process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_FIXTURES"] = FixturesBlob;
+            process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_TEST_HASH"] = TestHash;
+            process.StartInfo.Environment["ISR_L03B_PROTOCOL_TEST_CORE_HASH"] = CoreHash;
             process.Start();
-            string stdout = process.StandardOutput.ReadToEnd();
-            string stderr = process.StandardError.ReadToEnd();
-            Assert.IsTrue(process.WaitForExit(15_000), "Failure-publisher harness timed out.");
+            Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(20_000))
+            {
+                process.Kill(entireProcessTree: true);
+                Assert.Fail("Failure-publisher harness exceeded its bounded integration timeout.");
+            }
+            string stdout = stdoutTask.GetAwaiter().GetResult();
+            string stderr = stderrTask.GetAwaiter().GetResult();
             Assert.AreEqual(0, process.ExitCode, $"Failure-publisher harness failed. stdout=[{stdout}] stderr=[{stderr}]");
+
+            using JsonDocument result = JsonDocument.Parse(File.ReadAllBytes(resultPath));
+            foreach (string property in new[] { "timedOut", "postKeyReached", "childTerminated", "sourceClean", "failurePublishingClean", "trxClean", "lockClean" })
+            {
+                Assert.IsTrue(result.RootElement.GetProperty(property).GetBoolean(), property);
+            }
 
             string[] published = Directory.GetFiles(failureTerminal, "*", SearchOption.AllDirectories)
                 .Select(path => Path.GetRelativePath(failureTerminal, path).Replace('\\', '/'))
@@ -323,9 +425,9 @@ public sealed class EvidenceProtocolTests
             Assert.IsFalse(terminalText.Contains("\"overallStatus\": \"RUNNING\"", StringComparison.Ordinal));
             Assert.IsFalse(terminalText.Contains("\"overallStatus\":\"RUNNING\"", StringComparison.Ordinal));
             Assert.IsFalse(published.Contains(L03BEvidenceProtocol.TrxArtifactPath, StringComparer.Ordinal),
-                "A parseable but incomplete timeout TRX must not be published.");
-            Assert.IsTrue(File.Exists(Path.Combine(staging, "sealed", "T03-06-S-review-key.json")),
-                "The publisher must reconstruct from an allowlist, not move or mutate source staging before runner cleanup.");
+                "A complete XML document with an unexecuted timeout TRX must not be published.");
+            Assert.IsFalse(Directory.Exists(staging), "The real runner finally path must remove source staging, including its review key.");
+            Assert.IsFalse(File.Exists(Path.Combine(temporaryRoot, "evidence-s-runner.lock")), "The runner lock must be released and removed.");
         }
         finally
         {

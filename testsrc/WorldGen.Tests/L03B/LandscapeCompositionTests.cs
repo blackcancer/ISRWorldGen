@@ -316,9 +316,9 @@ public sealed class LandscapeCompositionTests
             })
             {
                 LandscapeFamilyProfile profile = new(family, 3, 2, 1, .2, weights.macroWeight, weights.mesoWeight, weights.detailWeight);
-                foreach ((double x, double z) point in new[] { (0d, 0d), (-4_000_000_000_000d, 0d), (31d, -17d) })
+                foreach ((double x, double z) point in new[] { (0d, 0d), (-4_000_000_000_000d, 0d), (31d, -17d), (191d, 1_757d) })
                 {
-                    double value = LandscapeSignatureSampler.Sample(profile, point.x, point.z, 73, 11, (long)point.x, (long)point.z);
+                    double value = LandscapeSignatureSampler.Sample(profile, point.x, point.z, 73, 11, 19, -23);
                     Assert.IsTrue(value is > -1 and < 1, $"{family} {weights} at {point} must be analytically bounded, not clipped.");
                 }
             }
@@ -376,6 +376,44 @@ public sealed class LandscapeCompositionTests
             Assert.IsLessThan(1d, .90d + (scale * noiseBound),
                 $"The formal Plains envelope must hold for valid weights {(macro, meso, detail)}.");
         }
+    }
+
+    [TestMethod]
+    public void VolcanicMacroPeakReproducesTheLegacyOvershootAndUsesTheUniversalEnvelope()
+    {
+        LandscapeFamilyProfile macroOnly = new(LandscapeFamily.VolcanicDomains, 3, 2, 1, .2, 1, 0, 0);
+        const int seed = 73;
+        const ulong streamOrdinal = 11;
+        const long anchorX = 19;
+        const long anchorZ = -23;
+        StableId stableId = StableId.Derive(RandomDomain.Geology, StableId.Zero, streamOrdinal);
+        MethodInfo phaseMethod = typeof(LandscapeSignatureSampler).GetMethod("Phase", BindingFlags.NonPublic | BindingFlags.Static)!;
+        MethodInfo signedMethod = typeof(LandscapeSignatureSampler).GetMethod("Signed", BindingFlags.NonPublic | BindingFlags.Static)!;
+        double angle = (double)phaseMethod.Invoke(null, [seed, stableId, 60UL])!;
+        double cos = Math.Cos(angle);
+        double sin = Math.Sin(angle);
+        double offsetX = (double)signedMethod.Invoke(null, [seed, stableId, 61UL])! * macroOnly.MacroWavelengthBlocks * .45d;
+        double offsetZ = (double)signedMethod.Invoke(null, [seed, stableId, 62UL])! * macroOnly.MacroWavelengthBlocks * .45d;
+        const double peakU = -.20d;
+        const double peakV = .10d;
+        double relativeX = offsetX + (macroOnly.MacroWavelengthBlocks * ((cos * peakU) - (sin * peakV)));
+        double relativeZ = offsetZ + (macroOnly.MacroWavelengthBlocks * ((sin * peakU) + (cos * peakV)));
+        double x = anchorX + relativeX;
+        double z = anchorZ + relativeZ;
+
+        MethodInfo localMethod = typeof(LandscapeSignatureSampler).GetMethod("Local", BindingFlags.NonPublic | BindingFlags.Static)!;
+        (double U, double V) q = ((double U, double V))localMethod.Invoke(
+            null, [relativeX, relativeZ, seed, stableId, 60UL, macroOnly.MacroWavelengthBlocks])!;
+        double coneRadius = Math.Sqrt(((q.U + .20d) * (q.U + .20d)) + ((q.V - .10d) * (q.V - .10d)));
+        double cone = Math.Max(0d, 1d - (coneRadius / .45d));
+        double legacy = (1.35d * cone * cone) - .32d;
+        Assert.IsTrue(legacy is > 1.029d and < 1.031d,
+            $"The exact cone center must reproduce the former public-envelope violation; old={legacy:R}.");
+        double corrected = LandscapeSignatureSampler.Sample(macroOnly, x, z, seed, streamOrdinal, anchorX, anchorZ);
+        Assert.AreEqual(.999d, corrected, 1e-12,
+            $"The analytic weight envelope must preserve the peak shape while keeping it bounded; coordinate=({x:R},{z:R}).");
+        Assert.AreNotEqual((double)anchorX, x);
+        Assert.AreNotEqual((double)anchorZ, z);
     }
 
     [TestMethod]

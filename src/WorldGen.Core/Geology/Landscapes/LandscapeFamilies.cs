@@ -88,7 +88,9 @@ public static class LandscapeSignatureSampler
                             .16 * Gaussian(q.U - .39, q.V + .04, .22, .20);
         double serration = .18 * (Noise(q.U * scale, q.V * scale, seed, s, 12) - .5);
         double crags = .12 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 13) - .5);
-        return (p.MacroWeight * (mainRidge + parallelRidge + col + ridgeKnots - .55)) + (p.MesoWeight * serration) + (p.DetailWeight * crags);
+        // Macro <= 1.18 + .50 + .18 + .16 - .55 = 1.47 and >= -.90;
+        // meso/detail absolute bounds are .09/.06.
+        return BoundedWeighted(p, mainRidge + parallelRidge + col + ridgeKnots - .55, 1.47, serration, .09, crags, .06);
     }
 
     /// <summary>
@@ -143,7 +145,10 @@ public static class LandscapeSignatureSampler
         double summitC = .56 * Gaussian((q.U + .04) * scale, (q.V + .38) * scale, .64, .58);
         double valley = -.45 * Gaussian(q.U, q.V, .24, .20);
         double weathering = .10 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 22) - .5);
-        return (p.MacroWeight * (summitA + summitB + valley - .28)) + (p.MesoWeight * (summitC - .10)) + (p.DetailWeight * weathering);
+        // Split on U=0: for U>=0 summitA<=exp(-.28^2/.34^2), and
+        // for U<0 summitB<=.82*exp(-.32^2/.28^2).  Thus the two
+        // summits minus .28 are <1.048; the negative bound is -.73.
+        return BoundedWeighted(p, summitA + summitB + valley - .28, 1.048, summitC - .10, .46, weathering, .05);
     }
 
     private static double Plateau(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
@@ -157,7 +162,7 @@ public static class LandscapeSignatureSampler
         double interior = (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 31) - .5) * top;
         double foreland = .14 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 33) - .5);
         double rockTexture = .05 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 34) - .5);
-        return (p.MacroWeight * (top - .36)) + (p.MesoWeight * (.46 * escarpment + steppedEdge + foreland - .11)) + (p.DetailWeight * ((.06 * interior) + rockTexture));
+        return BoundedWeighted(p, top - .36, .64, (.46 * escarpment) + steppedEdge + foreland - .11, .46, (.06 * interior) + rockTexture, .055);
     }
 
     private static double Basin(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
@@ -169,7 +174,7 @@ public static class LandscapeSignatureSampler
         double mesoScale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
         double rimUndulation = .08 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 42) - .5) * enclosingRim;
         double floor = .06 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 41) - .5) * Math.Exp(-4 * r * r);
-        return (p.MacroWeight * (closedBowl + .29)) + (p.MesoWeight * (enclosingRim + rimUndulation - .08)) + (p.DetailWeight * floor);
+        return BoundedWeighted(p, closedBowl + .29, .71, enclosingRim + rimUndulation - .08, .5232, floor, .03);
     }
 
     private static double Plain(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
@@ -206,7 +211,25 @@ public static class LandscapeSignatureSampler
         double caldera = -.48 * Math.Exp(-125 * r * r) + .18 * Math.Exp(-210 * (r - .16) * (r - .16));
         double rift = .22 * (Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 62) - .5);
         double lava = .26 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 63) - .5);
-        return (p.MacroWeight * ((1.35 * mainCone) - .32)) + (p.MesoWeight * (secondaryCone + caldera + rift - .08)) + (p.DetailWeight * lava);
+        // The macro cone is [-.32,1.03], the conservative meso envelope
+        // is [-.67,.79], and detail is [-.13,.13].
+        return BoundedWeighted(p, (1.35 * mainCone) - .32, 1.03, secondaryCone + caldera + rift - .08, .79, lava, .13);
+    }
+    private static double BoundedWeighted(
+        LandscapeFamilyProfile profile,
+        double macro,
+        double macroAbsoluteBound,
+        double meso,
+        double mesoAbsoluteBound,
+        double detail,
+        double detailAbsoluteBound)
+    {
+        double value = (profile.MacroWeight * macro) + (profile.MesoWeight * meso) + (profile.DetailWeight * detail);
+        double bound = (profile.MacroWeight * macroAbsoluteBound) + (profile.MesoWeight * mesoAbsoluteBound) + (profile.DetailWeight * detailAbsoluteBound);
+        // Every catalog bound is below .999, so catalog morphology is bit-for-bit
+        // unchanged.  Extreme public weights consume this analytic budget without
+        // clipping individual samples or hiding an invalid primitive envelope.
+        return Math.Min(1d, .999d / bound) * value;
     }
     private static (double U, double V) Local(double x, double z, int seed, StableId s, ulong c, double scale) { double angle = Phase(seed, s, c); double cos = Math.Cos(angle); double sin = Math.Sin(angle); double ox = Signed(seed, s, c + 1) * scale * .45; double oz = Signed(seed, s, c + 2) * scale * .45; double dx = x - ox; double dz = z - oz; return (((cos * dx) + (sin * dz)) / scale, ((-sin * dx) + (cos * dz)) / scale); }
     private static (double U, double V) OrientedLocal(double x, double z, int seed, StableId s, ulong c, double scale) { double angle = Phase(seed, s, c); double cos = Math.Cos(angle); double sin = Math.Sin(angle); return (((cos * x) + (sin * z)) / scale, ((-sin * x) + (cos * z)) / scale); }
