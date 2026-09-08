@@ -529,11 +529,18 @@
       "blocker": null
     },
     "L14-B": {
-      "status": "IN_PROGRESS",
-      "owner": "agent:l14-b",
+      "status": "DONE",
+      "owner": "integrator:l14-b",
       "branch": "agent/l14-b",
       "base_commit": "7e4d08f",
-      "evidence": [],
+      "evidence": [
+        "worklogs/L14-B.md",
+        "commit:4e6c13a",
+        "commit:27f88f8c7788ccad1a55b45a7091ecda29c80b3b",
+        "review:independent PASS after analytical-priority and actual-parallelism corrections",
+        "local:.local/L14B-integrated/tests/debug/L14B-integrated-debug.trx (4/4 PASS)",
+        "local:.local/L14B-integrated/tests/release/L14B-integrated-release.trx (4/4 PASS)"
+      ],
       "blocker": null
     },
     "L14-C": {
