@@ -679,11 +679,17 @@
       "blocker": null
     },
     "L19-A": {
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "owner": "agent:l19-a",
       "branch": "agent/l19-a",
       "base_commit": "089bf6f",
-      "evidence": [],
+      "evidence": [
+        "worklogs/L19-A.md",
+        "commit:a9976ddedfc881d7c6d62c4290e652e2d07ff25e",
+        "review:independent ACCEPT; scope documentaire, seven families and conservative status verified",
+        "local:main python tools/test_documentation_tools.py (12/12 PASS)",
+        "local:.local/l19-a-integration/spec-validation.json (PASS)"
+      ],
       "blocker": null
     },
     "L19-B": {
