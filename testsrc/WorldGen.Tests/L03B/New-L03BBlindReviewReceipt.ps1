@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$BlindDirectory,
     [Parameter(Mandatory = $true)][string]$AnswersPath,
-    [Parameter(Mandatory = $true)][string]$ReviewDirectory)
+    [string]$ReviewParent)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -10,22 +10,27 @@ Import-Module (Join-Path $PSScriptRoot 'L03BBlindReviewProtocol.psm1') -Force
 
 $blind = (Resolve-Path -LiteralPath $BlindDirectory -ErrorAction Stop).Path
 $answers = (Resolve-Path -LiteralPath $AnswersPath -ErrorAction Stop).Path
-$review = [IO.Path]::GetFullPath($ReviewDirectory)
-$reviewParent = [IO.Path]::GetDirectoryName($review)
-if (-not $reviewParent -or -not (Test-Path -LiteralPath $reviewParent -PathType Container)) {
-    throw 'The review directory parent must already exist.'
-}
-$blindPrefix = $blind.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-if ($review -eq $blind -or $review.StartsWith($blindPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'The durable review receipt must be stored outside the immutable blind package.'
-}
-if (Test-Path -LiteralPath $review) {
-    throw 'Review directory already exists; a receipt cannot be modified, replaced, or resubmitted.'
-}
-
-$publishing = "$review-publishing-$([guid]::NewGuid().ToString('N'))"
+$review = $null
+$publishing = $null
 try {
     $package = Read-L03BVerifiedBlindPackage $blind
+    if ([IO.Path]::GetFileName($blind) -cne 'blind') { throw 'BlindDirectory must be the exact blind child of an evidence terminal.' }
+    $evidenceTerminal = [IO.Path]::GetDirectoryName($blind)
+    $canonicalParent = [IO.Path]::GetDirectoryName($evidenceTerminal)
+    if (-not $canonicalParent -or -not (Test-Path -LiteralPath $canonicalParent -PathType Container)) {
+        throw 'The canonical review parent derived from BlindDirectory is absent.'
+    }
+    if ($ReviewParent) {
+        $assertedParent = [IO.Path]::GetFullPath($ReviewParent).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        if ($assertedParent -cne $canonicalParent.TrimEnd([IO.Path]::DirectorySeparatorChar)) {
+            throw 'ReviewParent does not match the canonical parent derived from BlindDirectory; alternate review locations are forbidden.'
+        }
+    }
+    $review = Join-Path $canonicalParent "evidence-s-review-$($package.Binding.runId)"
+    if (Test-Path -LiteralPath $review) {
+        throw 'Canonical review terminal already exists; a receipt cannot be modified, replaced, or resubmitted.'
+    }
+    $publishing = "$review-publishing-$([guid]::NewGuid().ToString('N'))"
     $answerBytes = Read-L03BBoundedBytes -Path $answers -MaximumBytes 65536
     try { $answerDocument = [Text.Encoding]::UTF8.GetString($answerBytes) | ConvertFrom-Json } catch { throw 'Blind review answers are not valid JSON.' }
     $recordedUtc = [DateTimeOffset]::UtcNow
@@ -47,5 +52,5 @@ try {
     }
     $summary | ConvertTo-Json -Depth 4
 } finally {
-    if (Test-Path -LiteralPath $publishing) { Remove-Item -LiteralPath $publishing -Recurse -Force }
+    if ($publishing -and (Test-Path -LiteralPath $publishing)) { Remove-Item -LiteralPath $publishing -Recurse -Force }
 }

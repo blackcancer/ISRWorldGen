@@ -122,6 +122,29 @@ function Read-L03BVerifiedBlindPackage {
     }
     Assert-L03BFixedHash ([string]$manifest.bundleSignature) (Get-L03BSha256Bytes (ConvertTo-L03BCanonicalBytes $manifestPayload)) 'Blind manifest bundle signature'
 
+    $requestPath = Join-Path $blind 'T03-06-S-review-request.json'
+    $requestBytes = Read-L03BBoundedBytes $requestPath
+    $requestHash = Get-L03BSha256Bytes $requestBytes
+    $requestArtifact = @($artifactRows | Where-Object { $_.path -ceq 'blind/T03-06-S-review-request.json' })
+    if ($requestArtifact.Count -ne 1) { throw 'Blind manifest does not bind exactly one review request.' }
+    Assert-L03BFixedHash $requestHash ([string]$requestArtifact[0].sha256) 'Blind review request artifact SHA-256'
+    try { $request = [Text.Encoding]::UTF8.GetString($requestBytes) | ConvertFrom-Json } catch { throw 'Blind review request is not valid JSON.' }
+    Assert-L03BExactProperties $request @('schemaVersion', 'status', 'trustBoundary', 'instructions', 'allowedFamilies', 'codes') 'Blind review request'
+    $requestCodes = @($request.codes)
+    $requestFamilies = @($request.allowedFamilies)
+    $requestInstructions = @($request.instructions)
+    if ($request.schemaVersion -isnot [long] -or [long]$request.schemaVersion -ne 2 -or
+        $request.status -isnot [string] -or [string]$request.status -cne 'READY_FOR_EXTERNAL_BLIND_REVIEW' -or
+        $request.trustBoundary -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$request.trustBoundary) -or
+        ($requestCodes -join '|') -cne ($script:ExpectedCodes -join '|') -or
+        ($requestFamilies -join '|') -cne ($script:AllowedFamilies -join '|') -or
+        @($requestCodes | Where-Object { $_ -isnot [string] }).Count -ne 0 -or
+        @($requestFamilies | Where-Object { $_ -isnot [string] }).Count -ne 0 -or
+        $requestInstructions.Count -eq 0 -or
+        @($requestInstructions | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$_) }).Count -ne 0) {
+        throw 'Blind review request schema or exact S01 through S06 code set is invalid.'
+    }
+
     $commitmentsPath = Join-Path $blind 'T03-06-S-attribution-commitments.json'
     $commitmentsBytes = Read-L03BBoundedBytes $commitmentsPath
     $commitmentsHash = Get-L03BSha256Bytes $commitmentsBytes
@@ -175,6 +198,8 @@ function Read-L03BVerifiedBlindPackage {
         Commitments = $commitments
         CommitmentsBytes = $commitmentsBytes
         CommitmentsSha256 = $commitmentsHash
+        ReviewRequestBytes = $requestBytes
+        ReviewRequestSha256 = $requestHash
     }
 }
 
@@ -183,6 +208,10 @@ function ConvertTo-L03BReviewEntries {
     $rows = @()
     foreach ($entry in @($Entries)) {
         Assert-L03BExactProperties $entry @('code', 'identifiedFamilyBeforeReveal', 'confidence0To100BeforeReveal', 'morphologyObservations') 'Blind review answer entry'
+        if ($entry.code -isnot [string] -or $entry.identifiedFamilyBeforeReveal -isnot [string] -or
+            $entry.confidence0To100BeforeReveal -isnot [long] -or $entry.morphologyObservations -isnot [string]) {
+            throw 'Blind review answer types must be string, string, integer, and string.'
+        }
         $code = [string]$entry.code
         $family = [string]$entry.identifiedFamilyBeforeReveal
         $confidence = [int]$entry.confidence0To100BeforeReveal
@@ -208,7 +237,7 @@ function ConvertTo-L03BReviewEntries {
 function New-L03BReviewReceiptBytes {
     param([Parameter(Mandatory = $true)]$BlindPackage, [Parameter(Mandatory = $true)]$Answers, [Parameter(Mandatory = $true)][DateTimeOffset]$RecordedUtc)
     Assert-L03BExactProperties $Answers @('schemaVersion', 'entries') 'Blind review answers'
-    if ([int]$Answers.schemaVersion -ne 1) { throw 'Blind review answers schema is unsupported.' }
+    if ($Answers.schemaVersion -isnot [long] -or [long]$Answers.schemaVersion -ne 1) { throw 'Blind review answers schema is unsupported.' }
     $entries = ConvertTo-L03BReviewEntries $Answers.entries
     $payload = [ordered]@{
         schemaVersion = 1

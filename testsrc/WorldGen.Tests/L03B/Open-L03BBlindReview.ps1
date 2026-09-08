@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
-    [Parameter(Mandatory = $true)][string]$ReviewDirectory,
     [Parameter(Mandatory = $true)][string]$ExpectedReceiptSha256)
 
 $ErrorActionPreference = 'Stop'
@@ -152,14 +151,11 @@ function Read-VerifiedReviewKey {
 }
 
 $evidence = (Resolve-Path -LiteralPath $EvidenceDirectory -ErrorAction Stop).Path
-$review = (Resolve-Path -LiteralPath $ReviewDirectory -ErrorAction Stop).Path
-if (-not (Test-Path -LiteralPath $evidence -PathType Container) -or -not (Test-Path -LiteralPath $review -PathType Container)) {
-    throw 'Evidence and review directories must both exist.'
-}
-$evidencePrefix = $evidence.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-if ($review -eq $evidence -or $review.StartsWith($evidencePrefix, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Review data must not be stored inside the immutable campaign terminal.'
-}
+$blindPackage = Read-L03BVerifiedBlindPackage (Join-Path $evidence 'blind')
+$canonicalParent = [IO.Path]::GetDirectoryName($evidence)
+if (-not $canonicalParent) { throw 'Evidence terminal has no canonical review parent.' }
+$review = Join-Path $canonicalParent "evidence-s-review-$($blindPackage.Binding.runId)"
+if (-not (Test-Path -LiteralPath $review -PathType Container)) { throw 'Canonical review terminal is absent for this blind run.' }
 $reveal = "$evidence-review-reveal"
 $revealParent = [IO.Path]::GetDirectoryName($reveal)
 if (-not $revealParent -or -not (Test-Path -LiteralPath $revealParent -PathType Container)) { throw 'Reveal directory parent must already exist.' }
@@ -192,7 +188,6 @@ try {
         throw 'Reveal publication already exists; review and reveal are immutable and cannot be repeated.'
     }
     Assert-L03BFixedHash $receiptFileSha256 $ExpectedReceiptSha256 'Expected blind review receipt SHA-256'
-    $blindPackage = Read-L03BVerifiedBlindPackage (Join-Path $evidence 'blind')
     $verifiedReceipt = Read-L03BVerifiedReviewReceiptBytes -ReceiptBytes $receiptBytes -BlindPackage $blindPackage
     $now = [DateTimeOffset]::UtcNow
     if ($verifiedReceipt.RecordedUtc -gt $now.AddMinutes(5)) { throw 'Blind review receipt timestamp is in the future.' }
