@@ -693,12 +693,12 @@
       "blocker": null
     },
     "L19-B": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
+      "status": "IN_PROGRESS",
+      "owner": "l19_b_r14",
+      "branch": "agent/l19-b-r14",
       "base_commit": null,
       "evidence": [],
-      "blocker": "Paused by user: L19 will evolve; do not start until explicit reactivation."
+      "blocker": null
     },
     "L19-C": {
       "status": "BACKLOG",
