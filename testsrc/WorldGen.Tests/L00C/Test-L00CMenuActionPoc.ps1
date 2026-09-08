@@ -26,6 +26,15 @@ function Assert-Calls([string]$type, [string]$methodName, [string]$target) {
 Assert-Calls 'Vintagestory.Client.GuiCompositeMainMenuLeft' 'OnSingleplayer' 'ScreenManager::LoadAndCacheScreen'
 Assert-Calls 'Vintagestory.Client.GuiScreenSingleplayer' 'OnClickCellLeft' 'ScreenManager::ConnectToSingleplayer'
 Assert-Calls 'Vintagestory.Client.ScreenManager' 'ConnectToSingleplayer' 'ScreenManager::StartGame'
+function Assert-FieldRid([string]$type, [string]$fieldName, [int]$rid, [string]$fieldType, [bool]$isPublic) {
+    $field = $module.GetType($type).Fields | Where-Object Name -eq $fieldName | Select-Object -First 1
+    if ($null -eq $field -or (($field.MetadataToken.ToInt32() -band 0x00ffffff) -ne $rid) -or $field.FieldType.FullName -ne $fieldType -or $field.IsPublic -ne $isPublic -or $field.IsStatic) {
+        throw "L00-C menu POC version lock refused: $type.$fieldName field drifted."
+    }
+}
+Assert-FieldRid 'Vintagestory.Client.NoObf.ClientCoreAPI' 'game' 0x11aa 'Vintagestory.Client.NoObf.ClientMain' $false
+Assert-FieldRid 'Vintagestory.Client.NoObf.ClientMain' 'ScreenRunningGame' 0x11f3 'Vintagestory.Client.GuiScreenRunningGame' $true
+Assert-FieldRid 'GuiScreen' 'ScreenManager' 0x0008 'Vintagestory.Client.ScreenManager' $true
 $clientMain = $module.GetType('Vintagestory.Client.NoObf.ClientMain')
 $sendLeave = $clientMain.Methods | Where-Object { $_.Name -eq 'SendLeave' } | Select-Object -First 1
 if ($null -eq $sendLeave -or $sendLeave.ReturnType.FullName -ne 'System.Void' -or $sendLeave.Parameters.Count -ne 1 -or $sendLeave.Parameters[0].ParameterType.FullName -ne 'System.Int32' -or $sendLeave.Parameters[0].Name -ne 'reason') {

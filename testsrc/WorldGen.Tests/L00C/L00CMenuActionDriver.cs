@@ -92,6 +92,23 @@ internal static class L00CMenuActionDriver
         return main && manager;
     }
 
+    // StartClientSide receives ClientCoreAPI.  Resolve its process-wide manager
+    // through exactly this audited field chain; later campaign states instead
+    // begin at the manager and retain their existing generic session discovery.
+    internal static bool TryFindScreenManagerFromClientApi(object clientApi, out object? screenManager)
+    {
+        RequireDebugLab();
+        Assembly lib = FindLoadedLib();
+        RequireAuditedLibrary(lib);
+        Type api = RequireType(lib, "Vintagestory.Client.NoObf.ClientCoreAPI");
+        Type main = RequireType(lib, "Vintagestory.Client.NoObf.ClientMain");
+        Type running = RequireType(lib, "Vintagestory.Client.GuiScreenRunningGame");
+        Type guiScreen = RequireType(lib, "GuiScreen");
+        Type manager = RequireType(lib, "Vintagestory.Client.ScreenManager");
+        return TryResolveClientSessionChain(clientApi, api, main, running, guiScreen, manager,
+            0x11aa, 0x11f3, 0x0008, out _, out screenManager);
+    }
+
     // ScreenManager owns the process-wide main-thread queue.  This is deliberately
     // separate from an ICoreClientAPI listener: DestroyGameSession disposes a
     // session's mod systems, but OnNewFrame continues to drain this queue.
@@ -222,6 +239,57 @@ internal static class L00CMenuActionDriver
             throw new InvalidOperationException("L00-C bootstrap refused: StartServerArgs." + name + " has an unexpected type.");
         field.SetValue(target, value);
     }
+
+    // This is intentionally a fixed audited chain, not an object-graph search:
+    // ClientCoreAPI.game -> ClientMain.ScreenRunningGame -> GuiScreen.ScreenManager.
+    // Tokens are checked as well as name, declaring type, visibility, instance-ness
+    // and field type so an API update fails before it can target another session.
+    internal static bool TryResolveClientSessionChain(object clientApi, Type clientCoreApiType, Type clientMainType,
+        Type runningGameType, Type guiScreenType, Type screenManagerType, int gameFieldToken,
+        int runningGameFieldToken, int screenManagerFieldToken, out object? clientMain, out object? screenManager)
+    {
+        if (clientApi is null) throw new ArgumentNullException(nameof(clientApi));
+        if (!clientCoreApiType.IsInstanceOfType(clientApi)) { clientMain = null; screenManager = null; return false; }
+
+        FieldInfo game = RequireDeclaredInstanceField(clientCoreApiType, "game", clientMainType, false, gameFieldToken);
+        object? main = game.GetValue(clientApi);
+        if (main is null || !clientMainType.IsInstanceOfType(main)) { clientMain = null; screenManager = null; return false; }
+
+        FieldInfo running = RequireDeclaredInstanceField(clientMainType, "ScreenRunningGame", runningGameType, true, runningGameFieldToken);
+        object? gameScreen = running.GetValue(main);
+        if (gameScreen is null || !runningGameType.IsInstanceOfType(gameScreen)) { clientMain = null; screenManager = null; return false; }
+
+        if (runningGameType.BaseType != guiScreenType)
+            throw new InvalidOperationException("L00-C menu POC refused: GuiScreenRunningGame no longer directly inherits GuiScreen.");
+        FieldInfo manager = RequireDeclaredInstanceField(guiScreenType, "ScreenManager", screenManagerType, true, screenManagerFieldToken);
+        object? resolvedManager = manager.GetValue(gameScreen);
+        if (resolvedManager is null || !screenManagerType.IsInstanceOfType(resolvedManager)) { clientMain = null; screenManager = null; return false; }
+
+        clientMain = main;
+        screenManager = resolvedManager;
+        return true;
+    }
+
+    private static FieldInfo RequireDeclaredInstanceField(Type declaringType, string name, Type fieldType, bool isPublic, int expectedToken)
+    {
+        BindingFlags visibility = isPublic ? BindingFlags.Public : BindingFlags.NonPublic;
+        FieldInfo? field = declaringType.GetField(name, BindingFlags.Instance | visibility | BindingFlags.DeclaredOnly);
+        // The audit records the FieldDef row-id (the low 24 bits); reflection
+        // exposes that id prefixed by the ECMA-335 FieldDef token table (0x04).
+        if (field is null || field.IsStatic || (isPublic ? !field.IsPublic : !field.IsPrivate) || field.FieldType != fieldType ||
+            (field.MetadataToken & 0x00ffffff) != expectedToken)
+            throw new InvalidOperationException("L00-C menu POC refused: audited " + declaringType.FullName + "." + name + " field drifted.");
+        return field;
+    }
+
+    private static void RequireAuditedLibrary(Assembly lib)
+    {
+        if (lib.GetName().Version?.ToString() != RequiredLibVersion || Hash(lib.Location) != RequiredLibSha256)
+            throw new InvalidOperationException("L00-C menu POC refused: VintagestoryLib version or SHA-256 drifted from the audited target.");
+    }
+
+    private static Type RequireType(Assembly assembly, string name)
+        => assembly.GetType(name, false) ?? throw new InvalidOperationException("L00-C menu POC refused: " + name + " is absent.");
 
     private static bool TryFindReachable(object root, string auditedTypeName, out object? target)
     {

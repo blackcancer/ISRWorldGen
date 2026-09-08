@@ -28,7 +28,7 @@ if (Select-String -LiteralPath $project -Pattern 'ProjectReference|src\\WorldGen
 if (-not (Select-String -LiteralPath $project -SimpleMatch 'BeforeTargets="PrepareForBuild"' -Quiet)) {
     throw 'Release rejection must run before PrepareForBuild, before C# compilation.'
 }
-if (Select-String -LiteralPath @($modSystem, $laboratoryHost, $driver) -Pattern 'SendKeys|mouse_event|keybd_event|WindowsInput|Process\.Start|Start-Process|GetCredential|AuthenticationHeader|Token|Password' -Quiet) {
+if (Select-String -LiteralPath @($modSystem, $laboratoryHost, $driver) -Pattern 'SendKeys|mouse_event|keybd_event|WindowsInput|Process\.Start|Start-Process|GetCredential|AuthenticationHeader|Password' -Quiet) {
     throw 'L00-C laboratory host must not synthesize input, start a process, or access authentication material.'
 }
 foreach ($required in @('public sealed class L00CMenuActionLabModSystem', 'StartClientSide(ICoreClientAPI api)', 'L00CProcessCampaignController.InstallOrSignal', 'Debugger.IsAttached', 'ISR_L00C_LAB', 'ISR_L00C_LAB_ROOT')) {

@@ -8,6 +8,7 @@
     <DefineConstants>$(DefineConstants);L00C_LAB_TESTMOD</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="L00CClientSessionResolverTests.cs" />
     <Reference Include="VintagestoryAPI">
       <HintPath>$(VintageStoryPath)\VintagestoryAPI.dll</HintPath>
       <Private>false</Private>

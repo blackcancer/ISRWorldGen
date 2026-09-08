@@ -47,7 +47,7 @@ internal sealed class L00CProcessCampaignController
                 return;
             }
 
-            if (!L00CMenuActionDriver.TryFindClientSession(api, out _, out object? manager) || manager is null)
+            if (!L00CMenuActionDriver.TryFindScreenManagerFromClientApi(api, out object? manager) || manager is null)
                 throw new InvalidOperationException("L00-C cannot resolve the audited ScreenManager during StartClientSide.");
             active = new L00CProcessCampaignController(manager, root);
             active.SignalSessionReady();
