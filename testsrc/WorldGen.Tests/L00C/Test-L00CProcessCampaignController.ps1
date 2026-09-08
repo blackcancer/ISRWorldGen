@@ -24,8 +24,8 @@ function Assert-Before([string]$Value, [string]$First, [string]$Second, [string]
 # lifetime/state contract without requiring a game process or authentication.
 Assert-Contains $text 'private static readonly L00CProcessCampaignInstallTransaction<L00CProcessCampaignController> installTransaction = new();' 'Transactional singleton'
 Assert-Contains $text 'private static L00CManagerLeaseLifecycle? bootstrapLease;' 'Shared bootstrap lease engine singleton'
-Assert-Contains $text 'if (installTransaction.Active is not null)' 'Singleton rejection/signal branch'
-Assert-Contains $text 'installTransaction.Active.SignalSessionReady();' 'Subsequent session signal'
+Assert-Contains $text 'installTransaction.TrySignalSameRoot(root' 'Singleton/root signal branch'
+Assert-Contains $text 'value => value.SignalSessionReady()' 'Subsequent session signal'
 Assert-Contains $text 'var engine = new L00CManagerLeaseLifecycle(seams);' 'Shared engine immediate handoff'
 Assert-Contains $text 'RegisterGameTickListener(_ => callback(), 50)' '50ms session retry listener adapter'
 Assert-Contains $driverText 'GameUnavailable' 'Explicit unavailable resolution status'

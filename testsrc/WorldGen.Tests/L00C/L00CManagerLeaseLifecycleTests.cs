@@ -9,7 +9,7 @@ internal static class L00CManagerLeaseLifecycleTests
 {
     public static int Main()
     {
-        ImmediateReady(); DelayedReadyAndOrder(); TimeoutAndLimit(); ResolverAndMismatch(); DisposeAndLateTick(); RegisterUnregisterAndEnqueueFailures(); DuplicateStart(); InstallTransactionRollback();
+        ImmediateReady(); DelayedReadyAndOrder(); TimeoutAndLimit(); ResolverAndMismatch(); DisposeAndLateTick(); TerminalizeUnregisterFailure(); RegisterUnregisterAndEnqueueFailures(); DuplicateStart(); InstallTransactionRollback();
         return 0;
     }
     private static void ImmediateReady()
@@ -36,6 +36,12 @@ internal static class L00CManagerLeaseLifecycleTests
     {
         var s = new Fake(L00CManagerResolutionStatus.RunningScreenUnavailable); var l = new L00CManagerLeaseLifecycle(s); l.Start(); l.Dispose(); int calls = s.Resolves; s.FireRegisteredCallback(); Check(l.Terminal && !l.ListenerActive && s.Resolves == calls && l.Receipts.Contains("disposed"));
     }
+    private static void TerminalizeUnregisterFailure()
+    {
+        var s = new Fake(L00CManagerResolutionStatus.ManagerUnavailable) { ThrowUnregister = true };
+        var l = new L00CManagerLeaseLifecycle(s); l.Start(); l.Dispose(); int resolves = s.Resolves; s.FireRegisteredCallback();
+        Check(l.Terminal && !l.ListenerActive && !l.Installed && s.Installs == 0 && s.Releases == 1 && s.Resolves == resolves && l.Receipts.Contains("disposed-unregister-fault"));
+    }
     private static void RegisterUnregisterAndEnqueueFailures()
     {
         var s = new Fake(L00CManagerResolutionStatus.ManagerUnavailable) { ThrowRegister = true }; var l = new L00CManagerLeaseLifecycle(s); l.Start(); Check(l.Terminal && l.Receipts.Contains("listener-register-fault"));
@@ -60,6 +66,13 @@ internal static class L00CManagerLeaseLifecycleTests
         transaction.Clear(second);
         transaction.Install(third, _ => { });
         Check(ReferenceEquals(transaction.Active, third) && transaction.PumpQueued);
+        bool conflictObserved = false; object? signalled = null;
+        try { transaction.TrySignalSameRoot("other-root", _ => "primary-root", value => signalled = value); }
+        catch (InvalidOperationException) { conflictObserved = true; }
+        Check(conflictObserved && ReferenceEquals(transaction.Active, third) && signalled is null);
+        Check(transaction.TrySignalSameRoot("primary-root", _ => "primary-root", value => signalled = value) && ReferenceEquals(signalled, third));
+        transaction.Clear(third);
+        Check(transaction.Active is null && !transaction.PumpQueued);
     }
     private static void Check(bool value) { if (!value) throw new InvalidOperationException("L00-C lease simulation failed."); }
     private sealed class Fake : IL00CManagerLeaseSeams

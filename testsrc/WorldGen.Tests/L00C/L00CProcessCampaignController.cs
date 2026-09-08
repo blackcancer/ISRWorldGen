@@ -48,7 +48,7 @@ internal sealed class L00CProcessCampaignController
         string root = Path.GetFullPath(laboratoryRoot);
         lock (Gate)
         {
-            if (installTransaction.Active is not null) { RequireSameRoot(installTransaction.Active.root, root); installTransaction.Active.SignalSessionReady(); return null; }
+            if (installTransaction.TrySignalSameRoot(root, value => value.root, value => value.SignalSessionReady())) return null;
             if (bootstrapLease is not null) { RequireSameRoot(bootstrapRoot!, root); return null; } // one retry listener/pump per process
             var seams = new VintageManagerLeaseSeams(api, root);
             var engine = new L00CManagerLeaseLifecycle(seams);

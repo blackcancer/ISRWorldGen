@@ -108,6 +108,15 @@ internal sealed class L00CProcessCampaignInstallTransaction<T> where T : class
         try { enqueue(candidate); }
         catch { Active = null; PumpQueued = false; throw; }
     }
+    internal bool TrySignalSameRoot(string requestedRoot, Func<T, string> rootOf, Action<T> signal)
+    {
+        T? current = Active;
+        if (current is null) return false;
+        if (!string.Equals(rootOf(current), requestedRoot, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("L00-C refuses a second laboratory root in the same client process.");
+        signal(current);
+        return true;
+    }
     internal void Clear(T candidate)
     {
         if (ReferenceEquals(Active, candidate)) { Active = null; PumpQueued = false; }
