@@ -514,11 +514,18 @@
       "blocker": null
     },
     "L14-A": {
-      "status": "IN_PROGRESS",
-      "owner": "agent:l14-a",
+      "status": "DONE",
+      "owner": "integrator:l14-a",
       "branch": "agent/l14-a",
       "base_commit": "0e21793",
-      "evidence": [],
+      "evidence": [
+        "worklogs/L14-A.md",
+        "commit:02bbd5f99f7bc67f9ba975e69e2029ad5a3e4359",
+        "commit:53e6f1bd52db94450f58488e7b9cd45a61fb8b23",
+        "review:independent PASS after provenance/fingerprint, required-code and host-family corrections",
+        "local:main Debug NativeRockCatalogTests 5/5 PASS",
+        "local:main Release NativeRockCatalogTests 5/5 PASS"
+      ],
       "blocker": null
     },
     "L14-B": {
