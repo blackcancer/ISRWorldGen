@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-08T06:54:17.9215359Z",
-  "integrated_commit": "4fe80f950243e801da4fc038136ee68f8b31437d",
+  "updated_utc": "2026-09-08T07:18:50.3280828Z",
+  "integrated_commit": "43950f8bec66ad82fa208f070688b2ec3c86371b",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -184,9 +184,14 @@
         "commit:ce9077a739ad596ff99324f7325761d472f13518",
         "commit:7caf1ee1ab754b99fdc5e7d970d27a8e57aecda0",
         "commit:35f13074aebca6fe1772ada7ac491d58d1dad58d",
+        "commit:0c6ca2d5ca9622dbaa71d226c5c2046d98a318af",
+        "commit:43950f8bec66ad82fa208f070688b2ec3c86371b",
         "local:.local/L03C-integrated/tests/debug/L03C-integrated-debug.trx",
         "local:.local/L03C-integrated/tests/release/L03C-integrated-release.trx",
-        "local:.local/L03C-integrated/tests/l03a-release/L03A-after-L03C-release.trx"
+        "local:.local/L03C-integrated/tests/l03a-release/L03A-after-L03C-release.trx",
+        "local:.local/L03C-enriched/tests/debug/L03C-enriched-integrated-debug.trx",
+        "local:.local/L03C-enriched/tests/release/L03C-enriched-integrated-release.trx",
+        "local:.local/L03C-enriched/tests/l03a-release/L03A-after-L03C-enrichment-release.trx"
       ],
       "blocker": null
     },
