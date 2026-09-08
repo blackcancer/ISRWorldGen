@@ -1332,7 +1332,8 @@
         "L11-C",
         "L12-C",
         "L10-C",
-        "L19-C"
+        "L19-C",
+        "L19-F"
       ],
       "required_read": [
         "AGENTS.md",
@@ -2104,110 +2105,6 @@
       "context_max_bytes": 49152
     },
     {
-      "id": "L19-A",
-      "lot": "L19",
-      "title": "Inventorier les informations utiles au futur mod animalier",
-      "document": "tasks/L19/L19-A.md",
-      "depends_on": [
-        "L05-D"
-      ],
-      "required_read": [
-        "AGENTS.md",
-        "docs/02-SOCLE.md",
-        "tasks/L19/L19-A.md",
-        "specs/S19.md",
-        "tests/T19.md"
-      ],
-      "allowed_write_paths": [
-        "docs/future-fauna/inventaire.md",
-        "worklogs/L19-A.md"
-      ],
-      "requirements": [
-        "R19-01",
-        "R19-02",
-        "R19-03"
-      ],
-      "tests": [
-        "T19-01",
-        "T19-02",
-        "T19-03"
-      ],
-      "context_max_bytes": 49152,
-      "state": "BACKLOG",
-      "release_scope": "V1_DOCUMENTATION",
-      "requires_gates": []
-    },
-    {
-      "id": "L19-B",
-      "lot": "L19",
-      "title": "Décrire les données, POI candidats et responsabilités",
-      "document": "tasks/L19/L19-B.md",
-      "depends_on": [
-        "L19-A"
-      ],
-      "required_read": [
-        "AGENTS.md",
-        "docs/02-SOCLE.md",
-        "tasks/L19/L19-B.md",
-        "specs/S19.md",
-        "tests/T19.md"
-      ],
-      "allowed_write_paths": [
-        "docs/future-fauna/dictionnaire.md",
-        "docs/future-fauna/poi-candidats.md",
-        "docs/future-fauna/responsabilites.md",
-        "worklogs/L19-B.md"
-      ],
-      "requirements": [
-        "R19-04",
-        "R19-05",
-        "R19-06"
-      ],
-      "tests": [
-        "T19-04",
-        "T19-05",
-        "T19-06"
-      ],
-      "context_max_bytes": 49152,
-      "state": "BACKLOG",
-      "release_scope": "V1_DOCUMENTATION",
-      "requires_gates": []
-    },
-    {
-      "id": "L19-C",
-      "lot": "L19",
-      "title": "Revoir et transmettre le dossier animalier sur la baseline V1",
-      "document": "tasks/L19/L19-C.md",
-      "depends_on": [
-        "L19-B",
-        "L11-C",
-        "L12-C"
-      ],
-      "required_read": [
-        "AGENTS.md",
-        "docs/02-SOCLE.md",
-        "tasks/L19/L19-C.md",
-        "specs/S19.md",
-        "tests/T19.md"
-      ],
-      "allowed_write_paths": [
-        "docs/future-fauna/",
-        "worklogs/L19-C.md"
-      ],
-      "requirements": [
-        "R19-07",
-        "R19-08"
-      ],
-      "tests": [
-        "T19-07",
-        "T19-08"
-      ],
-      "context_max_bytes": 49152,
-      "state": "BACKLOG",
-      "release_scope": "V1_DOCUMENTATION",
-      "requires_gates": []
-    },
-    {
       "id": "L20-A",
       "lot": "L20",
       "title": "Auditer la frontière L17 / pack / adaptation après V1",
@@ -2399,6 +2296,252 @@
       "requires_gates": [
         "G5"
       ]
+    },
+    {
+      "id": "L19-A",
+      "lot": "L19",
+      "title": "Inventorier les données et qualifier leur couverture",
+      "document": "tasks/L19/L19-A.md",
+      "depends_on": [
+        "L05-D"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-A.md",
+        "specs/S19.md",
+        "tests/T19.md",
+        "tests/L19/T19-A.md"
+      ],
+      "allowed_write_paths": [
+        "docs/future-fauna/inventaire.md",
+        "worklogs/L19-A.md"
+      ],
+      "requirements": [
+        "R19-01",
+        "R19-02",
+        "R19-03"
+      ],
+      "tests": [
+        "T19-01",
+        "T19-02",
+        "T19-03"
+      ],
+      "context_max_bytes": 49152,
+      "release_scope": "V1",
+      "requires_gates": []
+    },
+    {
+      "id": "L19-B",
+      "lot": "L19",
+      "title": "Définir le dictionnaire, le contrat public et les responsabilités",
+      "document": "tasks/L19/L19-B.md",
+      "depends_on": [
+        "L19-A"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-B.md",
+        "specs/S19.md",
+        "tests/T19.md",
+        "tests/L19/T19-B.md",
+        "contracts/C13.md"
+      ],
+      "allowed_write_paths": [
+        "docs/future-fauna/dictionnaire.md",
+        "docs/future-fauna/poi-candidats.md",
+        "docs/future-fauna/responsabilites.md",
+        "docs/future-fauna/proposition-C13.md",
+        "worklogs/L19-B.md"
+      ],
+      "requirements": [
+        "R19-04",
+        "R19-05",
+        "R19-06"
+      ],
+      "tests": [
+        "T19-04",
+        "T19-05",
+        "T19-06"
+      ],
+      "context_max_bytes": 65536,
+      "release_scope": "V1",
+      "requires_gates": []
+    },
+    {
+      "id": "L19-C",
+      "lot": "L19",
+      "title": "Revoir et transmettre le dossier sur le service réellement livré",
+      "document": "tasks/L19/L19-C.md",
+      "depends_on": [
+        "L19-B",
+        "L11-C",
+        "L12-C",
+        "L19-E"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-C.md",
+        "specs/S19.md",
+        "tests/T19.md",
+        "tests/L19/T19-C.md",
+        "contracts/C13.md"
+      ],
+      "allowed_write_paths": [
+        "docs/future-fauna/",
+        "worklogs/L19-C.md"
+      ],
+      "requirements": [
+        "R19-07",
+        "R19-08"
+      ],
+      "tests": [
+        "T19-07",
+        "T19-08"
+      ],
+      "context_max_bytes": 65536,
+      "release_scope": "V1",
+      "requires_gates": []
+    },
+    {
+      "id": "L19-D",
+      "lot": "L19",
+      "title": "Implémenter la collecte, les reçus et la persistance environnementale",
+      "document": "tasks/L19/L19-D.md",
+      "depends_on": [
+        "L19-B",
+        "L10-B",
+        "L11-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-D.md",
+        "specs/S19.md",
+        "tests/T19.md",
+        "tests/L19/T19-D.md",
+        "contracts/C13.md",
+        "contracts/C05.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.Core/Environment/Projection/",
+        "src/WorldGen.Runtime/Environment/Catalog/",
+        "src/WorldGen.Runtime/Environment/Persistence/",
+        "src/WorldGen.VintageStory/Environment/Collection/",
+        "testsrc/WorldGen.Tests/L19D/",
+        "worklogs/L19-D.md"
+      ],
+      "requirements": [
+        "R19-09",
+        "R19-10",
+        "R19-11",
+        "R19-12",
+        "R19-13"
+      ],
+      "tests": [
+        "T19-09",
+        "T19-10",
+        "T19-11",
+        "T19-12",
+        "T19-13"
+      ],
+      "context_max_bytes": 65536,
+      "release_scope": "V1",
+      "requires_gates": []
+    },
+    {
+      "id": "L19-E",
+      "lot": "L19",
+      "title": "Implémenter l’API publique, l’index et le diagnostic bornés",
+      "document": "tasks/L19/L19-E.md",
+      "depends_on": [
+        "L19-D",
+        "L02-B"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-E.md",
+        "specs/S19.md",
+        "tests/T19.md",
+        "tests/L19/T19-E.md",
+        "contracts/C13.md",
+        "contracts/C05.md"
+      ],
+      "allowed_write_paths": [
+        "src/WorldGen.EnvironmentApi/",
+        "src/WorldGen.Runtime/Environment/Queries/",
+        "src/WorldGen.VintageStory/Environment/Service/",
+        "src/WorldGen.VintageStory/Environment/Diagnostics/",
+        "src/WorldGen.Tools/Environment/",
+        "testsrc/WorldGen.Tests/L19E/",
+        "worklogs/L19-E.md"
+      ],
+      "requirements": [
+        "R19-14",
+        "R19-15",
+        "R19-16",
+        "R19-17",
+        "R19-18",
+        "R19-19"
+      ],
+      "tests": [
+        "T19-14",
+        "T19-15",
+        "T19-16",
+        "T19-17",
+        "T19-18",
+        "T19-19"
+      ],
+      "context_max_bytes": 65536,
+      "release_scope": "V1",
+      "requires_gates": []
+    },
+    {
+      "id": "L19-F",
+      "lot": "L19",
+      "title": "Qualifier le socle avec un consommateur externe et le monde réel",
+      "document": "tasks/L19/L19-F.md",
+      "depends_on": [
+        "L19-C",
+        "L19-E",
+        "L10-C",
+        "L09-C"
+      ],
+      "required_read": [
+        "AGENTS.md",
+        "docs/02-SOCLE.md",
+        "tasks/L19/L19-F.md",
+        "specs/S19.md",
+        "tests/T19.md",
+        "tests/L19/T19-F.md",
+        "contracts/C13.md"
+      ],
+      "allowed_write_paths": [
+        "testsrc/WorldGen.EnvironmentConsumerProbe/",
+        "testsrc/WorldGen.AcceptanceTests/L19/",
+        "docs/future-fauna/qualification.md",
+        "worklogs/L19-F.md"
+      ],
+      "requirements": [
+        "R19-20",
+        "R19-21",
+        "R19-22",
+        "R19-23",
+        "R19-24"
+      ],
+      "tests": [
+        "T19-20",
+        "T19-21",
+        "T19-22",
+        "T19-23",
+        "T19-24"
+      ],
+      "context_max_bytes": 65536,
+      "release_scope": "V1",
+      "requires_gates": []
     }
   ],
   "product": "ISRWorldGen",

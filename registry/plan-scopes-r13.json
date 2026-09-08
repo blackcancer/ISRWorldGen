@@ -84,7 +84,10 @@
     "L18-D",
     "L19-A",
     "L19-B",
-    "L19-C"
+    "L19-C",
+    "L19-D",
+    "L19-E",
+    "L19-F"
   ],
   "post_v1_tasks": [
     "L20-A",
@@ -93,5 +96,5 @@
     "L20-D",
     "L20-E"
   ],
-  "note": "Policy only. Qualifying reports and dispatcher enforcement must be checked locally."
+  "note": "Politique active r1.4: L19-A a F appartient a V1; L20 reste POST_V1 apres G5 qualifiee."
 }

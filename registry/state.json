@@ -747,6 +747,30 @@
       "base_commit": null,
       "evidence": [],
       "blocker": "POST_V1: requires qualified G5"
+    },
+    "L19-D": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base": null,
+      "worktree": null,
+      "blocker": "Planned by r1.4; no implementation authorized."
+    },
+    "L19-E": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base": null,
+      "worktree": null,
+      "blocker": "Planned by r1.4; no implementation authorized."
+    },
+    "L19-F": {
+      "status": "BACKLOG",
+      "owner": null,
+      "branch": null,
+      "base": null,
+      "worktree": null,
+      "blocker": "Planned by r1.4; no implementation authorized."
     }
   }
 }

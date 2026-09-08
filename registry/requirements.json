@@ -842,62 +842,6 @@
       "introduced_in": "1.2"
     },
     {
-      "id": "R19-01",
-      "module": "S19",
-      "text": "L19 doit rester documentaire : aucune modification du runtime, des comportements animaux, des sauvegardes, des assets du jeu ou de leur génération n’est introduite.",
-      "source": "specs/S19.md",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "R19-02",
-      "module": "S19",
-      "text": "L’inventaire doit couvrir relief, hydrologie, climat, sols, végétation, neige/glace et refuges potentiels, en distinguant les usages futurs sans les implémenter.",
-      "source": "specs/S19.md",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "R19-03",
-      "module": "S19",
-      "text": "Chaque information doit porter une source identifiable et un statut explicite : implémentée et vérifiée, documentée mais non vérifiée localement, prévue, ou absente.",
-      "source": "specs/S19.md",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "R19-04",
-      "module": "S19",
-      "text": "Le dossier doit distinguer habitat potentiel, POI candidat, accessibilité par une espèce et disponibilité courante ; aucune de ces notions ne doit être déduite automatiquement des autres.",
-      "source": "specs/S19.md",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "R19-05",
-      "module": "S19",
-      "text": "Le dictionnaire documentaire doit préciser coordonnées et dimension, unité ou catégorie, résolution, validité temporelle, propriétaire, provenance et signification des valeurs manquantes.",
-      "source": "specs/S19.md",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "R19-06",
-      "module": "S19",
-      "text": "La passation doit attribuer au futur consommateur validation locale, stock courant, invalidation, navigation et besoins ; elle ne doit créer ni index spatial, ni service, ni contrat C# d’exécution dans ce lot.",
-      "source": "specs/S19.md",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "R19-07",
-      "module": "S19",
-      "text": "La revue finale doit relier les informations déclarées disponibles aux contrats et preuves du commit de référence, en conservant explicitement les données absentes ou non vérifiées.",
-      "source": "specs/S19.md",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "R19-08",
-      "module": "S19",
-      "text": "Le dossier final doit être exploitable sans la conversation initiale et sans ajouter de dépendance technique du futur mod animalier à la release ISRWorldGen 1.0.0.",
-      "source": "specs/S19.md",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
       "id": "R20-01",
       "module": "S20",
       "text": "L’implémentation L20 doit commencer seulement après G5 qualifié sur une baseline ISRWorldGen 1.0.0 identifiée ; aucune tâche V1 ne dépend de L20.",
@@ -980,6 +924,174 @@
       "text": "L’acceptation doit comparer les paysages et arbres natifs/améliorés sur un corpus figé, montrer l’intérêt des variations régionales et refuser les coutures de chunks, effets de verger ou promesses de nouvelles essences non livrées.",
       "source": "specs/S20.md",
       "release_scope": "POST_V1"
+    },
+    {
+      "id": "R19-01",
+      "module": "S19",
+      "text": "L19 fournit un socle environnemental réel. A à C restent documentaires ; D à F implémentent et qualifient collecte, stockage et consultation. Aucun besoin, comportement, population, spawning, consommation ou pathfinding animal n’est développé.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-02",
+      "module": "S19",
+      "text": "Inventorier relief, hydrologie, climat, sols, végétation, neige/glace et refuges potentiels, en identifiant pour chaque champ son producteur et son caractère obligatoire ou facultatif.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-03",
+      "module": "S19",
+      "text": "Relier chaque champ à un contrat et, lorsque disponible, à un symbole/commit/preuve. Ne pas déduire d’un contrat documentaire qu’un export fonctionne déjà.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-04",
+      "module": "S19",
+      "text": "Distinguer habitat potentiel, candidat environnemental, accès par espèce et ressource présente. Aucun score de faim, stock alimentaire ou territoire occupé n’est fabriqué par le générateur.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-05",
+      "module": "S19",
+      "text": "Définir repère, dimension, unités, résolution, domaine de validité, provenance, versions et valeurs manquantes ; distinguer couvert planifié, climat de référence et état réellement observé.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-06",
+      "module": "S19",
+      "text": "Spécifier puis faire approuver C13 : projection environnementale en lecture seule, consultation bornée et persistance réutilisant C05. Le consommateur reste responsable des validations courantes et de sa simulation.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-07",
+      "module": "S19",
+      "text": "Confronter l’inventaire aux implémentations et preuves D/E sur la baseline candidate ; une capacité minimale absente bloque la clôture technique F, contrairement à un enrichissement facultatif explicitement absent.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-08",
+      "module": "S19",
+      "text": "Livrer une documentation autonome de découverte, version, requêtes, erreurs, validité et installation du contrat partagé ; le futur mod ne doit pas accéder aux classes Core/Runtime internes.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-09",
+      "module": "S19",
+      "text": "Projeter les sorties canoniques validées, sans second modèle écologique, RNG partagé, modification des blocs ou changement des décisions géographiques. Collecter même sans mod animalier installé.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-10",
+      "module": "S19",
+      "text": "Ne publier que des révisions cohérentes ; séparer plans et reçus de matérialisation, coverage par couche et fragments, générations partielles, rejetées ou non terminées.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-11",
+      "module": "S19",
+      "text": "Préserver les identités entre sérialisation, éviction et redémarrage à versions identiques ; géométries, fragments, régions négatives et dimensions ne doivent ni se confondre ni créer de doublons.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-12",
+      "module": "S19",
+      "text": "Intégrer C05/L10 avec données canoniques durables, checksum, tailles bornées, manifeste et reconstruction d’index dérivés. Une interruption ne rend pas publique une référence incomplète.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-13",
+      "module": "S19",
+      "text": "Supporter l’ajout du consommateur après génération. Pour des mondes antérieurs à L19, importer seulement les sources historiques reproductibles et versionnées ; sinon signaler la lacune sans réécrire les chunks.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-14",
+      "module": "S19",
+      "text": "Exposer une interface typée en lecture seule via un mécanisme de chargement vérifié, avec versions/capacités, absence du fournisseur, Initializing/Ready/Stopping et isolation entre mondes.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-15",
+      "module": "S19",
+      "text": "Fournir consultation ponctuelle et recherche de candidats dans un rayon avec filtres ; distance à la géométrie, ordre stable, couverture et limites explicites. Ne garantir le plus proche global que sur une recherche complète.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-16",
+      "module": "S19",
+      "text": "Borner rayon, régions, candidats visités, résultats, octets, file, mémoire et lectures. Aucune requête normale ne charge ou ne génère des chunks ni ne lance une analyse globale.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-17",
+      "module": "S19",
+      "text": "Exposer séparément couche non supportée, zone non répertoriée, absent vérifié, partiel, limite atteinte, initialisation, incompatibilité et corruption. Aucun zéro ou tableau vide ne remplace silencieusement ces états.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-18",
+      "module": "S19",
+      "text": "Les réponses ne contiennent aucun chunk, API du jeu ou buffer mutable partagé. Les requêtes concurrentes, annulations, publications et arrêts de monde respectent les snapshots et budgets.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-19",
+      "module": "S19",
+      "text": "Fournir inspection et export administratif bornés avec provenance, couverture, géométries, inconnues, rejets et compteurs. Les cartes spatiales sont accompagnées d’oracles numériques et d’un manifeste.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-20",
+      "module": "S19",
+      "text": "Compiler et exécuter un petit mod de preuve distinct, dépendant seulement du contrat public et des API natives nécessaires ; il doit consulter réellement ISRWorldGen sans références à ses internes.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-21",
+      "module": "S19",
+      "text": "Dans le jeu/serveur réel, interroger des métadonnées d’une zone initialement générée puis déchargée et après relance, sans chargement/génération de chunks causé par cette requête.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-22",
+      "module": "S19",
+      "text": "Après abattage, récolte, construction, modification d’eau ou cycle saisonnier, le catalogue initial reste identifié comme historique/potentiel ; aucune observation courante non réalisée ne doit être annoncée.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-23",
+      "module": "S19",
+      "text": "Qualifier fournisseur absent/incompatible, monde sans métadonnées, démarrage client/serveur, distribution unique du contrat partagé et absence d’exposition automatique des données aux clients.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
+    },
+    {
+      "id": "R19-24",
+      "module": "S19",
+      "text": "Qualifier les bornes et budgets gelés, concurrence, froid/chaud, mémoire, surcoût worldgen/stockage et absence de modification des sorties L00–L18 ; transmettre à L13 les régressions pertinentes.",
+      "source": "specs/S19.md",
+      "release_scope": "V1"
     }
   ],
   "spec_version": "1.3"

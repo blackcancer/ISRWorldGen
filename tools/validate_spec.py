@@ -123,7 +123,7 @@ def validate(root: Path) -> dict[str, Any]:
         if required_gate not in gate_by_id:
             errors.append("Post-V1 qualified gate is missing")
         for tid, task in by_task.items():
-            expected_scope = "POST_V1" if tid in post_v1_tasks else "V1_DOCUMENTATION" if tid.startswith("L19-") else None
+            expected_scope = "POST_V1" if tid in post_v1_tasks else "V1" if tid.startswith("L19-") else None
             if expected_scope is not None and task.get("release_scope") != expected_scope:
                 errors.append(f"Unexpected release scope for {tid}")
             if tid in post_v1_tasks:

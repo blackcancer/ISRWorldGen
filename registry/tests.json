@@ -1634,110 +1634,6 @@
       "blocking": true
     },
     {
-      "id": "T19-01",
-      "module": "S19",
-      "title": "Périmètre strictement documentaire",
-      "requirements": [
-        "R19-01"
-      ],
-      "level": "Revue documentaire",
-      "state": "NOT_RUN",
-      "source": "tests/T19.md",
-      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "T19-02",
-      "module": "S19",
-      "title": "Couverture des informations",
-      "requirements": [
-        "R19-02"
-      ],
-      "level": "Revue documentaire",
-      "state": "NOT_RUN",
-      "source": "tests/T19.md",
-      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "T19-03",
-      "module": "S19",
-      "title": "Provenance et disponibilité",
-      "requirements": [
-        "R19-03"
-      ],
-      "level": "Revue documentaire",
-      "state": "NOT_RUN",
-      "source": "tests/T19.md",
-      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "T19-04",
-      "module": "S19",
-      "title": "Potentiel versus état courant",
-      "requirements": [
-        "R19-04"
-      ],
-      "level": "Revue documentaire",
-      "state": "NOT_RUN",
-      "source": "tests/T19.md",
-      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "T19-05",
-      "module": "S19",
-      "title": "Dictionnaire non ambigu",
-      "requirements": [
-        "R19-05"
-      ],
-      "level": "Revue documentaire",
-      "state": "NOT_RUN",
-      "source": "tests/T19.md",
-      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "T19-06",
-      "module": "S19",
-      "title": "Responsabilités futures",
-      "requirements": [
-        "R19-06"
-      ],
-      "level": "Revue documentaire",
-      "state": "NOT_RUN",
-      "source": "tests/T19.md",
-      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "T19-07",
-      "module": "S19",
-      "title": "Revue finale sur baseline",
-      "requirements": [
-        "R19-07"
-      ],
-      "level": "Revue documentaire",
-      "state": "NOT_RUN",
-      "source": "tests/T19.md",
-      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
-      "id": "T19-08",
-      "module": "S19",
-      "title": "Dossier autonome et release",
-      "requirements": [
-        "R19-08"
-      ],
-      "level": "Revue documentaire",
-      "state": "NOT_RUN",
-      "source": "tests/T19.md",
-      "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
-      "release_scope": "V1_DOCUMENTATION"
-    },
-    {
       "id": "T20-01",
       "module": "S20",
       "title": "Barrière après V1",
@@ -1892,6 +1788,318 @@
       "source": "tests/T20.md",
       "execution_state_policy": "Définition seulement ; conserver les rapports réels. Aucun succès inféré de cette livraison.",
       "release_scope": "POST_V1"
+    },
+    {
+      "id": "T19-01",
+      "module": "S19",
+      "title": "T19-01",
+      "requirements": [
+        "R19-01"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-A.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-02",
+      "module": "S19",
+      "title": "T19-02",
+      "requirements": [
+        "R19-02"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-A.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-03",
+      "module": "S19",
+      "title": "T19-03",
+      "requirements": [
+        "R19-03"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-A.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-04",
+      "module": "S19",
+      "title": "T19-04",
+      "requirements": [
+        "R19-04"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-B.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-05",
+      "module": "S19",
+      "title": "T19-05",
+      "requirements": [
+        "R19-05"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-B.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-06",
+      "module": "S19",
+      "title": "T19-06",
+      "requirements": [
+        "R19-06"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-B.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-07",
+      "module": "S19",
+      "title": "T19-07",
+      "requirements": [
+        "R19-07"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-C.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-08",
+      "module": "S19",
+      "title": "T19-08",
+      "requirements": [
+        "R19-08"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-C.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-09",
+      "module": "S19",
+      "title": "T19-09",
+      "requirements": [
+        "R19-09"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-D.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-10",
+      "module": "S19",
+      "title": "T19-10",
+      "requirements": [
+        "R19-10"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-D.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-11",
+      "module": "S19",
+      "title": "T19-11",
+      "requirements": [
+        "R19-11"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-D.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-12",
+      "module": "S19",
+      "title": "T19-12",
+      "requirements": [
+        "R19-12"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-D.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-13",
+      "module": "S19",
+      "title": "T19-13",
+      "requirements": [
+        "R19-13"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-D.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-14",
+      "module": "S19",
+      "title": "T19-14",
+      "requirements": [
+        "R19-14"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-E.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-15",
+      "module": "S19",
+      "title": "T19-15",
+      "requirements": [
+        "R19-15"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-E.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-16",
+      "module": "S19",
+      "title": "T19-16",
+      "requirements": [
+        "R19-16"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-E.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-17",
+      "module": "S19",
+      "title": "T19-17",
+      "requirements": [
+        "R19-17"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-E.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-18",
+      "module": "S19",
+      "title": "T19-18",
+      "requirements": [
+        "R19-18"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-E.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-19",
+      "module": "S19",
+      "title": "T19-19",
+      "requirements": [
+        "R19-19"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-E.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-20",
+      "module": "S19",
+      "title": "T19-20",
+      "requirements": [
+        "R19-20"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-F.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-21",
+      "module": "S19",
+      "title": "T19-21",
+      "requirements": [
+        "R19-21"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-F.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-22",
+      "module": "S19",
+      "title": "T19-22",
+      "requirements": [
+        "R19-22"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-F.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-23",
+      "module": "S19",
+      "title": "T19-23",
+      "requirements": [
+        "R19-23"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-F.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
+    },
+    {
+      "id": "T19-24",
+      "module": "S19",
+      "title": "T19-24",
+      "requirements": [
+        "R19-24"
+      ],
+      "level": "A qualifier",
+      "state": "NOT_RUN",
+      "source": "tests/L19/T19-F.md",
+      "execution_state_policy": "Definition r1.4; aucune preuve technique inferee.",
+      "release_scope": "V1"
     }
   ],
   "spec_version": "1.3"
