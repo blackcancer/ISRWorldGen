@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('Prepare', 'Restore')][string]$Action,
+    [Parameter(Mandatory = $true)][ValidateSet('Prepare', 'RestoreSettings', 'CleanupMount', 'Restore')][string]$Action,
     [string]$BackupDirectory,
+    # Cleanup is an explicit post-debugger phase.  A caller must attest that
+    # the process which may still have scanned the mounted package has ended.
+    [switch]$RuntimeStopped,
     # Test-only escape hatch: must be below the process temporary directory and
     # still uses the same fixed repository-relative layout as the real helper.
     [string]$SyntheticFixtureRoot,
@@ -26,6 +29,11 @@ function Get-Sha256([byte[]]$Bytes) {
 function Write-NewBytes([string]$Path, [byte[]]$Bytes) {
     $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
     try { $stream.Write($Bytes, 0, $Bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+}
+function Replace-BytesAtomically([string]$Path, [byte[]]$Bytes) {
+    $temporary = "$Path.$([Guid]::NewGuid().ToString('N')).tmp"
+    try { Write-NewBytes $temporary $Bytes; Move-Item -LiteralPath $temporary -Destination $Path -Force }
+    finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
 }
 function Open-ExclusiveWriteHandle([string]$Path) { [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::Read) }
 function Read-LockedBytes([IO.FileStream]$Stream) {
@@ -73,6 +81,7 @@ $launchSettings = Get-CanonicalPath (Join-Path $repository 'src\WorldGen.Vintage
 $projectUserSettings = Get-CanonicalPath (Join-Path $repository 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj.user')
 $laboratory = Get-CanonicalPath (Join-Path $repository '.local\L00C')
 $mountHelper = Join-Path $PSScriptRoot 'Set-L00CTestModMount.ps1'
+$effectiveAction = if ($Action -eq 'Restore') { 'RestoreSettings' } else { $Action }
 $launchSettingsLock = $null; $projectUserSettingsLock = $null
 try {
     # These are operating-system write locks, not advisory lock files. The
@@ -80,7 +89,23 @@ try {
     $launchSettingsLock = Open-ExclusiveWriteHandle $launchSettings
     $projectUserSettingsLock = Open-ExclusiveWriteHandle $projectUserSettings
 
-if ($Action -eq 'Restore') {
+if ($effectiveAction -eq 'CleanupMount') {
+    if ([string]::IsNullOrWhiteSpace($BackupDirectory)) { throw 'CleanupMount requires -BackupDirectory returned by Prepare.' }
+    if (-not $RuntimeStopped) { throw 'CleanupMount requires the explicit -RuntimeStopped attestation after the debugger/process has stopped.' }
+    $backup = Get-CanonicalPath $BackupDirectory; Assert-ChildPath $backup $laboratory 'Backup directory'
+    $metadataPath = Join-Path $backup 'metadata.json'
+    if (-not (Test-Path $metadataPath -PathType Leaf)) { throw 'Backup directory is incomplete.' }
+    $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+    if ($metadata.Owner -ne (Get-Acl -LiteralPath $backup).Owner -or $metadata.LaunchSettingsPath -ne $launchSettings -or $metadata.ProjectUserSettingsPath -ne $projectUserSettings) { throw 'Cleanup backup identity is not trusted.' }
+    if ($metadata.Phase -ne 'SETTINGS_RESTORED') { throw 'CleanupMount refuses a mount until RestoreSettings has completed and recorded its phase.' }
+    if ((Get-Sha256 (Read-LockedBytes $launchSettingsLock)) -ne $metadata.OriginalSha256 -or (Get-Sha256 (Read-LockedBytes $projectUserSettingsLock)) -ne $metadata.ProjectUserSettingsOriginalSha256) { throw 'CleanupMount refuses because restored F5 settings no longer match their trusted originals.' }
+    & $mountHelper -Action Unmount -SyntheticFixtureRoot $SyntheticFixtureRoot -BackupDirectory $metadata.MountBackupDirectory | Out-Null
+    $metadata.Phase = 'CLEANED'; $metadata | Add-Member -NotePropertyName CleanedUtc -NotePropertyValue ([DateTimeOffset]::UtcNow.ToString('o')) -Force
+    Replace-BytesAtomically $metadataPath ([Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Depth 4)))
+    [ordered]@{ Status = 'CLEANED'; BackupDirectory = $backup; Sha256 = $metadata.OriginalSha256 } | ConvertTo-Json -Compress; return
+}
+
+if ($effectiveAction -eq 'RestoreSettings') {
     if ([string]::IsNullOrWhiteSpace($BackupDirectory)) { throw 'Restore requires -BackupDirectory returned by Prepare.' }
     $backup = Get-CanonicalPath $BackupDirectory; Assert-ChildPath $backup $laboratory 'Backup directory'
     $metadataPath = Join-Path $backup 'metadata.json'; $originalPath = Join-Path $backup 'launchSettings.original.json'; $originalUserSettingsPath = Join-Path $backup 'WorldGen.VintageStory.csproj.user.original'
@@ -115,9 +140,24 @@ if ($Action -eq 'Restore') {
         if ((Get-Sha256 (Read-LockedBytes $projectUserSettingsLock)) -eq $metadata.ProjectUserSettingsOriginalSha256 -and (Get-Sha256 (Read-LockedBytes $launchSettingsLock)) -eq $metadata.ModifiedSha256) { Write-LockedBytes $projectUserSettingsLock $currentUserSettings $currentUserSettings 'RestoreAfterUserSettingsRollbackTruncate' }
         throw
     }
-    Invoke-TransactionTestHook 'RestoreBeforeMount'
-    & $mountHelper -Action Restore -SyntheticFixtureRoot $SyntheticFixtureRoot -BackupDirectory $metadata.MountBackupDirectory | Out-Null
-    [ordered]@{ Status = 'RESTORED'; BackupDirectory = $backup; Sha256 = $metadata.OriginalSha256 } | ConvertTo-Json -Compress; return
+    # Settings restoration takes precedence over provenance verification: a
+    # tampered mount must never keep the user's F5 profile altered.  Verify
+    # only after both settings are durably original, and retain (never remove)
+    # the package if that verification refuses.
+    & $mountHelper -Action Verify -SyntheticFixtureRoot $SyntheticFixtureRoot -BackupDirectory $metadata.MountBackupDirectory | Out-Null
+    $metadata.Phase = 'SETTINGS_RESTORED'; $metadata | Add-Member -NotePropertyName SettingsRestoredUtc -NotePropertyValue ([DateTimeOffset]::UtcNow.ToString('o')) -Force
+    Replace-BytesAtomically $metadataPath ([Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Depth 4)))
+    # Legacy Restore is retained only for isolated synthetic fixtures so the
+    # pre-existing transaction corpus can exercise its historical cleanup
+    # assertions.  A real invocation is deliberately settings-only; callers
+    # must use CleanupMount -RuntimeStopped after Debug.Stop/process exit.
+    if ($Action -eq 'Restore' -and $SyntheticFixtureRoot) {
+        & $mountHelper -Action Unmount -SyntheticFixtureRoot $SyntheticFixtureRoot -BackupDirectory $metadata.MountBackupDirectory | Out-Null
+        $metadata.Phase = 'CLEANED'; $metadata | Add-Member -NotePropertyName CleanedUtc -NotePropertyValue ([DateTimeOffset]::UtcNow.ToString('o')) -Force
+        Replace-BytesAtomically $metadataPath ([Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Depth 4)))
+        [ordered]@{ Status = 'CLEANED_LEGACY_SYNTHETIC'; BackupDirectory = $backup; Sha256 = $metadata.OriginalSha256 } | ConvertTo-Json -Compress; return
+    }
+    [ordered]@{ Status = 'SETTINGS_RESTORED'; BackupDirectory = $backup; Sha256 = $metadata.OriginalSha256; MountRetained = $true } | ConvertTo-Json -Compress; return
 }
 
 foreach ($required in @($laboratory, (Join-Path $laboratory '.isrworldgen-lab'))) { if (-not (Test-Path -LiteralPath $required)) { throw "Required L00-C laboratory root input is missing: $required" } }
@@ -143,7 +183,7 @@ try {
     $backupParent = Join-Path $laboratory 'f5-profile-backups'; [void](New-Item -ItemType Directory -Path $backupParent -Force)
     $backup = Join-Path $backupParent ('f5-' + [Guid]::NewGuid().ToString('N')); [void](New-Item -ItemType Directory -Path $backup -ErrorAction Stop)
     $owner = (Get-Acl -LiteralPath $backup).Owner; Write-NewBytes (Join-Path $backup 'launchSettings.original.json') $original; Write-NewBytes (Join-Path $backup 'WorldGen.VintageStory.csproj.user.original') $originalUserSettings
-    $metadata = [ordered]@{ Owner = $owner; LaunchSettingsPath = $launchSettings; ProjectUserSettingsPath = $projectUserSettings; FirstProfile = $first.Name; OriginalSha256 = $originalHash; ModifiedSha256 = $modifiedHash; ProjectUserSettingsOriginalSha256 = (Get-Sha256 $originalUserSettings); ProjectUserSettingsModifiedSha256 = $modifiedUserSettingsHash; MountBackupDirectory = $mountReceipt.BackupDirectory; MountedPackage = $mountReceipt.MountedPackage; PreparedUtc = [DateTimeOffset]::UtcNow.ToString('o') }
+    $metadata = [ordered]@{ Owner = $owner; LaunchSettingsPath = $launchSettings; ProjectUserSettingsPath = $projectUserSettings; FirstProfile = $first.Name; OriginalSha256 = $originalHash; ModifiedSha256 = $modifiedHash; ProjectUserSettingsOriginalSha256 = (Get-Sha256 $originalUserSettings); ProjectUserSettingsModifiedSha256 = $modifiedUserSettingsHash; MountBackupDirectory = $mountReceipt.BackupDirectory; MountedPackage = $mountReceipt.MountedPackage; Phase = 'PREPARED'; PreparedUtc = [DateTimeOffset]::UtcNow.ToString('o') }
     Write-NewBytes (Join-Path $backup 'metadata.json') ([Text.Encoding]::UTF8.GetBytes(($metadata | ConvertTo-Json -Depth 4)))
     Invoke-TransactionTestHook 'PrepareBeforeLaunchSettingsWrite'
     Assert-CurrentSha256 $launchSettingsLock $originalHash 'prepare launchSettings.json'
@@ -160,7 +200,7 @@ try {
 catch {
     if ($null -ne $modifiedHash -and (Get-Sha256 (Read-LockedBytes $launchSettingsLock)) -eq $modifiedHash) { Write-LockedBytes $launchSettingsLock $original $modified 'PrepareAfterLaunchSettingsRollbackTruncate' }
     if ($null -ne $modifiedUserSettingsHash -and (Get-Sha256 (Read-LockedBytes $projectUserSettingsLock)) -eq $modifiedUserSettingsHash) { Write-LockedBytes $projectUserSettingsLock $originalUserSettings $modifiedUserSettings 'PrepareAfterUserSettingsRollbackTruncate' }
-    & $mountHelper -Action Restore -SyntheticFixtureRoot $SyntheticFixtureRoot -BackupDirectory $mountReceipt.BackupDirectory | Out-Null
+    & $mountHelper -Action Unmount -SyntheticFixtureRoot $SyntheticFixtureRoot -BackupDirectory $mountReceipt.BackupDirectory | Out-Null
     throw
 }
 }
