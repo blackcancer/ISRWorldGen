@@ -18,6 +18,7 @@ public sealed class L00CMenuActionLaboratoryHost
     private readonly List<string> chronology = new();
     private State state = State.ExpectPrimaryMenu;
     private int primaryCycles;
+    private int stableTicks;
 
     private L00CMenuActionLaboratoryHost(string evidenceDirectory, L00CMarkedSaveCell primary, L00CMarkedSaveCell secondary)
     { this.evidenceDirectory = evidenceDirectory; this.primary = primary; this.secondary = secondary; }
@@ -85,6 +86,44 @@ public sealed class L00CMenuActionLaboratoryHost
         RequireDebugLaboratory();
         if (state != State.ReadyToComplete || primaryCycles != RequiredPrimaryCycles) throw new InvalidOperationException("L00-C requires five primary returns then the secondary final return.");
         state = State.Completed; Record("campaign-complete", null, "none"); WriteReceipt("complete");
+    }
+
+    /// <summary>
+    /// Advances only after the actual client exposes the expected, audited menu object
+    /// for three game ticks.  It does not send input, authenticate, or launch a process.
+    /// </summary>
+    public bool TryAdvance(object api)
+    {
+        RequireDebugLaboratory();
+        if (api is null) throw new ArgumentNullException(nameof(api));
+
+        switch (state)
+        {
+            case State.ExpectPrimaryMenu:
+            case State.ExpectSecondaryMenu:
+                if (!L00CMenuActionDriver.TryFindMenuLeft(api, out object? menuLeft) || menuLeft is null) { stableTicks = 0; return false; }
+                if (++stableTicks < 3) return false;
+                stableTicks = 0; EnterSingleplayerMenu(menuLeft); return false;
+            case State.PrimaryMenuOpen:
+            case State.SecondaryMenuOpen:
+                if (!L00CMenuActionDriver.TryFindSingleplayerScreen(api, out object? singleplayer) || singleplayer is null) { stableTicks = 0; return false; }
+                if (++stableTicks < 3) return false;
+                stableTicks = 0;
+                if (state == State.PrimaryMenuOpen) OpenPrimary(singleplayer); else OpenSecondary(singleplayer);
+                return false;
+            case State.PrimaryWorldOpen:
+            case State.SecondaryWorldOpen:
+                // This callback is public API lifecycle evidence that the client is ticking.
+                // Three ticks prevent a same-frame menu mutation after ConnectToSingleplayer.
+                if (++stableTicks < 3 || !L00CMenuActionDriver.TryFindClientSession(api, out object? clientMain, out object? screenManager) || clientMain is null || screenManager is null) return false;
+                stableTicks = 0; ReturnToMainMenu(clientMain, screenManager); return false;
+            case State.ReadyToComplete:
+                Complete(); return true;
+            case State.Completed:
+                return true;
+            default:
+                throw new InvalidOperationException("L00-C laboratory host reached an unknown state.");
+        }
     }
 
     private void Record(string action, L00CMarkedSaveCell? target, string method)

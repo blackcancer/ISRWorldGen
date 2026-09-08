@@ -66,6 +66,21 @@ internal static class L00CMenuActionDriver
         return Invoke(screenManager, "StartMainMenu", Array.Empty<object?>(), "return-main-menu", false);
     }
 
+    // Discovery is deliberately kept beside the guarded internal actions.  The host uses
+    // only ICoreClientAPI lifecycle callbacks and never binds a game-private type.
+    internal static bool TryFindMenuLeft(object clientApi, out object? menuLeft)
+        => TryFindReachable(clientApi, "Vintagestory.Client.GuiCompositeMainMenuLeft", out menuLeft);
+
+    internal static bool TryFindSingleplayerScreen(object clientApi, out object? singleplayer)
+        => TryFindReachable(clientApi, "Vintagestory.Client.GuiScreenSingleplayer", out singleplayer);
+
+    internal static bool TryFindClientSession(object clientApi, out object? clientMain, out object? screenManager)
+    {
+        bool main = TryFindReachable(clientApi, "Vintagestory.Client.NoObf.ClientMain", out clientMain);
+        bool manager = TryFindReachable(clientApi, "Vintagestory.Client.ScreenManager", out screenManager);
+        return main && manager;
+    }
+
     private static L00CMenuActionReceipt Invoke(object target, string name, object?[] arguments, string action, bool expectTrue)
     {
         RequireDebugLab();
@@ -115,6 +130,29 @@ internal static class L00CMenuActionDriver
         if (!Debugger.IsAttached) throw new InvalidOperationException("L00-C menu POC requires a debugger to be attached; debugger origin is not inferred.");
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal))
             throw new InvalidOperationException("L00-C menu POC requires ISR_L00C_LAB=1 in addition to an attached debugger.");
+    }
+
+    private static bool TryFindReachable(object root, string auditedTypeName, out object? target)
+    {
+        RequireDebugLab();
+        Assembly lib = FindLoadedLib();
+        if (lib.GetName().Version?.ToString() != RequiredLibVersion || Hash(lib.Location) != RequiredLibSha256)
+            throw new InvalidOperationException("L00-C menu POC refused: VintagestoryLib version or SHA-256 drifted from the audited target.");
+        Type audited = lib.GetType(auditedTypeName, true)!;
+        var pending = new System.Collections.Generic.Queue<(object Value, int Depth)>();
+        pending.Enqueue((root, 0));
+        while (pending.Count > 0)
+        {
+            (object value, int depth) = pending.Dequeue();
+            if (audited.IsInstanceOfType(value)) { target = value; return true; }
+            if (depth == 2) continue;
+            foreach (FieldInfo field in value.GetType().GetFields(PrivateInstance))
+                if (!field.FieldType.IsValueType && field.GetValue(value) is object child) pending.Enqueue((child, depth + 1));
+            foreach (PropertyInfo property in value.GetType().GetProperties(PrivateInstance))
+                if (property.GetIndexParameters().Length == 0 && property.CanRead && !property.PropertyType.IsValueType)
+                    try { if (property.GetValue(value) is object child) pending.Enqueue((child, depth + 1)); } catch { }
+        }
+        target = null; return false;
     }
 
     private static Assembly FindLoadedLib() => AppDomain.CurrentDomain.GetAssemblies().SingleOrDefault(a => a.GetName().Name == "VintagestoryLib")
