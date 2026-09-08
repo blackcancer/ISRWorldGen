@@ -205,9 +205,11 @@ $mountReceipt = & $mountHelper -Action Prepare -SyntheticFixtureRoot $SyntheticF
 $modifiedHash = $null; $modifiedUserSettingsHash = $null
 try {
     $profile = $first.Value
-    # Preserve every pre-existing argument and append the one lab target only
-    # to the verified first profile.
-    $profile.commandLineArgs = ([string]$profile.commandLineArgs) + ' ' + $bootstrapWorldArgument
+    # --addOrigin consumes following values in the target game version.  Put
+    # the logical world name first, before every existing argument, so it is
+    # never interpreted as an origin. The save attestation above remains the
+    # proof that this named bootstrap world already exists.
+    $profile.commandLineArgs = $bootstrapWorldArgument + ' ' + ([string]$profile.commandLineArgs)
     if ($null -eq $profile.PSObject.Properties['environmentVariables']) { $profile | Add-Member -NotePropertyName environmentVariables -NotePropertyValue ([pscustomobject]@{}) }
     $profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB -NotePropertyValue '1' -Force
     $profile.environmentVariables | Add-Member -NotePropertyName ISR_L00C_LAB_ROOT -NotePropertyValue $laboratory -Force
