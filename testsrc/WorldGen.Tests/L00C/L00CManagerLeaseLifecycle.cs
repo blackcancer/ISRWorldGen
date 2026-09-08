@@ -92,3 +92,28 @@ internal sealed class L00CManagerLeaseLifecycle
     }
     private void Publish(string status, string detail) { Receipts.Add(status); seams.Receipt(status, detail); }
 }
+
+/// <summary>
+/// Exact active/pump publication transaction used by the process controller.
+/// Queue failure must leave no published active controller or queued-pump bit.
+/// </summary>
+internal sealed class L00CProcessCampaignInstallTransaction<T> where T : class
+{
+    internal T? Active { get; private set; }
+    internal bool PumpQueued { get; private set; }
+    internal void Install(T candidate, Action<T> enqueue)
+    {
+        if (Active is not null || PumpQueued) throw new InvalidOperationException("L00-C controller transaction is already active.");
+        Active = candidate; PumpQueued = true;
+        try { enqueue(candidate); }
+        catch { Active = null; PumpQueued = false; throw; }
+    }
+    internal void Clear(T candidate)
+    {
+        if (ReferenceEquals(Active, candidate)) { Active = null; PumpQueued = false; }
+    }
+    internal void PumpDequeued(T candidate)
+    {
+        if (ReferenceEquals(Active, candidate)) PumpQueued = false;
+    }
+}

@@ -22,10 +22,10 @@ function Assert-Before([string]$Value, [string]$First, [string]$Second, [string]
 
 # Deterministic white-box regression oracle: these assertions establish the
 # lifetime/state contract without requiring a game process or authentication.
-Assert-Contains $text 'private static L00CProcessCampaignController? active;' 'Singleton'
+Assert-Contains $text 'private static readonly L00CProcessCampaignInstallTransaction<L00CProcessCampaignController> installTransaction = new();' 'Transactional singleton'
 Assert-Contains $text 'private static L00CManagerLeaseLifecycle? bootstrapLease;' 'Shared bootstrap lease engine singleton'
-Assert-Contains $text 'if (active is not null)' 'Singleton rejection/signal branch'
-Assert-Contains $text 'active.SignalSessionReady();' 'Subsequent session signal'
+Assert-Contains $text 'if (installTransaction.Active is not null)' 'Singleton rejection/signal branch'
+Assert-Contains $text 'installTransaction.Active.SignalSessionReady();' 'Subsequent session signal'
 Assert-Contains $text 'var engine = new L00CManagerLeaseLifecycle(seams);' 'Shared engine immediate handoff'
 Assert-Contains $text 'RegisterGameTickListener(_ => callback(), 50)' '50ms session retry listener adapter'
 Assert-Contains $driverText 'GameUnavailable' 'Explicit unavailable resolution status'
@@ -43,7 +43,7 @@ Assert-Contains $text 'bootstrap.TryAdvance(screenManager' 'Bootstrap survives M
 Assert-Contains $text 'host.TryAdvance(screenManager)' 'Campaign survives ModSystem Dispose'
 Assert-Contains $text 'UnregisterAndClearSingleton();' 'Terminal cleanup'
 Assert-Contains $text 'terminal = true;' 'Terminal state'
-Assert-Contains $text 'active = null;' 'Singleton release'
+Assert-Contains $text 'installTransaction.Clear(this);' 'Singleton release'
 if ($text -notmatch 'private ICoreClientAPI\? api;' -or $text -notmatch 'api = null; token\?\.Complete\(\); token = null;') { throw 'The sole adapter API reference is not explicitly severed.' }
 
 Assert-Before $hostText 'ExpectPrimaryMenu' 'ExpectSecondaryMenu' 'Primary cycles before secondary campaign phase'

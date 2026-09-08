@@ -22,7 +22,7 @@ internal sealed class L00CManagerLeaseToken
 internal sealed class L00CProcessCampaignController
 {
     private static readonly object Gate = new();
-    private static L00CProcessCampaignController? active;
+    private static readonly L00CProcessCampaignInstallTransaction<L00CProcessCampaignController> installTransaction = new();
     private static L00CManagerLeaseLifecycle? bootstrapLease;
     private static string? bootstrapRoot;
     private readonly object screenManager;
@@ -48,7 +48,7 @@ internal sealed class L00CProcessCampaignController
         string root = Path.GetFullPath(laboratoryRoot);
         lock (Gate)
         {
-            if (active is not null) { RequireSameRoot(active.root, root); active.SignalSessionReady(); return null; }
+            if (installTransaction.Active is not null) { RequireSameRoot(installTransaction.Active.root, root); installTransaction.Active.SignalSessionReady(); return null; }
             if (bootstrapLease is not null) { RequireSameRoot(bootstrapRoot!, root); return null; } // one retry listener/pump per process
             var seams = new VintageManagerLeaseSeams(api, root);
             var engine = new L00CManagerLeaseLifecycle(seams);
@@ -71,13 +71,11 @@ internal sealed class L00CProcessCampaignController
         {
             candidate = new L00CProcessCampaignController(manager, laboratoryRoot);
             candidate.SignalSessionReady();
-            active = candidate;
-            candidate.QueuePump();
+            installTransaction.Install(candidate, value => value.QueuePump());
             return true;
         }
         catch (Exception exception)
         {
-            if (ReferenceEquals(active, candidate)) active = null;
             candidate?.UnregisterAndClearSingleton();
             WriteLeaseReceipt(laboratoryRoot, "install-pump-fault", phase + "-" + exception.GetType().Name);
             return false;
@@ -97,8 +95,8 @@ internal sealed class L00CProcessCampaignController
     {
         lock (Gate)
         {
-            pumpQueued = false;
-            if (terminal || !ReferenceEquals(active, this)) return;
+            pumpQueued = false; installTransaction.PumpDequeued(this);
+            if (terminal || !ReferenceEquals(installTransaction.Active, this)) return;
             try
             {
                 if (sessionSignals == 0) { QueuePump(); return; }
@@ -115,7 +113,7 @@ internal sealed class L00CProcessCampaignController
 
     private void Complete() { WriteTerminal("complete", null); UnregisterAndClearSingleton(); }
     private void Fault(Exception exception) { WriteTerminal("refused", exception.Message); UnregisterAndClearSingleton(); }
-    private void UnregisterAndClearSingleton() { terminal = true; bootstrap = null; host = null; pumpQueued = false; if (ReferenceEquals(active, this)) active = null; }
+    private void UnregisterAndClearSingleton() { terminal = true; bootstrap = null; host = null; pumpQueued = false; installTransaction.Clear(this); }
 
     private void WriteTerminal(string status, string? detail)
     {

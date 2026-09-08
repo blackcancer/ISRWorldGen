@@ -9,7 +9,7 @@ internal static class L00CManagerLeaseLifecycleTests
 {
     public static int Main()
     {
-        ImmediateReady(); DelayedReadyAndOrder(); TimeoutAndLimit(); ResolverAndMismatch(); DisposeAndLateTick(); RegisterUnregisterAndEnqueueFailures(); DuplicateStart();
+        ImmediateReady(); DelayedReadyAndOrder(); TimeoutAndLimit(); ResolverAndMismatch(); DisposeAndLateTick(); RegisterUnregisterAndEnqueueFailures(); DuplicateStart(); InstallTransactionRollback();
         return 0;
     }
     private static void ImmediateReady()
@@ -45,6 +45,21 @@ internal static class L00CManagerLeaseLifecycleTests
     private static void DuplicateStart()
     {
         var s = new Fake(L00CManagerResolutionStatus.ManagerUnavailable); var l = new L00CManagerLeaseLifecycle(s); l.Start(); l.Start(); Check(s.Registers == 1 && s.Installs == 0);
+    }
+    private static void InstallTransactionRollback()
+    {
+        var transaction = new L00CProcessCampaignInstallTransaction<object>();
+        object first = new object(); object second = new object(); object third = new object();
+        try { transaction.Install(first, _ => throw new InvalidOperationException()); throw new InvalidOperationException("expected enqueue failure"); }
+        catch (InvalidOperationException) { }
+        Check(transaction.Active is null && !transaction.PumpQueued);
+        transaction.Install(second, _ => { });
+        Check(ReferenceEquals(transaction.Active, second) && transaction.PumpQueued);
+        try { transaction.Install(third, _ => { }); throw new InvalidOperationException("expected active conflict"); }
+        catch (InvalidOperationException) { }
+        transaction.Clear(second);
+        transaction.Install(third, _ => { });
+        Check(ReferenceEquals(transaction.Active, third) && transaction.PumpQueued);
     }
     private static void Check(bool value) { if (!value) throw new InvalidOperationException("L00-C lease simulation failed."); }
     private sealed class Fake : IL00CManagerLeaseSeams
