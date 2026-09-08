@@ -13,24 +13,25 @@
         "L14-B"
       ],
       "reason": "Catalogue réel, strates 3D et propriétés communes",
-      "disposition": "TO_ASSESS",
-      "evidence": []
+      "disposition": "EXTEND_AND_RETEST",
+      "evidence": ["artifacts/plan-adoption/requalification-plan-r12.md", "L03-C 10/10 Debug/Release historical regression"]
     },
     {
-      "tasks": [
-        "L04-A",
-        "L04-B",
-        "L04-C",
-        "L05-B",
-        "L05-C"
-      ],
+      "tasks": ["L04-A", "L04-B", "L04-C"],
       "new_consumers": [
         "L18-A",
         "L06-A"
       ],
       "reason": "Un seul climat, neige-stockage-fonte et budgets de ports annuels",
-      "disposition": "TO_ASSESS",
-      "evidence": []
+      "disposition": "EXTEND_AND_RETEST",
+      "evidence": ["artifacts/plan-adoption/requalification-plan-r12.md", "L04-C historical Core regression"]
+    },
+    {
+      "tasks": ["L05-B", "L05-C"],
+      "new_consumers": ["L18-A", "L06-A"],
+      "reason": "Ports hydrologiques annuels et sidecar saisonnier C12",
+      "disposition": "BLOCKED",
+      "evidence": ["artifacts/plan-adoption/requalification-plan-r12.md", "C03 v1 must not receive seasonal fields in place"]
     },
     {
       "tasks": [
@@ -43,8 +44,8 @@
         "L11-B"
       ],
       "reason": "Schémas extensions, empreintes catalogues et état temporel",
-      "disposition": "TO_ASSESS",
-      "evidence": []
+      "disposition": "BLOCKED",
+      "evidence": ["artifacts/plan-adoption/requalification-plan-r12.md"]
     },
     {
       "tasks": [
@@ -58,8 +59,8 @@
         "L18-C"
       ],
       "reason": "Cartes, ownership des passes, API/consommateurs natifs",
-      "disposition": "TO_ASSESS",
-      "evidence": []
+      "disposition": "BLOCKED",
+      "evidence": ["artifacts/plan-adoption/requalification-plan-r12.md"]
     },
     {
       "tasks": [
@@ -75,8 +76,8 @@
       ],
       "new_consumers": [],
       "reason": "Si déjà commencés ou DONE localement, compléter et requalifier le delta 1.2 ; ne pas réécrire l’historique",
-      "disposition": "TO_ASSESS",
-      "evidence": []
+      "disposition": "BREAKING_NEW_REVISION",
+      "evidence": ["artifacts/plan-adoption/requalification-plan-r12.md"]
     }
   ]
 }

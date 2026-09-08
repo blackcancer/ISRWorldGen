@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-08T09:30:00Z",
-  "integrated_commit": "689471513aad0599c077229dd304feda454fb49c",
+  "updated_utc": "2026-09-08T10:00:00Z",
+  "integrated_commit": "7c8362c519640be5cfcb3d3eb7d912273b5cfa2f",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -498,11 +498,19 @@
       "blocker": null
     },
     "L05-D": {
-      "status": "IN_PROGRESS",
-      "owner": "agent:l05-d",
+      "status": "DONE",
+      "owner": "integrator:l05-d",
       "branch": "agent/l05-d",
       "base_commit": "c8faebcb9ba5155adacf9600101df2b8ca8c1840",
-      "evidence": [],
+      "evidence": [
+        "worklogs/L05-D.md",
+        "artifacts/plan-adoption/compatibility-matrix-r12.md",
+        "artifacts/plan-adoption/requalification-plan-r12.md",
+        "commit:e0b9ca5",
+        "commit:7c8362c519640be5cfcb3d3eb7d912273b5cfa2f",
+        "local:main Debug T05U 4/4 PASS",
+        "local:main Release L03-C/L04-C/L05-C/L05-D regression 28/28 PASS"
+      ],
       "blocker": null
     },
     "L14-A": {
