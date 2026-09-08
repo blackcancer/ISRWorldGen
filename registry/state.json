@@ -584,10 +584,10 @@
       "blocker": null
     },
     "L16-A": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
+      "status": "IN_PROGRESS",
+      "owner": "agent:l16-a",
+      "branch": "agent/l16-a",
+      "base_commit": "1c36867",
       "evidence": [],
       "blocker": null
     },
