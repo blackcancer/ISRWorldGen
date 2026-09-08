@@ -26,6 +26,7 @@
     <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CFixtureBootstrap.cs" Link="L00C\L00CFixtureBootstrap.cs" />
     <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CProcessCampaignController.cs" Link="L00C\L00CProcessCampaignController.cs" />
     <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CManagerLeaseLifecycle.cs" Link="L00C\L00CManagerLeaseLifecycle.cs" />
+    <Compile Include="..\..\testsrc\WorldGen.Tests\L00C\L00CNativeFixtureOracle.cs" Link="L00C\L00CNativeFixtureOracle.cs" />
   </ItemGroup>
 
   <ItemGroup>
