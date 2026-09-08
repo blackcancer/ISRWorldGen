@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Text;
 using ISRWorldGen.Core.Contracts;
 
@@ -13,17 +12,16 @@ internal sealed class NativeRockCatalogSnapshot
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     internal NativeRockCatalogSnapshot(
-        string catalogId,
-        string targetVersion,
-        string assetRevision,
+        NativeRockCatalogManifest manifest,
         IEnumerable<NativeAssetRecord> effectiveAssets,
         IEnumerable<NativeRockDefinition> rocks,
         IEnumerable<NativeResourceHost> resourceHosts,
         IEnumerable<NativeResourceHost> forbiddenHosts)
     {
-        CatalogId = RequireToken(catalogId, nameof(catalogId));
-        TargetVersion = RequireToken(targetVersion, nameof(targetVersion));
-        AssetRevision = RequireToken(assetRevision, nameof(assetRevision));
+        Manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
+        CatalogId = Manifest.CatalogId;
+        TargetVersion = Manifest.TargetVersion;
+        AssetRevision = Manifest.AssetRevision;
         ArgumentNullException.ThrowIfNull(effectiveAssets);
         ArgumentNullException.ThrowIfNull(rocks);
         ArgumentNullException.ThrowIfNull(resourceHosts);
@@ -33,10 +31,11 @@ internal sealed class NativeRockCatalogSnapshot
         NativeRockDefinition[] suppliedRocks = rocks.ToArray();
         NativeResourceHost[] suppliedHosts = resourceHosts.ToArray();
         NativeResourceHost[] suppliedForbiddenHosts = forbiddenHosts.ToArray();
-        ValidateAssets(assets, AssetRevision);
-        ValidateRocks(suppliedRocks, assets, AssetRevision);
-        ValidateHosts(suppliedHosts, suppliedForbiddenHosts, suppliedRocks);
+        ValidateAssets(assets, Manifest);
+        ValidateRocks(suppliedRocks, assets, Manifest);
+        ValidateHosts(suppliedHosts, suppliedForbiddenHosts, suppliedRocks, Manifest.RequiredHostFamilies);
 
+        EffectiveAssets = Array.AsReadOnly(assets.OrderBy(asset => asset.AssetLocation, StringComparer.Ordinal).ToArray());
         Rocks = Array.AsReadOnly(suppliedRocks.OrderBy(rock => rock.RockKey, StringComparer.Ordinal).ToArray());
         ResourceHosts = Array.AsReadOnly(suppliedHosts
             .OrderBy(host => host.ResourceKey, StringComparer.Ordinal)
@@ -53,6 +52,8 @@ internal sealed class NativeRockCatalogSnapshot
     internal string CatalogId { get; }
     internal string TargetVersion { get; }
     internal string AssetRevision { get; }
+    internal NativeRockCatalogManifest Manifest { get; }
+    internal IReadOnlyList<NativeAssetRecord> EffectiveAssets { get; }
     internal IReadOnlyList<NativeRockDefinition> Rocks { get; }
     internal IReadOnlyList<NativeResourceHost> ResourceHosts { get; }
     internal IReadOnlyList<NativeResourceHost> ForbiddenHosts { get; }
@@ -64,6 +65,29 @@ internal sealed class NativeRockCatalogSnapshot
         builder.Append("catalog=").Append(CatalogId)
             .Append(";target=").Append(TargetVersion)
             .Append(";revision=").Append(AssetRevision).Append('\n');
+        foreach (string provenance in Manifest.AdmittedProvenances)
+        {
+            builder.Append("admitted-provenance=").Append(provenance).Append('\n');
+        }
+
+        foreach (string requiredCode in Manifest.RequiredNativeCodes)
+        {
+            builder.Append("required-code=").Append(requiredCode).Append('\n');
+        }
+
+        foreach (NativeHostFamilyRequirement requirement in Manifest.RequiredHostFamilies)
+        {
+            builder.Append("required-host-family=").Append(requirement.ResourceKey)
+                .Append(";family=").Append(requirement.Family).Append('\n');
+        }
+
+        foreach (NativeAssetRecord asset in EffectiveAssets)
+        {
+            builder.Append("asset=").Append(asset.AssetLocation)
+                .Append(";provenance=").Append(asset.Provenance)
+                .Append(";revision=").Append(asset.AssetRevision).Append('\n');
+        }
+
         foreach (NativeRockDefinition rock in Rocks)
         {
             builder.Append("rock=").Append(rock.RockKey)
@@ -91,17 +115,18 @@ internal sealed class NativeRockCatalogSnapshot
         return builder.ToString();
     }
 
-    private static void ValidateAssets(NativeAssetRecord[] assets, string revision)
+    private static void ValidateAssets(NativeAssetRecord[] assets, NativeRockCatalogManifest manifest)
     {
         if (assets.Length == 0 || assets.Any(asset => asset is null) ||
-            assets.Any(asset => !string.Equals(asset.AssetRevision, revision, StringComparison.Ordinal)) ||
+            assets.Any(asset => !string.Equals(asset.AssetRevision, manifest.AssetRevision, StringComparison.Ordinal) ||
+                                !manifest.AdmittedProvenances.Contains(asset.Provenance, StringComparer.Ordinal)) ||
             assets.GroupBy(asset => asset.AssetLocation, StringComparer.Ordinal).Any(group => group.Count() != 1))
         {
             throw new ArgumentException("Effective assets must be non-empty, uniquely located, and from one declared revision.");
         }
     }
 
-    private static void ValidateRocks(NativeRockDefinition[] rocks, NativeAssetRecord[] assets, string revision)
+    private static void ValidateRocks(NativeRockDefinition[] rocks, NativeAssetRecord[] assets, NativeRockCatalogManifest manifest)
     {
         if (rocks.Length == 0 || rocks.Any(rock => rock is null) ||
             rocks.GroupBy(rock => rock.RockKey, StringComparer.Ordinal).Any(group => group.Count() != 1) ||
@@ -115,17 +140,24 @@ internal sealed class NativeRockCatalogSnapshot
         {
             if (!assetsByLocation.TryGetValue(rock.AssetLocation, out NativeAssetRecord? asset) ||
                 !string.Equals(asset.Provenance, rock.Provenance, StringComparison.Ordinal) ||
-                !string.Equals(asset.AssetRevision, revision, StringComparison.Ordinal))
+                !string.Equals(asset.AssetRevision, manifest.AssetRevision, StringComparison.Ordinal))
             {
                 throw new ArgumentException("Every rock must point to an effective asset with matching provenance and revision.");
             }
+        }
+
+        if (manifest.RequiredNativeCodes.Any(requiredCode =>
+            !rocks.Any(rock => string.Equals(rock.NativeCode, requiredCode, StringComparison.Ordinal))))
+        {
+            throw new ArgumentException("A required native rock code is absent from the effective catalog.");
         }
     }
 
     private static void ValidateHosts(
         NativeResourceHost[] hosts,
         NativeResourceHost[] forbiddenHosts,
-        NativeRockDefinition[] rocks)
+        NativeRockDefinition[] rocks,
+        IReadOnlyList<NativeHostFamilyRequirement> requiredHostFamilies)
     {
         if (hosts.Any(host => host is null) || forbiddenHosts.Any(host => host is null) ||
             hosts.GroupBy(host => (host.ResourceKey, host.RockKey), StringTupleComparer.Ordinal).Any(group => group.Count() != 1) ||
@@ -143,26 +175,16 @@ internal sealed class NativeRockCatalogSnapshot
             throw new ArgumentException("Resource hosts must name catalog rocks and cannot also be forbidden.");
         }
 
-        foreach (string resource in hosts.Where(host => host.Requirement == NativeHostRequirement.Required)
-                     .Select(host => host.ResourceKey).Distinct(StringComparer.Ordinal))
+        foreach (NativeHostFamilyRequirement requirement in requiredHostFamilies)
         {
-            if (!hosts.Any(host => host.Requirement == NativeHostRequirement.Required &&
-                                   string.Equals(host.ResourceKey, resource, StringComparison.Ordinal)))
+            if (!hosts.Any(host =>
+                    string.Equals(host.ResourceKey, requirement.ResourceKey, StringComparison.Ordinal) &&
+                    rocks.Any(rock => string.Equals(rock.RockKey, host.RockKey, StringComparison.Ordinal) &&
+                                      rock.Family == requirement.Family)))
             {
-                throw new ArgumentException("Every required resource must retain a compatible host.");
+                throw new ArgumentException("A required resource host family is absent from the effective catalog.");
             }
         }
-    }
-
-    private static string RequireToken(string? value, string parameterName)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value != value.ToLowerInvariant() ||
-            value.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is ':' or '/' or '.' or '_' or '-')))
-        {
-            throw new ArgumentException("Catalog identifiers must be lowercase semantic tokens.", parameterName);
-        }
-
-        return value;
     }
 
     private sealed class StringTupleComparer : IEqualityComparer<(string ResourceKey, string RockKey)>
@@ -174,6 +196,46 @@ internal sealed class NativeRockCatalogSnapshot
         public int GetHashCode((string ResourceKey, string RockKey) value) =>
             HashCode.Combine(StringComparer.Ordinal.GetHashCode(value.ResourceKey), StringComparer.Ordinal.GetHashCode(value.RockKey));
     }
+}
+
+internal sealed class NativeRockCatalogManifest
+{
+    internal NativeRockCatalogManifest(
+        string catalogId,
+        string targetVersion,
+        string assetRevision,
+        IEnumerable<string> admittedProvenances,
+        IEnumerable<string> requiredNativeCodes,
+        IEnumerable<NativeHostFamilyRequirement> requiredHostFamilies)
+    {
+        CatalogId = NativeRockCatalogSnapshotToken.Require(catalogId, nameof(catalogId));
+        TargetVersion = NativeRockCatalogSnapshotToken.Require(targetVersion, nameof(targetVersion));
+        AssetRevision = NativeRockCatalogSnapshotToken.Require(assetRevision, nameof(assetRevision));
+        ArgumentNullException.ThrowIfNull(admittedProvenances);
+        ArgumentNullException.ThrowIfNull(requiredNativeCodes);
+        ArgumentNullException.ThrowIfNull(requiredHostFamilies);
+        string[] provenances = admittedProvenances.Select(value => NativeRockCatalogSnapshotToken.Require(value, nameof(admittedProvenances))).ToArray();
+        string[] codes = requiredNativeCodes.Select(value => NativeRockCatalogSnapshotToken.Require(value, nameof(requiredNativeCodes))).ToArray();
+        NativeHostFamilyRequirement[] families = requiredHostFamilies.ToArray();
+        if (provenances.Length == 0 || families.Any(family => family is null) ||
+            provenances.Distinct(StringComparer.Ordinal).Count() != provenances.Length ||
+            codes.Distinct(StringComparer.Ordinal).Count() != codes.Length ||
+            families.GroupBy(family => (family.ResourceKey, family.Family), NativeHostFamilyRequirementComparer.Ordinal).Any(group => group.Count() != 1))
+        {
+            throw new ArgumentException("Catalog requirements must be non-empty and unique.");
+        }
+
+        AdmittedProvenances = Array.AsReadOnly(provenances.OrderBy(value => value, StringComparer.Ordinal).ToArray());
+        RequiredNativeCodes = Array.AsReadOnly(codes.OrderBy(value => value, StringComparer.Ordinal).ToArray());
+        RequiredHostFamilies = Array.AsReadOnly(families.OrderBy(value => value.ResourceKey, StringComparer.Ordinal).ThenBy(value => value.Family).ToArray());
+    }
+
+    internal string CatalogId { get; }
+    internal string TargetVersion { get; }
+    internal string AssetRevision { get; }
+    internal IReadOnlyList<string> AdmittedProvenances { get; }
+    internal IReadOnlyList<string> RequiredNativeCodes { get; }
+    internal IReadOnlyList<NativeHostFamilyRequirement> RequiredHostFamilies { get; }
 }
 
 internal sealed record NativeAssetRecord(string AssetLocation, string Provenance, string AssetRevision)
@@ -200,8 +262,23 @@ internal sealed record NativeResourceHost(string ResourceKey, string RockKey, Na
     internal NativeHostRequirement Requirement { get; } = Enum.IsDefined(Requirement) ? Requirement : throw new ArgumentOutOfRangeException(nameof(Requirement));
 }
 
+internal sealed record NativeHostFamilyRequirement(string ResourceKey, NativeRockFamily Family)
+{
+    internal string ResourceKey { get; } = NativeRockCatalogSnapshotToken.Require(ResourceKey, nameof(ResourceKey));
+    internal NativeRockFamily Family { get; } = Enum.IsDefined(Family) ? Family : throw new ArgumentOutOfRangeException(nameof(Family));
+}
+
 internal enum NativeRockFamily { Sedimentary, Igneous, Metamorphic, Impact }
 internal enum NativeHostRequirement { Optional, Required }
+
+internal sealed class NativeHostFamilyRequirementComparer : IEqualityComparer<(string ResourceKey, NativeRockFamily Family)>
+{
+    internal static NativeHostFamilyRequirementComparer Ordinal { get; } = new();
+    public bool Equals((string ResourceKey, NativeRockFamily Family) x, (string ResourceKey, NativeRockFamily Family) y) =>
+        string.Equals(x.ResourceKey, y.ResourceKey, StringComparison.Ordinal) && x.Family == y.Family;
+    public int GetHashCode((string ResourceKey, NativeRockFamily Family) value) =>
+        HashCode.Combine(StringComparer.Ordinal.GetHashCode(value.ResourceKey), value.Family);
+}
 
 internal static class NativeRockCatalogSnapshotToken
 {
