@@ -22,10 +22,21 @@ internal static class L00CClientSessionResolverTests
             out object? clientMain, out object? resolvedManager) || !ReferenceEquals(clientMain, core.Main) || !ReferenceEquals(resolvedManager, manager))
             return 1;
 
+        if (L00CMenuActionDriver.ResolveClientSessionChain(core, typeof(ClientCoreApi), typeof(ClientMain),
+            typeof(GuiScreenRunningGame), typeof(GuiScreen), typeof(ScreenManager),
+            Rid(typeof(ClientCoreApi).GetField("game", BindingFlags.Instance | BindingFlags.NonPublic)!),
+            Rid(typeof(ClientMain).GetField("ScreenRunningGame", BindingFlags.Instance | BindingFlags.Public)!),
+            Rid(typeof(GuiScreen).GetField("ScreenManager", BindingFlags.Instance | BindingFlags.Public)!)).Status != L00CManagerResolutionStatus.Ready) return 11;
+
         // A wrong root type and a null link are ordinary not-ready states; no graph search is permitted.
         if (L00CMenuActionDriver.TryResolveClientSessionChain(new object(), typeof(ClientCoreApi), typeof(ClientMain),
             typeof(GuiScreenRunningGame), typeof(GuiScreen), typeof(ScreenManager), 1, 1, 1, out _, out _)) return 2;
         ClientCoreApi noMain = new ClientCoreApi(null!);
+        if (L00CMenuActionDriver.ResolveClientSessionChain(noMain, typeof(ClientCoreApi), typeof(ClientMain),
+            typeof(GuiScreenRunningGame), typeof(GuiScreen), typeof(ScreenManager),
+            Rid(typeof(ClientCoreApi).GetField("game", BindingFlags.Instance | BindingFlags.NonPublic)!),
+            Rid(typeof(ClientMain).GetField("ScreenRunningGame", BindingFlags.Instance | BindingFlags.Public)!),
+            Rid(typeof(GuiScreen).GetField("ScreenManager", BindingFlags.Instance | BindingFlags.Public)!)).Status != L00CManagerResolutionStatus.GameUnavailable) return 12;
         if (L00CMenuActionDriver.TryResolveClientSessionChain(noMain, typeof(ClientCoreApi), typeof(ClientMain),
             typeof(GuiScreenRunningGame), typeof(GuiScreen), typeof(ScreenManager),
             Rid(typeof(ClientCoreApi).GetField("game", BindingFlags.Instance | BindingFlags.NonPublic)!),

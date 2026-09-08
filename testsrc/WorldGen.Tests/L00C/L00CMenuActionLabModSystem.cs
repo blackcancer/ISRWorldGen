@@ -14,6 +14,8 @@ namespace ISRWorldGen.L00C.Laboratory;
 /// </summary>
 public sealed class L00CMenuActionLabModSystem : ModSystem
 {
+    private ICoreClientAPI? sessionApi;
+
     /// <inheritdoc />
     public override void StartClientSide(ICoreClientAPI api)
     {
@@ -25,9 +27,21 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         // reflection lock, debugger state, save, profile, or session.
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) return;
         string root = RequireLaboratoryRoot();
+        sessionApi = api;
         L00CProcessCampaignController.InstallOrSignal(api, root);
         Mod.Logger.Notification("L00C_INPROCESS_HARNESS_READY: process-lifetime ScreenManager pump installed or signalled.");
 #endif
+    }
+
+    /// <inheritdoc />
+    public override void Dispose()
+    {
+#if DEBUG
+        ICoreClientAPI? retained = sessionApi;
+        sessionApi = null;
+        if (retained is not null) L00CProcessCampaignController.DisposeSession(retained);
+#endif
+        base.Dispose();
     }
 
     private static string RequireLaboratoryRoot()

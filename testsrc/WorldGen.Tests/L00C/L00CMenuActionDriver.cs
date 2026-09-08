@@ -11,6 +11,26 @@ using System.Security.Cryptography;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
+/// <summary>Outcome of the fixed ClientCoreAPI-to-ScreenManager chain.</summary>
+internal enum L00CManagerResolutionStatus
+{
+    ApiTypeMismatch,
+    GameUnavailable,
+    RunningScreenUnavailable,
+    ManagerUnavailable,
+    Ready
+}
+
+/// <summary>Only <see cref="L00CManagerResolutionStatus.Ready"/> exposes a manager.</summary>
+internal sealed class L00CManagerResolution
+{
+    internal L00CManagerResolution(L00CManagerResolutionStatus status, object? clientMain, object? screenManager)
+    { Status = status; ClientMain = clientMain; ScreenManager = screenManager; }
+    internal L00CManagerResolutionStatus Status { get; }
+    internal object? ClientMain { get; }
+    internal object? ScreenManager { get; }
+}
+
 internal sealed class L00CMenuActionReceipt
 {
     public L00CMenuActionReceipt(string action, DateTimeOffset startedUtc, DateTimeOffset completedUtc,
@@ -95,7 +115,12 @@ internal static class L00CMenuActionDriver
     // StartClientSide receives ClientCoreAPI.  Resolve its process-wide manager
     // through exactly this audited field chain; later campaign states instead
     // begin at the manager and retain their existing generic session discovery.
-    internal static bool TryFindScreenManagerFromClientApi(object clientApi, out object? screenManager)
+    /// <summary>
+    /// Resolves the manager through the only audited chain.  A partially built
+    /// client is a normal, retryable lifecycle state; a reflection mismatch is
+    /// still an exception and is deliberately never retried.
+    /// </summary>
+    internal static L00CManagerResolution ResolveScreenManagerFromClientApi(object clientApi)
     {
         RequireDebugLab();
         Assembly lib = FindLoadedLib();
@@ -105,8 +130,17 @@ internal static class L00CMenuActionDriver
         Type running = RequireType(lib, "Vintagestory.Client.GuiScreenRunningGame");
         Type guiScreen = RequireType(lib, "GuiScreen");
         Type manager = RequireType(lib, "Vintagestory.Client.ScreenManager");
-        return TryResolveClientSessionChain(clientApi, api, main, running, guiScreen, manager,
-            0x11aa, 0x11f3, 0x0008, out _, out screenManager);
+        return ResolveClientSessionChain(clientApi, api, main, running, guiScreen, manager,
+            0x11aa, 0x11f3, 0x0008);
+    }
+
+    // Retained for the original local oracle and callers that only need the
+    // successful object. New lifecycle code must consume the explicit status.
+    internal static bool TryFindScreenManagerFromClientApi(object clientApi, out object? screenManager)
+    {
+        L00CManagerResolution resolution = ResolveScreenManagerFromClientApi(clientApi);
+        screenManager = resolution.ScreenManager;
+        return resolution.Status == L00CManagerResolutionStatus.Ready;
     }
 
     // ScreenManager owns the process-wide main-thread queue.  This is deliberately
@@ -248,26 +282,35 @@ internal static class L00CMenuActionDriver
         Type runningGameType, Type guiScreenType, Type screenManagerType, int gameFieldToken,
         int runningGameFieldToken, int screenManagerFieldToken, out object? clientMain, out object? screenManager)
     {
+        L00CManagerResolution result = ResolveClientSessionChain(clientApi, clientCoreApiType, clientMainType,
+            runningGameType, guiScreenType, screenManagerType, gameFieldToken, runningGameFieldToken, screenManagerFieldToken);
+        clientMain = result.ClientMain;
+        screenManager = result.ScreenManager;
+        return result.Status == L00CManagerResolutionStatus.Ready;
+    }
+
+    internal static L00CManagerResolution ResolveClientSessionChain(object clientApi, Type clientCoreApiType, Type clientMainType,
+        Type runningGameType, Type guiScreenType, Type screenManagerType, int gameFieldToken,
+        int runningGameFieldToken, int screenManagerFieldToken)
+    {
         if (clientApi is null) throw new ArgumentNullException(nameof(clientApi));
-        if (!clientCoreApiType.IsInstanceOfType(clientApi)) { clientMain = null; screenManager = null; return false; }
+        if (!clientCoreApiType.IsInstanceOfType(clientApi)) return new(L00CManagerResolutionStatus.ApiTypeMismatch, null, null);
 
         FieldInfo game = RequireDeclaredInstanceField(clientCoreApiType, "game", clientMainType, false, gameFieldToken);
         object? main = game.GetValue(clientApi);
-        if (main is null || !clientMainType.IsInstanceOfType(main)) { clientMain = null; screenManager = null; return false; }
+        if (main is null || !clientMainType.IsInstanceOfType(main)) return new(L00CManagerResolutionStatus.GameUnavailable, null, null);
 
         FieldInfo running = RequireDeclaredInstanceField(clientMainType, "ScreenRunningGame", runningGameType, true, runningGameFieldToken);
         object? gameScreen = running.GetValue(main);
-        if (gameScreen is null || !runningGameType.IsInstanceOfType(gameScreen)) { clientMain = null; screenManager = null; return false; }
+        if (gameScreen is null || !runningGameType.IsInstanceOfType(gameScreen)) return new(L00CManagerResolutionStatus.RunningScreenUnavailable, main, null);
 
         if (runningGameType.BaseType != guiScreenType)
             throw new InvalidOperationException("L00-C menu POC refused: GuiScreenRunningGame no longer directly inherits GuiScreen.");
         FieldInfo manager = RequireDeclaredInstanceField(guiScreenType, "ScreenManager", screenManagerType, true, screenManagerFieldToken);
         object? resolvedManager = manager.GetValue(gameScreen);
-        if (resolvedManager is null || !screenManagerType.IsInstanceOfType(resolvedManager)) { clientMain = null; screenManager = null; return false; }
+        if (resolvedManager is null || !screenManagerType.IsInstanceOfType(resolvedManager)) return new(L00CManagerResolutionStatus.ManagerUnavailable, main, null);
 
-        clientMain = main;
-        screenManager = resolvedManager;
-        return true;
+        return new(L00CManagerResolutionStatus.Ready, main, resolvedManager);
     }
 
     private static FieldInfo RequireDeclaredInstanceField(Type declaringType, string name, Type fieldType, bool isPublic, int expectedToken)
