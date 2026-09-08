@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-08T08:30:00Z",
-  "integrated_commit": "211309d2bf4ea3ec3a6468bf6418492c55f44f82",
+  "updated_utc": "2026-09-08T08:45:00Z",
+  "integrated_commit": "b89e55c789e46afb8584deb4f29504c84bfe527b",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -285,11 +285,19 @@
       "blocker": null
     },
     "L05-C": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
-      "evidence": [],
+      "status": "DONE",
+      "owner": "integrator:l05-c",
+      "branch": "agent/l05-c",
+      "base_commit": "bfb2746",
+      "evidence": [
+        "worklogs/L05-C.md",
+        "commit:e53315e",
+        "commit:3132018",
+        "commit:b89e55c789e46afb8584deb4f29504c84bfe527b",
+        "local:main Debug T05-05/T05-06 6/6 PASS",
+        "local:main Release L05-A/L05-B/L05-C regression 18/18 PASS",
+        "review:canonical child reduction, identity/profile validation, and permutation proof PASS"
+      ],
       "blocker": null
     },
     "L06-A": {
