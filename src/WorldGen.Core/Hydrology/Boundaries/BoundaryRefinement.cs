@@ -45,9 +45,18 @@ public static class BoundaryRefinementPlanner
             if (!parents.TryGetValue(child.ParentPortId, out BoundaryPort? parent)) throw new ArgumentException("Each fine port requires a known published parent.", nameof(source));
             BoundaryPort fine = child.ChildPort;
             if (fine.PortId == parent.PortId || fine.Iteration != parentSnapshot.Iteration || fine.ReliefSignature != parentSnapshot.ReliefSignature ||
-                fine.Plane != parent.Plane || !parent.ProtectedCorridor.Contains(fine.Crossing) || !double.IsFinite(fine.ReferenceFlowModelVolumePerYear) || fine.ReferenceFlowModelVolumePerYear < 0d)
-                throw new ArgumentException("Fine ports must retain parent provenance/plane, lie in its corridor, and carry finite non-negative flow.", nameof(source));
+                fine.PortId != StableId.Derive(RandomDomain.Hydrology, fine.OwnerId, fine.OwnerLocalIndex) || fine.Plane != fine.Plane.Canonicalize() ||
+                fine.Plane != parent.Plane || !double.IsFinite(fine.ReferenceFlowModelVolumePerYear) || fine.ReferenceFlowModelVolumePerYear < 0d)
+                throw new ArgumentException("Fine ports must retain canonical identity, provenance, plane, and finite non-negative flow.", nameof(source));
+            fine.Profile.Validate(fine.WaterLevelQuantized);
+            fine.ProtectedCorridor.Validate();
+            if (!fine.ProtectedCorridor.Contains(fine.Crossing) || !parent.ProtectedCorridor.Contains(fine.Crossing))
+                throw new ArgumentException("A fine crossing must lie in both its own and its published parent corridor.", nameof(source));
         }
+        // The input is an untrusted enumeration.  This canonical total order is established
+        // after validation and before any floating-point reduction or allocation decision.
+        children = children.OrderBy(child => child.ParentPortId.High).ThenBy(child => child.ParentPortId.Low)
+            .ThenBy(child => child.ChildPort.PortId.High).ThenBy(child => child.ChildPort.PortId.Low).ToArray();
 
         var allocations = new List<BoundaryRefinementAllocation>(parents.Count);
         foreach (BoundaryPort parent in parentSnapshot.Ports)

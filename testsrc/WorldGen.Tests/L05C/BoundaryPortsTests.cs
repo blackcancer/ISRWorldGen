@@ -80,6 +80,39 @@ public sealed class BoundaryPortsTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => BoundaryRefinementPlanner.Refine(parent, [one, two]));
     }
 
+    [TestMethod]
+    public void BoundaryRefinement_CanonicalizesFiniteHeterogeneousReductionsBeforeEveryAllocationDecision()
+    {
+        BoundaryPortSnapshot parent = BoundaryPortPublisher.Publish(6, Relief, [Request(80, 0, 300, 301, 20, 20, 20, 20, 30, 4, 4, 1000d, 6)]);
+        BoundaryPort port = parent.Ports.Single();
+        BoundaryRefinementChild[] supplied =
+        [
+            Child(port, 83, 0, 3, 3, 700.1d), Child(port, 81, 0, 1, 1, 0.2d), Child(port, 82, 0, 2, 2, 0.3d),
+        ];
+
+        BoundaryRefinementSnapshot expected = BoundaryRefinementPlanner.Refine(parent, supplied);
+        foreach (BoundaryRefinementChild[] permutation in Permutations(supplied))
+        {
+            BoundaryRefinementSnapshot actual = BoundaryRefinementPlanner.Refine(parent, permutation);
+            CollectionAssert.AreEqual(expected.Children.ToArray(), actual.Children.ToArray());
+            CollectionAssert.AreEqual(expected.Allocations.ToArray(), actual.Allocations.ToArray(),
+                "Canonical child ordering must make child-flow, retained-flow, and acceptance decision bit-identical across permutations.");
+        }
+    }
+
+    [TestMethod]
+    public void BoundaryRefinement_RejectsFalsifiedPublicIdentityAndInvalidPublicProfile()
+    {
+        BoundaryPortSnapshot parent = BoundaryPortPublisher.Publish(4, Relief, [Request(90, 0, 400, 401, 5, 5, 5, 5, 10, 2, 2, 8d, 4)]);
+        BoundaryPort port = parent.Ports.Single();
+        BoundaryPort valid = Child(port, 91, 0, 4, 4, 2d).ChildPort;
+        BoundaryPort falsifiedId = valid with { PortId = StableId.Zero };
+        BoundaryPort invalidProfile = valid with { Profile = new BoundaryChannelProfile(valid.WaterLevelQuantized + 1, 2, 2) };
+
+        Assert.ThrowsExactly<ArgumentException>(() => BoundaryRefinementPlanner.Refine(parent, [new BoundaryRefinementChild(port.PortId, falsifiedId)]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => BoundaryRefinementPlanner.Refine(parent, [new BoundaryRefinementChild(port.PortId, invalidProfile)]));
+    }
+
     private static void AssertConserved(BoundaryRefinementSnapshot result, BoundaryPort parent, double expectedChildren)
     {
         BoundaryRefinementAllocation allocation = result.Allocations.Single();
@@ -95,4 +128,13 @@ public sealed class BoundaryPortsTests
     private static BoundaryRefinementChild Child(BoundaryPort parent, ulong owner, ulong index, long x, long z, double flow) =>
         new(parent.PortId, new BoundaryPort(StableId.Derive(RandomDomain.Hydrology, new StableId(0, owner), index), new StableId(0, owner), index,
             parent.Plane, new BoundaryCrossing(x, z), parent.WaterLevelQuantized, parent.Profile, flow, parent.ProtectedCorridor, parent.Iteration, parent.ReliefSignature));
+
+    private static IEnumerable<BoundaryRefinementChild[]> Permutations(BoundaryRefinementChild[] values)
+    {
+        for (int first = 0; first < values.Length; first++)
+        for (int second = 0; second < values.Length; second++)
+        for (int third = 0; third < values.Length; third++)
+            if (first != second && first != third && second != third)
+                yield return [values[first], values[second], values[third]];
+    }
 }
