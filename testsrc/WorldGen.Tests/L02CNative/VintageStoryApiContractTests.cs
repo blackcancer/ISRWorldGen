@@ -115,6 +115,8 @@ public sealed class VintageStoryApiContractTests
         ModWorldConfiguration? declaration =
             JsonConvert.DeserializeObject<ModWorldConfiguration>(File.ReadAllText(sourcePath));
         Assert.IsNotNull(declaration);
+        Assert.IsNotNull(declaration.PlayStyles, "The native loader dereferences PlayStyles during world creation.");
+        Assert.HasCount(0, declaration.PlayStyles, "ISRWorldGen must not replace Vanilla playstyles.");
         Assert.HasCount(1, declaration.WorldConfigAttributes);
         WorldConfigurationAttribute attribute = declaration.WorldConfigAttributes[0];
         Assert.AreEqual(VintageStoryNativeProfileHost.SelectionConfigKey, attribute.Code);
@@ -179,6 +181,9 @@ public sealed class VintageStoryApiContractTests
     {
         Assert.IsTrue(File.Exists(path), $"Missing world configuration declaration: {path}");
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        JsonElement playstyles = document.RootElement.GetProperty("playstyles");
+        Assert.AreEqual(JsonValueKind.Array, playstyles.ValueKind);
+        Assert.AreEqual(0, playstyles.GetArrayLength());
         JsonElement attributes = document.RootElement.GetProperty("worldConfigAttributes");
         Assert.AreEqual(JsonValueKind.Array, attributes.ValueKind);
         Assert.AreEqual(1, attributes.GetArrayLength());

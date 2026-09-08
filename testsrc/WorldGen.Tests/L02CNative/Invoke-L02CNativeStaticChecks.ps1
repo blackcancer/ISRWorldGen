@@ -150,8 +150,10 @@ $libraryAssembly = [Reflection.Assembly]::LoadFrom($libraryPath)
 $declaration = [Newtonsoft.Json.JsonConvert]::DeserializeObject(
     (Get-Content -LiteralPath $worldConfigPath -Raw),
     [Vintagestory.API.Common.ModWorldConfiguration])
+$declaredPlaystyles = @($declaration.PlayStyles)
 $declaredAttribute = @($declaration.WorldConfigAttributes)
-if ($declaredAttribute.Count -ne 1 -or
+if ($null -eq $declaration.PlayStyles -or $declaredPlaystyles.Count -ne 0 -or
+    $declaredAttribute.Count -ne 1 -or
     $declaredAttribute[0].Code -ne 'isrworldgenProfileId' -or
     $declaredAttribute[0].DataType -ne [Vintagestory.API.Common.EnumDataType]::String -or
     $declaredAttribute[0].TypedDefault -ne '' -or
