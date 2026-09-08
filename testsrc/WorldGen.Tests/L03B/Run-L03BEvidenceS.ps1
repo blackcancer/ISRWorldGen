@@ -91,24 +91,36 @@ function Write-SealedManifest {
         [string]$Tree,
         [string]$FixturesBlob,
         [string]$TestAssemblyHash,
-        [string]$CoreAssemblyHash)
-    $artifactRelativePaths = @(
-        'blind/T03-06-S-manifest.json',
-        'sealed/T03-05-06-S.json',
-        'sealed/T03-05-06-S.trx',
-        'sealed/T03-06-S-progress.json',
-        'sealed/T03-06-S-review-key.json')
-    $artifacts = @($artifactRelativePaths | Sort-Object | ForEach-Object {
-        $artifactPath = Join-Path $StagingPath $_
-        if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) { throw "Required sealed evidence artifact is absent: $_" }
-        [ordered]@{ path = $_; sha256 = Get-EvidenceSha256 -Path $artifactPath }
-    })
+        [string]$CoreAssemblyHash,
+        [ValidateSet('PASS', 'FAIL')][string]$AutomatedStatus,
+        [ValidateSet('REVIEW_REQUIRED', 'NOT_RUN')][string]$QualitativeReviewStatus,
+        [ValidateSet('REVIEW_REQUIRED', 'FAIL')][string]$OverallStatus)
+    $requiredRelativePaths = if ($AutomatedStatus -eq 'PASS') {
+        @('blind/T03-06-S-manifest.json', 'blind/T03-06-S-attribution-commitments.json',
+          'sealed/T03-05-06-S.json', 'sealed/T03-05-06-S.trx',
+          'sealed/T03-06-S-progress.json', 'sealed/T03-06-S-review-key.json')
+    } else {
+        @('blind/T03-06-S-manifest.json', 'blind/T03-06-S-attribution-commitments.json',
+          'sealed/T03-05-06-S.json')
+    }
+    foreach ($relativePath in $requiredRelativePaths) {
+        if (-not (Test-Path -LiteralPath (Join-Path $StagingPath $relativePath) -PathType Leaf)) {
+            throw "Required sealed evidence artifact is absent: $relativePath"
+        }
+    }
+    $sealedManifestPath = Join-Path $StagingPath 'sealed/T03-05-06-S-manifest.json'
+    $artifacts = @(Get-ChildItem -LiteralPath $StagingPath -Recurse -File | Where-Object {
+        $_.FullName -ne $sealedManifestPath
+    } | ForEach-Object {
+        $relativePath = [IO.Path]::GetRelativePath($StagingPath, $_.FullName).Replace('\', '/')
+        [ordered]@{ path = $relativePath; sha256 = Get-EvidenceSha256 -Path $_.FullName }
+    } | Sort-Object { $_.path })
     $payload = [ordered]@{
         schemaVersion = 1
         requirementIds = @('R03-05', 'R03-06')
-        automatedStatus = 'PASS'
-        qualitativeReviewStatus = 'REVIEW_REQUIRED'
-        overallStatus = 'REVIEW_REQUIRED'
+        automatedStatus = $AutomatedStatus
+        qualitativeReviewStatus = $QualitativeReviewStatus
+        overallStatus = $OverallStatus
         commit = $Head
         tree = $Tree
         fixturesBlob = $FixturesBlob
@@ -123,7 +135,40 @@ function Write-SealedManifest {
     foreach ($entry in $payload.GetEnumerator()) { $manifest[$entry.Key] = $entry.Value }
     $manifest.bundleSignature = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($canonicalBytes)).ToLowerInvariant()
     $manifestBytes = [Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 8))
-    Write-EvidenceAtomicBytes -Path (Join-Path $StagingPath 'sealed/T03-05-06-S-manifest.json') -Content $manifestBytes
+    Write-EvidenceAtomicBytes -Path $sealedManifestPath -Content $manifestBytes
+}
+function Publish-EvidenceFailure {
+    param(
+        [string]$StagingPath,
+        [string]$FailureTerminalPath,
+        [string]$TrxStagingPath,
+        [string]$TrxName,
+        [string]$Head,
+        [string]$Tree,
+        [string]$FixturesBlob,
+        [string]$TestAssemblyHash,
+        [string]$CoreAssemblyHash)
+    if (-not (Test-Path -LiteralPath $StagingPath -PathType Container)) { return $false }
+    if (Test-Path -LiteralPath $FailureTerminalPath) { throw 'Evidence failure terminal directory already exists.' }
+    $trxSource = Join-Path $TrxStagingPath $TrxName
+    if (Test-Path -LiteralPath $trxSource -PathType Leaf) {
+        $sealedPath = Join-Path $StagingPath 'sealed'
+        [void][IO.Directory]::CreateDirectory($sealedPath)
+        Move-Item -LiteralPath $trxSource -Destination (Join-Path $sealedPath $TrxName) -ErrorAction Stop
+    }
+    $failureReceipt = Join-Path $StagingPath 'sealed/T03-06-S-failure-attribution.json'
+    if (Test-Path -LiteralPath $failureReceipt -PathType Leaf) {
+        $commitments = Join-Path $StagingPath 'blind/T03-06-S-attribution-commitments.json'
+        if (-not (Test-Path -LiteralPath $commitments -PathType Leaf)) {
+            throw 'Selective failure attribution cannot be published without its committed blind bundle.'
+        }
+    }
+    Write-SealedManifest -StagingPath $StagingPath -Head $Head -Tree $Tree -FixturesBlob $FixturesBlob `
+        -TestAssemblyHash $TestAssemblyHash -CoreAssemblyHash $CoreAssemblyHash `
+        -AutomatedStatus FAIL -QualitativeReviewStatus NOT_RUN -OverallStatus FAIL
+    [void](Assert-Provenance $Head $Tree)
+    Move-Item -LiteralPath $StagingPath -Destination $FailureTerminalPath -ErrorAction Stop
+    return $true
 }
 
 [void][IO.Directory]::CreateDirectory($localRoot)
@@ -143,16 +188,24 @@ try {
     if ($PreflightOnly) { [void](Assert-Provenance $head $tree); return }
     $terminalPath = Join-Path $localRoot "evidence-s-terminal-$head"; if (Test-Path -LiteralPath $terminalPath) { throw 'Evidence terminal directory already exists.' }
     $stagingName = "evidence-s-staging-$head-$([guid]::NewGuid().ToString('N'))"; $stagingPath = Join-Path $localRoot $stagingName
+    $failureTerminalPath = Join-Path $localRoot "evidence-s-failure-$head-$($stagingName.Substring($stagingName.Length - 32))"
     $trxStagingPath = Join-Path $localRoot "$stagingName-trx"
     $trxName = 'T03-05-06-S.trx'
     $nonceBytes = [byte[]]::new(32); [Security.Cryptography.RandomNumberGenerator]::Fill($nonceBytes); $nonce = [Convert]::ToHexString($nonceBytes).ToLowerInvariant()
+    $terminalPublished = $false
     try {
         $env:ISR_L03B_EVIDENCE_COMMIT = $head; $env:ISR_L03B_EVIDENCE_TREE = $tree; $env:ISR_L03B_EVIDENCE_FIXTURES_BLOB = $fixturesBlob; $env:ISR_L03B_EVIDENCE_NONCE = $nonce; $env:ISR_L03B_EVIDENCE_CONFIGURATION = 'Release'; $env:ISR_L03B_EVIDENCE_RUN = $stagingName
         $env:ISR_L03B_EVIDENCE_TEST_ASSEMBLY_SHA256 = Get-EvidenceSha256 -Path $testAssembly; $env:ISR_L03B_EVIDENCE_CORE_ASSEMBLY_SHA256 = Get-EvidenceSha256 -Path $coreAssembly
         $evidenceFilter = 'FullyQualifiedName=ISRWorldGen.Tests.L03B.EvidenceArtifactTests.T0305AndT0306PublishAtomicBlindReviewEvidence'
         $testArguments = @('test', (Join-Path $root 'testsrc\WorldGen.Tests\WorldGen.Tests.csproj'), '--configuration', 'Release', '--no-build', '--no-restore', '--filter', $evidenceFilter, '--logger', "trx;LogFileName=$trxName", '--results-directory', $trxStagingPath, '/p:VintageStoryPath=D:\Jeux\Vintagestory')
         $test = Invoke-EvidenceProcess -FileName dotnet -Arguments $testArguments -TimeoutSeconds 3600 -Secrets @($nonce)
-        if ($test.ExitCode -ne 0) { throw "Evidence test failed: $(Format-EvidenceDiagnostic -Result $test -Secrets @($nonce))" }
+        if ($test.ExitCode -ne 0) {
+            $diagnostic = Format-EvidenceDiagnostic -Result $test -Secrets @($nonce)
+            $terminalPublished = Publish-EvidenceFailure -StagingPath $stagingPath -FailureTerminalPath $failureTerminalPath `
+                -TrxStagingPath $trxStagingPath -TrxName $trxName -Head $head -Tree $tree -FixturesBlob $fixturesBlob `
+                -TestAssemblyHash $env:ISR_L03B_EVIDENCE_TEST_ASSEMBLY_SHA256 -CoreAssemblyHash $env:ISR_L03B_EVIDENCE_CORE_ASSEMBLY_SHA256
+            throw "Evidence test failed; the sealed failure terminal is $failureTerminalPath. $diagnostic"
+        }
         $trxSource = Join-Path $trxStagingPath $trxName
         if (-not (Test-Path -LiteralPath $trxSource -PathType Leaf)) { throw 'Evidence test completed without the required TRX.' }
         [xml]$trx = Get-Content -LiteralPath $trxSource -Raw
@@ -160,9 +213,19 @@ try {
         if ($null -eq $counters -or [int]$counters.total -ne 1 -or [int]$counters.executed -ne 1 -or [int]$counters.passed -ne 1 -or [int]$counters.failed -ne 0) { throw 'Evidence TRX must contain exactly one executed and passing evidence test.' }
         $trxDestination = Join-Path $stagingPath "sealed\$trxName"
         Move-Item -LiteralPath $trxSource -Destination $trxDestination -ErrorAction Stop
-        Write-SealedManifest -StagingPath $stagingPath -Head $head -Tree $tree -FixturesBlob $fixturesBlob -TestAssemblyHash $env:ISR_L03B_EVIDENCE_TEST_ASSEMBLY_SHA256 -CoreAssemblyHash $env:ISR_L03B_EVIDENCE_CORE_ASSEMBLY_SHA256
+        Write-SealedManifest -StagingPath $stagingPath -Head $head -Tree $tree -FixturesBlob $fixturesBlob `
+            -TestAssemblyHash $env:ISR_L03B_EVIDENCE_TEST_ASSEMBLY_SHA256 -CoreAssemblyHash $env:ISR_L03B_EVIDENCE_CORE_ASSEMBLY_SHA256 `
+            -AutomatedStatus PASS -QualitativeReviewStatus REVIEW_REQUIRED -OverallStatus REVIEW_REQUIRED
         [void](Assert-Provenance $head $tree)
         Move-Item -LiteralPath $stagingPath -Destination $terminalPath -ErrorAction Stop
+        $terminalPublished = $true
+    } catch {
+        if (-not $terminalPublished -and (Test-Path -LiteralPath $stagingPath -PathType Container)) {
+            $terminalPublished = Publish-EvidenceFailure -StagingPath $stagingPath -FailureTerminalPath $failureTerminalPath `
+                -TrxStagingPath $trxStagingPath -TrxName $trxName -Head $head -Tree $tree -FixturesBlob $fixturesBlob `
+                -TestAssemblyHash $env:ISR_L03B_EVIDENCE_TEST_ASSEMBLY_SHA256 -CoreAssemblyHash $env:ISR_L03B_EVIDENCE_CORE_ASSEMBLY_SHA256
+        }
+        throw
     } finally {
         foreach ($name in @('ISR_L03B_EVIDENCE_COMMIT', 'ISR_L03B_EVIDENCE_TREE', 'ISR_L03B_EVIDENCE_FIXTURES_BLOB', 'ISR_L03B_EVIDENCE_NONCE', 'ISR_L03B_EVIDENCE_CONFIGURATION', 'ISR_L03B_EVIDENCE_RUN', 'ISR_L03B_EVIDENCE_TEST_ASSEMBLY_SHA256', 'ISR_L03B_EVIDENCE_CORE_ASSEMBLY_SHA256')) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
         if ($null -ne $nonceBytes) { [Security.Cryptography.CryptographicOperations]::ZeroMemory($nonceBytes) }

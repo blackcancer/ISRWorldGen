@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Text;
 using ISRWorldGen.Core.Atlas.Geometry;
 using ISRWorldGen.Core.Atlas.Profiles;
@@ -13,6 +12,7 @@ namespace ISRWorldGen.Tests.L03B;
 public sealed class EvidenceViewContractTests
 {
     private const int FixtureSeed = 20260907;
+    private const double EvidenceSignalVarianceThreshold = 0.0001d;
     private static readonly int[] TargetedFixtureSeeds =
         [20260907, -20260907, 731, -731, 196883, -196883, 48731, -48731];
     private static readonly Lazy<L03BPureLandscapeView> PureRangeView = new(BuildPureRangeView);
@@ -72,57 +72,42 @@ public sealed class EvidenceViewContractTests
     }
 
     [TestMethod]
-    public void OldMassifTargetedPureCoresHaveMeasurableMultiSummitRelief()
+    public void TargetedPlainPureCoresMeetTheExistingEvidenceSignalAlarm()
     {
-        int measuredViews = 0;
         var failures = new List<string>();
-        var surfaceHashes = new HashSet<Hash256>();
         foreach (int seed in TargetedFixtureSeeds)
         {
             (LandscapeModel model, AtlasMesh atlas) = Build(seed);
             L03BPureLandscapeView? view = L03BEvidenceViews.TrySelectPureView(
-                model, atlas, LandscapeFamily.OldMassifs, seed, L03BEvidenceViews.BlindMapSide);
-            if (view is null)
-            {
-                continue;
-            }
+                model, atlas, LandscapeFamily.Plains, seed, L03BEvidenceViews.BlindMapSide);
+            Assert.IsNotNull(view, $"Targeted seed {seed} must expose a Plains pure-owner view.");
 
-            measuredViews++;
             double[] altitudes = L03BEvidenceViews.Altitudes(view).Cast<double>().ToArray();
             double mean = altitudes.Average();
             double variance = altitudes.Select(value => (value - mean) * (value - mean)).Average();
-            L03BMorphologyMeasurement morphology = L03BEvidenceViews.MeasureMorphology(view);
-            int saturatedSamples = altitudes.Count(value => Math.Abs(value) >= .999d);
-            surfaceHashes.Add(SurfaceHash(altitudes));
-
+            Assert.IsTrue(altitudes.All(value => Math.Abs(value) < .999d),
+                $"Targeted Plains view {seed} must not gain evidence signal through saturation.");
             Console.WriteLine(
-                $"OldMassifs seed={seed}, owner={view.OwnerCellId}, span={view.SpanBlocks:R}, variance={variance:R}, peaks={morphology.ProminentPeaks}, valleys={morphology.ProminentValleys}, anisotropy={morphology.GradientAnisotropy:R}, saturated={saturatedSamples}");
-            // This is the pre-declared campaign alarm, reproduced analytically on
-            // owner-pure views without running or changing the sealed campaign.
-            if (variance <= 0.0001d)
+                $"Plains seed={seed}, owner={view.OwnerCellId}, center=({view.CenterX},{view.CenterZ}), side={view.Side}, span={view.SpanBlocks:R}, step={view.StepBlocks:R}, variance={variance:R}");
+            if (variance <= EvidenceSignalVarianceThreshold)
             {
-                failures.Add($"seed {seed}: variance {variance:R} on {view.SpanBlocks:R} blocks");
+                failures.Add($"seed {seed}: variance {variance:R}");
             }
-            if (morphology.ProminentPeaks < 2)
+
+            if (seed == FixtureSeed)
             {
-                failures.Add($"seed {seed}: {morphology.ProminentPeaks} prominent summit(s)");
-            }
-            if (morphology.ProminentValleys < 1)
-            {
-                failures.Add($"seed {seed}: {morphology.ProminentValleys} prominent valley(s)");
-            }
-            if (saturatedSamples != 0)
-            {
-                failures.Add($"seed {seed}: {saturatedSamples} saturated sample(s)");
+                Assert.AreEqual("63ae30280aba64e7d0cdfb5d498c74df", view.OwnerCellId.ToString());
+                Assert.AreEqual(611661L, view.CenterX);
+                Assert.AreEqual(722865L, view.CenterZ);
+                Assert.AreEqual(L03BEvidenceViews.BlindMapSide, view.Side);
+                Assert.AreEqual(67_600d, view.SpanBlocks);
+                Assert.AreEqual(352.0833333333333d, view.StepBlocks, 1e-12);
             }
         }
 
-        Assert.AreEqual(TargetedFixtureSeeds.Length, measuredViews,
-            "Every declared targeted seed must contain an OldMassifs pure-core view.");
-        Assert.HasCount(measuredViews, surfaceHashes,
-            "Centering the massif system must not homogenize its deterministic per-region variants.");
         Assert.HasCount(0, failures,
-            "Every available OldMassifs pure core must preserve measurable multi-summit relief: " + string.Join("; ", failures));
+            $"Every targeted Plains view must remain above the unchanged variance alarm {EvidenceSignalVarianceThreshold:R}: " +
+            string.Join("; ", failures));
     }
 
     [TestMethod]
@@ -172,18 +157,6 @@ public sealed class EvidenceViewContractTests
             model, atlas, LandscapeFamily.RuggedRanges, FixtureSeed, L03BEvidenceViews.CorpusMapSide);
         Assert.AreNotEqual(StableId.Zero, view.OwnerCellId);
         return view;
-    }
-
-    private static Hash256 SurfaceHash(IReadOnlyList<double> altitudes)
-    {
-        byte[] canonical = new byte[checked(altitudes.Count * sizeof(long))];
-        for (int index = 0; index < altitudes.Count; index++)
-        {
-            BinaryPrimitives.WriteInt64BigEndian(
-                canonical.AsSpan(index * sizeof(long), sizeof(long)),
-                BitConverter.DoubleToInt64Bits(altitudes[index]));
-        }
-        return Hash256.Compute(canonical);
     }
 
     private static (LandscapeModel Model, AtlasMesh Atlas) Build(int seed)

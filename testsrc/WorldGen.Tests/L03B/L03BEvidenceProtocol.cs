@@ -14,6 +14,8 @@ internal static class L03BEvidenceProtocol
 
     internal const int ManifestSchemaVersion = 1;
     internal const string BlindSignatureScheme = "sha256-canonical-json-v1";
+    internal const string FailureAttributionScheme = "sha256-run-bound-selective-opening-v1";
+    private static readonly string[] ExpectedNeutralCodes = ["S01", "S02", "S03", "S04", "S05", "S06"];
 
     private static readonly JsonSerializerOptions CanonicalJsonOptions = new()
     {
@@ -149,6 +151,108 @@ internal static class L03BEvidenceProtocol
         return JsonSerializer.SerializeToUtf8Bytes(manifest, ManifestJsonOptions);
     }
 
+    internal static byte[] CreateAttributionCommitments(
+        string runId,
+        string commit,
+        string tree,
+        string fixturesBlob,
+        string configuration,
+        string testAssemblyHash,
+        string coreAssemblyHash,
+        IReadOnlyList<(string Code, LandscapeFamily Family)> blindOrder,
+        string masterNonce)
+    {
+        AttributionBinding binding = ValidateAttributionInputs(
+            runId, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash, blindOrder, masterNonce);
+        AttributionCommitmentEntry[] entries = blindOrder
+            .Select(item => new AttributionCommitmentEntry(
+                item.Code,
+                Commitment(binding, item.Code, item.Family, DeriveOpening(binding, item.Code, masterNonce))))
+            .OrderBy(item => item.Code, StringComparer.Ordinal)
+            .ToArray();
+        var payload = new AttributionCommitmentPayload(
+            1,
+            ["R03-06"],
+            FailureAttributionScheme,
+            binding,
+            entries);
+        byte[] canonicalPayload = JsonSerializer.SerializeToUtf8Bytes(payload, CanonicalJsonOptions);
+        var document = new AttributionCommitments(
+            payload.SchemaVersion,
+            payload.RequirementIds,
+            payload.Scheme,
+            payload.Binding,
+            payload.Entries,
+            L03BTestSupport.Sha256(canonicalPayload));
+        return JsonSerializer.SerializeToUtf8Bytes(document, ManifestJsonOptions);
+    }
+
+    internal static byte[] CreateFailureAttribution(
+        byte[] commitmentsBytes,
+        string code,
+        LandscapeFamily family,
+        string masterNonce)
+    {
+        AttributionCommitments commitments = ParseAndValidateCommitments(commitmentsBytes);
+        ValidateNonce(masterNonce);
+        AttributionCommitmentEntry entry = commitments.Entries.SingleOrDefault(item => item.Code == code) ??
+            throw new InvalidOperationException($"No attribution commitment exists for neutral code {code}.");
+        string opening = DeriveOpening(commitments.Binding, code, masterNonce);
+        string expected = Commitment(commitments.Binding, code, family, opening);
+        if (!FixedTimeEquals(entry.CommitmentSha256, expected))
+        {
+            throw new InvalidOperationException("Selective failure attribution does not open the committed neutral code.");
+        }
+
+        var receipt = new FailureAttribution(
+            1,
+            ["R03-06"],
+            "FAIL",
+            FailureAttributionScheme,
+            commitments.Binding,
+            L03BTestSupport.Sha256(commitmentsBytes),
+            code,
+            family.ToString(),
+            opening,
+            "This receipt opens only the failing neutral code. Verify it against the exact committed bundle; do not substitute a review key from another run.");
+        byte[] receiptBytes = JsonSerializer.SerializeToUtf8Bytes(receipt, ManifestJsonOptions);
+        if (VerifyFailureAttribution(commitmentsBytes, receiptBytes) != family)
+        {
+            throw new InvalidOperationException("Selective failure attribution failed its self-verification.");
+        }
+        return receiptBytes;
+    }
+
+    internal static LandscapeFamily VerifyFailureAttribution(byte[] commitmentsBytes, byte[] receiptBytes)
+    {
+        ArgumentNullException.ThrowIfNull(commitmentsBytes);
+        ArgumentNullException.ThrowIfNull(receiptBytes);
+        AttributionCommitments commitments = ParseAndValidateCommitments(commitmentsBytes);
+        FailureAttribution receipt = JsonSerializer.Deserialize<FailureAttribution>(receiptBytes, ManifestJsonOptions) ??
+            throw new InvalidDataException("Failure attribution receipt is empty.");
+        if (receipt.RequirementIds is null || receipt.Binding is null || receipt.Code is null ||
+            receipt.RevealedFamily is null || receipt.SchemaVersion != 1 ||
+            !receipt.RequirementIds.SequenceEqual(["R03-06"], StringComparer.Ordinal) ||
+            receipt.Status != "FAIL" || receipt.Scheme != FailureAttributionScheme ||
+            receipt.Binding != commitments.Binding ||
+            !FixedTimeEquals(receipt.CommitmentBundleSha256, L03BTestSupport.Sha256(commitmentsBytes)) ||
+            !ExpectedNeutralCodes.Contains(receipt.Code, StringComparer.Ordinal) ||
+            !Enum.TryParse(receipt.RevealedFamily, ignoreCase: false, out LandscapeFamily family) || !Enum.IsDefined(family) ||
+            !IsLowerHex(receipt.Opening, 64))
+        {
+            throw new InvalidDataException("Failure attribution receipt is malformed or belongs to another evidence run.");
+        }
+
+        AttributionCommitmentEntry entry = commitments.Entries.SingleOrDefault(item => item.Code == receipt.Code) ??
+            throw new InvalidDataException("Failure attribution code is absent from the committed bundle.");
+        string expected = Commitment(commitments.Binding, receipt.Code, family, receipt.Opening);
+        if (!FixedTimeEquals(entry.CommitmentSha256, expected))
+        {
+            throw new InvalidDataException("Failure attribution receipt does not open its committed neutral code.");
+        }
+        return family;
+    }
+
     internal static byte[] CreateBlindReviewForm(IReadOnlyList<string> codes)
     {
         ArgumentNullException.ThrowIfNull(codes);
@@ -179,6 +283,127 @@ internal static class L03BEvidenceProtocol
                 identifiedCorrectlyAfterReveal = (bool?)null,
             }),
         }, ManifestJsonOptions);
+    }
+
+    private static AttributionBinding ValidateAttributionInputs(
+        string runId,
+        string commit,
+        string tree,
+        string fixturesBlob,
+        string configuration,
+        string testAssemblyHash,
+        string coreAssemblyHash,
+        IReadOnlyList<(string Code, LandscapeFamily Family)> blindOrder,
+        string masterNonce)
+    {
+        ArgumentNullException.ThrowIfNull(blindOrder);
+        var binding = new AttributionBinding(runId, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash);
+        if (!IsValidBinding(binding) || blindOrder.Count != Enum.GetValues<LandscapeFamily>().Length ||
+            blindOrder.Select(item => item.Code).Distinct(StringComparer.Ordinal).Count() != blindOrder.Count ||
+            !blindOrder.Select(item => item.Code).Order(StringComparer.Ordinal).SequenceEqual(ExpectedNeutralCodes, StringComparer.Ordinal) ||
+            blindOrder.Select(item => item.Family).Distinct().Count() != blindOrder.Count ||
+            blindOrder.Any(item => !Enum.IsDefined(item.Family)))
+        {
+            throw new ArgumentException("Failure attribution requires one valid neutral code per family and exact run provenance.");
+        }
+        ValidateNonce(masterNonce);
+        return binding;
+    }
+
+    private static AttributionCommitments ParseAndValidateCommitments(byte[] commitmentsBytes)
+    {
+        ArgumentNullException.ThrowIfNull(commitmentsBytes);
+        AttributionCommitments commitments = JsonSerializer.Deserialize<AttributionCommitments>(commitmentsBytes, ManifestJsonOptions) ??
+            throw new InvalidDataException("Attribution commitment bundle is empty.");
+        if (commitments.RequirementIds is null || commitments.Binding is null || commitments.Entries is null ||
+            commitments.SchemaVersion != 1 || !commitments.RequirementIds.SequenceEqual(["R03-06"], StringComparer.Ordinal) ||
+            commitments.Scheme != FailureAttributionScheme || !IsValidBinding(commitments.Binding) ||
+            commitments.Entries.Length != Enum.GetValues<LandscapeFamily>().Length ||
+            commitments.Entries.Select(item => item.Code).Distinct(StringComparer.Ordinal).Count() != commitments.Entries.Length ||
+            !commitments.Entries.Select(item => item.Code).SequenceEqual(ExpectedNeutralCodes, StringComparer.Ordinal) ||
+            commitments.Entries.Any(item => !IsLowerHex(item.CommitmentSha256, 64)))
+        {
+            throw new InvalidDataException("Attribution commitment bundle is malformed.");
+        }
+
+        var payload = new AttributionCommitmentPayload(
+            commitments.SchemaVersion,
+            commitments.RequirementIds,
+            commitments.Scheme,
+            commitments.Binding,
+            commitments.Entries);
+        string expectedSignature = L03BTestSupport.Sha256(JsonSerializer.SerializeToUtf8Bytes(payload, CanonicalJsonOptions));
+        if (!FixedTimeEquals(commitments.BundleSignature, expectedSignature))
+        {
+            throw new InvalidDataException("Attribution commitment bundle signature is invalid.");
+        }
+        return commitments;
+    }
+
+    private static string DeriveOpening(AttributionBinding binding, string code, string masterNonce)
+    {
+        byte[] key = Convert.FromHexString(masterNonce);
+        byte[] context = JsonSerializer.SerializeToUtf8Bytes(
+            new AttributionOpeningContext("ISRW-L03B-FAILURE-OPENING-V1", binding, code), CanonicalJsonOptions);
+        try
+        {
+            using var hmac = new HMACSHA256(key);
+            return Convert.ToHexString(hmac.ComputeHash(context)).ToLowerInvariant();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+            CryptographicOperations.ZeroMemory(context);
+        }
+    }
+
+    private static string Commitment(AttributionBinding binding, string code, LandscapeFamily family, string opening)
+    {
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
+            new AttributionOpening("ISRW-L03B-FAILURE-COMMITMENT-V1", binding, code, family.ToString(), opening),
+            CanonicalJsonOptions);
+        try
+        {
+            return L03BTestSupport.Sha256(payload);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+
+    private static void ValidateNonce(string masterNonce)
+    {
+        if (!IsLowerHex(masterNonce, 64))
+        {
+            throw new ArgumentException("Evidence master nonce must be 32 canonical lower-case bytes.", nameof(masterNonce));
+        }
+    }
+
+    private static bool IsValidBinding(AttributionBinding binding) =>
+        !string.IsNullOrWhiteSpace(binding.RunId) && binding.RunId.Length <= 255 &&
+        binding.RunId.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && !binding.RunId.Contains("..", StringComparison.Ordinal) &&
+        IsLowerHex(binding.Commit, 40) && IsLowerHex(binding.Tree, 40) && IsLowerHex(binding.FixturesBlob, 40) &&
+        binding.Configuration == "Release" && IsLowerHex(binding.TestAssemblySha256, 64) &&
+        IsLowerHex(binding.CoreAssemblySha256, 64);
+
+    private static bool IsLowerHex(string? value, int length) => value is not null && value.Length == length &&
+        value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static bool FixedTimeEquals(string left, string right)
+    {
+        if (!IsLowerHex(left, 64) || !IsLowerHex(right, 64)) return false;
+        byte[] leftBytes = Convert.FromHexString(left);
+        byte[] rightBytes = Convert.FromHexString(right);
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(leftBytes);
+            CryptographicOperations.ZeroMemory(rightBytes);
+        }
     }
 
     private static void TerminateAndDrain(Process process, Task stdout, Task stderr)
@@ -249,4 +474,51 @@ internal static class L03BEvidenceProtocol
         string SignatureScheme,
         L03BBlindArtifact[] Artifacts,
         string BundleSignature);
+
+    private sealed record AttributionBinding(
+        string RunId,
+        string Commit,
+        string Tree,
+        string FixturesBlob,
+        string Configuration,
+        string TestAssemblySha256,
+        string CoreAssemblySha256);
+
+    private sealed record AttributionCommitmentEntry(string Code, string CommitmentSha256);
+
+    private sealed record AttributionCommitmentPayload(
+        int SchemaVersion,
+        string[] RequirementIds,
+        string Scheme,
+        AttributionBinding Binding,
+        AttributionCommitmentEntry[] Entries);
+
+    private sealed record AttributionCommitments(
+        int SchemaVersion,
+        string[] RequirementIds,
+        string Scheme,
+        AttributionBinding Binding,
+        AttributionCommitmentEntry[] Entries,
+        string BundleSignature);
+
+    private sealed record AttributionOpeningContext(string Domain, AttributionBinding Binding, string Code);
+
+    private sealed record AttributionOpening(
+        string Domain,
+        AttributionBinding Binding,
+        string Code,
+        string Family,
+        string Opening);
+
+    private sealed record FailureAttribution(
+        int SchemaVersion,
+        string[] RequirementIds,
+        string Status,
+        string Scheme,
+        AttributionBinding Binding,
+        string CommitmentBundleSha256,
+        string Code,
+        string RevealedFamily,
+        string Opening,
+        string VerificationInstruction);
 }

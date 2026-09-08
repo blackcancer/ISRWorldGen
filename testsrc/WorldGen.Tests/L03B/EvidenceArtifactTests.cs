@@ -55,8 +55,14 @@ public sealed class EvidenceArtifactTests
         Directory.CreateDirectory(Path.Combine(output, "sealed"));
         string reportPath = Path.Combine(output, "sealed", "T03-05-06-S.json");
         string manifestPath = Path.Combine(output, "blind", "T03-06-S-manifest.json");
+        string commitmentsPath = Path.Combine(output, "blind", "T03-06-S-attribution-commitments.json");
+        byte[] commitmentsBytes = L03BEvidenceProtocol.CreateAttributionCommitments(
+            runName, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash, blindOrder, nonce);
+        WriteAtomic(commitmentsPath, commitmentsBytes);
+        L03BBlindArtifact[] initialBlindArtifacts =
+            [new(RelativeArtifactPath(output, commitmentsPath), L03BTestSupport.Sha256(commitmentsBytes))];
         WriteBlindManifest(manifestPath, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash,
-            automatedStatus: "RUNNING", qualitativeReviewStatus: "REVIEW_REQUIRED", overallStatus: "RUNNING", Array.Empty<L03BBlindArtifact>());
+            automatedStatus: "RUNNING", qualitativeReviewStatus: "REVIEW_REQUIRED", overallStatus: "RUNNING", initialBlindArtifacts);
         WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1,
@@ -71,10 +77,15 @@ public sealed class EvidenceArtifactTests
 
         try
         {
-            RunCampaign(output, repository, reportPath, manifestPath, commit, tree, configuration, nonce, blindOrder, testAssemblyHash, coreAssemblyHash, fixturesBlob);
+            RunCampaign(output, repository, reportPath, manifestPath, commit, tree, configuration, nonce, blindOrder,
+                testAssemblyHash, coreAssemblyHash, fixturesBlob, commitmentsBytes, initialBlindArtifacts);
         }
         catch (Exception exception)
         {
+            string failureAttributionPath = Path.Combine(output, "sealed", "T03-06-S-failure-attribution.json");
+            string? failureAttributionSha256 = File.Exists(failureAttributionPath)
+                ? L03BTestSupport.Sha256(File.ReadAllBytes(failureAttributionPath))
+                : null;
             WriteAtomic(reportPath, JsonSerializer.SerializeToUtf8Bytes(new
             {
                 schemaVersion = 1,
@@ -86,9 +97,15 @@ public sealed class EvidenceArtifactTests
                 tree,
                 configuration,
                 failure = new { type = exception.GetType().FullName, exception.Message },
+                selectiveFailureAttribution = failureAttributionSha256 is null ? null : new
+                {
+                    path = RelativeArtifactPath(output, failureAttributionPath),
+                    sha256 = failureAttributionSha256,
+                    protocol = "run-bound selective opening of one neutral code; no complete review key",
+                },
             }, JsonOptions));
             WriteBlindManifest(manifestPath, commit, tree, fixturesBlob, configuration, testAssemblyHash, coreAssemblyHash,
-                automatedStatus: "FAIL", qualitativeReviewStatus: "NOT_RUN", overallStatus: "FAIL", Array.Empty<L03BBlindArtifact>());
+                automatedStatus: "FAIL", qualitativeReviewStatus: "NOT_RUN", overallStatus: "FAIL", initialBlindArtifacts);
             throw;
         }
     }
@@ -105,7 +122,9 @@ public sealed class EvidenceArtifactTests
         IReadOnlyList<(string Code, LandscapeFamily Family)> blindOrder,
         string testAssemblyHash,
         string coreAssemblyHash,
-        string fixturesBlob)
+        string fixturesBlob,
+        byte[] commitmentsBytes,
+        IReadOnlyList<L03BBlindArtifact> initialBlindArtifacts)
     {
         VerticalMetric[] verticalMetrics = new[] { "laboratory", "balanced", "vast-expeditions" }
             .Select(VerticalMetricFor)
@@ -129,69 +148,88 @@ public sealed class EvidenceArtifactTests
         Assert.AreEqual("geology.landscapes.vertical-above-sea", impossibleAbove.Error.Stage);
 
         var fixtureMetrics = new List<BlindFixtureMetric>();
-        var blindArtifacts = new List<L03BBlindArtifact>();
+        var blindArtifacts = new List<L03BBlindArtifact>(initialBlindArtifacts);
         var sealedFixtures = new List<object>();
         var profileRows = new StringBuilder("code,direction,index,offset-x-blocks,offset-z-blocks,normalized-height\n");
         var blindViews = new List<object>();
         var sampledByCode = new Dictionary<string, double[,]>(StringComparer.Ordinal);
-        foreach ((string code, LandscapeFamily family) in blindOrder)
+        string? activeCode = null;
+        LandscapeFamily? activeFamily = null;
+        try
         {
-            LandscapeFamilyProfile profile = LandscapeFamilyCatalog.Get(family);
-            FixtureSample fixture = SampleFixture(family, profile);
-            double[,] samples = L03BEvidenceViews.Altitudes(fixture.View);
-            sampledByCode.Add(code, samples);
-            BlindFixtureMetric metric = Measure(code, fixture.View, samples);
-            fixtureMetrics.Add(metric);
-            Assert.IsGreaterThan(MinimumTargetVariance, metric.Variance, code);
-            Assert.IsTrue(double.IsFinite(metric.Mean) && double.IsFinite(metric.Variance) &&
-                double.IsFinite(metric.MeanAbsoluteSlope) && double.IsFinite(metric.RugosityLag1) &&
-                double.IsFinite(metric.RugosityLag4) && double.IsFinite(metric.RugosityLag12) &&
-                double.IsFinite(metric.ResidualPlanEnergy) && metric.Jumps.IsFinite &&
-                double.IsFinite(metric.DirectionalBalance) && metric.DirectionalBalance is >= 0 and <= 1 &&
-                metric.EightNeighborExtremaAtContrastFraction >= 0 && metric.SaturatedPixelCount >= 0,
-                $"Blind metrics must be finite and bounded where defined for {code}.");
-
-            byte[] bitmap = RenderBitmap(fixture.View);
-            string mapPath = Path.Combine(output, "blind", $"T03-06-{code}.bmp");
-            WriteAtomic(mapPath, bitmap);
-            blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, mapPath), L03BTestSupport.Sha256(bitmap)));
-            byte[] transitionMask = L03BEvidenceViews.RenderTransitionMask(fixture.View);
-            string maskPath = Path.Combine(output, "blind", $"T03-06-{code}-transition-mask.pgm");
-            WriteAtomic(maskPath, transitionMask);
-            blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, maskPath), L03BTestSupport.Sha256(transitionMask)));
-            blindViews.Add(new
+            foreach ((string code, LandscapeFamily family) in blindOrder)
             {
-                code,
-                widthPixels = fixture.View.Side,
-                heightPixels = fixture.View.Side,
-                fixture.View.SpanBlocks,
-                nominalStepBlocks = fixture.View.StepBlocks,
-                xOffsetsBlocks = fixture.View.Pixels.Where(pixel => pixel.Row == fixture.View.Side / 2)
-                    .OrderBy(pixel => pixel.Column).Select(pixel => pixel.X - fixture.View.CenterX),
-                zOffsetsBlocks = fixture.View.Pixels.Where(pixel => pixel.Column == fixture.View.Side / 2)
-                    .OrderBy(pixel => pixel.Row).Select(pixel => pixel.Z - fixture.View.CenterZ),
-                transitionMask = new
+                activeCode = code;
+                activeFamily = family;
+                LandscapeFamilyProfile profile = LandscapeFamilyCatalog.Get(family);
+                FixtureSample fixture = SampleFixture(family, profile);
+                double[,] samples = L03BEvidenceViews.Altitudes(fixture.View);
+                sampledByCode.Add(code, samples);
+                BlindFixtureMetric metric = Measure(code, fixture.View, samples);
+                fixtureMetrics.Add(metric);
+                Assert.IsGreaterThan(MinimumTargetVariance, metric.Variance, code);
+                Assert.IsTrue(double.IsFinite(metric.Mean) && double.IsFinite(metric.Variance) &&
+                    double.IsFinite(metric.MeanAbsoluteSlope) && double.IsFinite(metric.RugosityLag1) &&
+                    double.IsFinite(metric.RugosityLag4) && double.IsFinite(metric.RugosityLag12) &&
+                    double.IsFinite(metric.ResidualPlanEnergy) && metric.Jumps.IsFinite &&
+                    double.IsFinite(metric.DirectionalBalance) && metric.DirectionalBalance is >= 0 and <= 1 &&
+                    metric.EightNeighborExtremaAtContrastFraction >= 0 && metric.SaturatedPixelCount >= 0,
+                    $"Blind metrics must be finite and bounded where defined for {code}.");
+
+                byte[] bitmap = RenderBitmap(fixture.View);
+                string mapPath = Path.Combine(output, "blind", $"T03-06-{code}.bmp");
+                WriteAtomic(mapPath, bitmap);
+                blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, mapPath), L03BTestSupport.Sha256(bitmap)));
+                byte[] transitionMask = L03BEvidenceViews.RenderTransitionMask(fixture.View);
+                string maskPath = Path.Combine(output, "blind", $"T03-06-{code}-transition-mask.pgm");
+                WriteAtomic(maskPath, transitionMask);
+                blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, maskPath), L03BTestSupport.Sha256(transitionMask)));
+                blindViews.Add(new
                 {
-                    path = RelativeArtifactPath(output, maskPath),
-                    sha256 = L03BTestSupport.Sha256(transitionMask),
-                    encoding = "PGM P5; 0=owner-pure, 255=transition/foreign contributor",
-                    transitionPixelCount = 0,
-                },
-                purityContract = "every rendered altitude has one owner, IsTransition=false, contributorCount=1, primaryWeight=1, foreignWeight=0, foreignContribution=0",
-            });
-            sealedFixtures.Add(new
-            {
-                code,
-                family = family.ToString(),
-                fixture.Seed,
-                site = fixture.SiteId.ToString(),
-                fixture.View.CenterX,
-                fixture.View.CenterZ,
-                fixture.View.SpanBlocks,
-                fixture.View.StepBlocks,
-            });
+                    code,
+                    widthPixels = fixture.View.Side,
+                    heightPixels = fixture.View.Side,
+                    fixture.View.SpanBlocks,
+                    nominalStepBlocks = fixture.View.StepBlocks,
+                    xOffsetsBlocks = fixture.View.Pixels.Where(pixel => pixel.Row == fixture.View.Side / 2)
+                        .OrderBy(pixel => pixel.Column).Select(pixel => pixel.X - fixture.View.CenterX),
+                    zOffsetsBlocks = fixture.View.Pixels.Where(pixel => pixel.Column == fixture.View.Side / 2)
+                        .OrderBy(pixel => pixel.Row).Select(pixel => pixel.Z - fixture.View.CenterZ),
+                    transitionMask = new
+                    {
+                        path = RelativeArtifactPath(output, maskPath),
+                        sha256 = L03BTestSupport.Sha256(transitionMask),
+                        encoding = "PGM P5; 0=owner-pure, 255=transition/foreign contributor",
+                        transitionPixelCount = 0,
+                    },
+                    purityContract = "every rendered altitude has one owner, IsTransition=false, contributorCount=1, primaryWeight=1, foreignWeight=0, foreignContribution=0",
+                });
+                sealedFixtures.Add(new
+                {
+                    code,
+                    family = family.ToString(),
+                    fixture.Seed,
+                    site = fixture.SiteId.ToString(),
+                    fixture.View.CenterX,
+                    fixture.View.CenterZ,
+                    fixture.View.SpanBlocks,
+                    fixture.View.StepBlocks,
+                });
 
-            AppendProfiles(profileRows, code, fixture.View, samples);
+                AppendProfiles(profileRows, code, fixture.View, samples);
+            }
+            activeCode = null;
+            activeFamily = null;
+        }
+        catch
+        {
+            if (activeCode is not null && activeFamily is LandscapeFamily failedFamily)
+            {
+                byte[] receipt = L03BEvidenceProtocol.CreateFailureAttribution(
+                    commitmentsBytes, activeCode, failedFamily, nonce);
+                WriteAtomic(Path.Combine(output, "sealed", "T03-06-S-failure-attribution.json"), receipt);
+            }
+            throw;
         }
 
         for (int left = 0; left < blindOrder.Count; left++)
@@ -234,9 +272,15 @@ public sealed class EvidenceArtifactTests
         blindArtifacts.Add(new L03BBlindArtifact(RelativeArtifactPath(output, reviewFormPath), L03BTestSupport.Sha256(reviewFormBytes)));
         byte[] keyBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            schemaVersion = 1,
+            schemaVersion = 2,
             instruction = "Do not open until a completed identification+confidence response copied from blind/T03-06-S-review-form.json has been timestamped and hashed.",
+            runId = Path.GetFileName(output),
             nonce,
+            attributionCommitments = new
+            {
+                path = "blind/T03-06-S-attribution-commitments.json",
+                sha256 = L03BTestSupport.Sha256(commitmentsBytes),
+            },
             entries = blindOrder.Select(item => new { item.Code, family = item.Family.ToString() }),
         }, JsonOptions);
         string keyPath = Path.Combine(output, "sealed", "T03-06-S-review-key.json");
@@ -362,6 +406,12 @@ public sealed class EvidenceArtifactTests
                         path = RelativeArtifactPath(output, keyPath),
                         sha256 = L03BTestSupport.Sha256(keyBytes),
                         instruction = "Reviewer must inspect neutral-code artifacts before opening the key.",
+                    },
+                    attributionCommitments = new
+                    {
+                        path = "blind/T03-06-S-attribution-commitments.json",
+                        sha256 = L03BTestSupport.Sha256(commitmentsBytes),
+                        protocol = L03BEvidenceProtocol.FailureAttributionScheme,
                     },
                     fixtureMetrics,
                 },

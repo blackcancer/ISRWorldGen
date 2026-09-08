@@ -1,5 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using ISRWorldGen.Core.Geology.Landscapes;
 
 namespace ISRWorldGen.Tests.L03B;
 
@@ -11,6 +13,17 @@ public sealed class EvidenceProtocolTests
     private const string FixturesBlob = "0123456789abcdef0123456789abcdef01234567";
     private const string TestHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private const string CoreHash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    private const string RunId = "evidence-s-staging-d38bf70b11c08e69fc7251347668ec175f489a74-0123456789abcdef0123456789abcdef";
+    private const string Nonce = "9999999999999999999999999999999999999999999999999999999999999999";
+    private static readonly (string Code, LandscapeFamily Family)[] BlindOrder =
+    [
+        ("S01", LandscapeFamily.RuggedRanges),
+        ("S02", LandscapeFamily.OldMassifs),
+        ("S03", LandscapeFamily.Plateaus),
+        ("S04", LandscapeFamily.SedimentaryBasins),
+        ("S05", LandscapeFamily.Plains),
+        ("S06", LandscapeFamily.VolcanicDomains),
+    ];
 
     [TestMethod]
     public void GitBlobObjectIdUsesTheExactGitBlobFraming()
@@ -103,6 +116,44 @@ public sealed class EvidenceProtocolTests
     }
 
     [TestMethod]
+    public void FailureAttributionOpensOnlyTheFailingNeutralCodeAndIsBoundToItsRun()
+    {
+        byte[] commitments = Commitments(RunId, Nonce);
+        byte[] receipt = L03BEvidenceProtocol.CreateFailureAttribution(
+            commitments, "S05", LandscapeFamily.Plains, Nonce);
+
+        Assert.AreEqual(LandscapeFamily.Plains,
+            L03BEvidenceProtocol.VerifyFailureAttribution(commitments, receipt));
+        string commitmentsText = Encoding.UTF8.GetString(commitments);
+        string receiptText = Encoding.UTF8.GetString(receipt);
+        Assert.IsFalse(commitmentsText.Contains(Nonce, StringComparison.Ordinal));
+        Assert.IsFalse(Enum.GetNames<LandscapeFamily>().Any(name => commitmentsText.Contains(name, StringComparison.Ordinal)));
+        Assert.IsFalse(receiptText.Contains(Nonce, StringComparison.Ordinal));
+        StringAssert.Contains(receiptText, "\"code\": \"S05\"");
+        StringAssert.Contains(receiptText, "\"revealedFamily\": \"Plains\"");
+        Assert.IsFalse(Enum.GetNames<LandscapeFamily>()
+            .Where(name => name != nameof(LandscapeFamily.Plains))
+            .Any(name => receiptText.Contains(name, StringComparison.Ordinal)));
+
+        byte[] anotherRun = Commitments(RunId + "-other", Nonce);
+        Assert.ThrowsExactly<InvalidDataException>(() =>
+            L03BEvidenceProtocol.VerifyFailureAttribution(anotherRun, receipt));
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            L03BEvidenceProtocol.CreateFailureAttribution(commitments, "S05", LandscapeFamily.OldMassifs, Nonce));
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            L03BEvidenceProtocol.CreateFailureAttribution(commitments, "S05", LandscapeFamily.Plains, new string('a', 64)));
+
+        JsonObject changedFamily = JsonNode.Parse(receipt)!.AsObject();
+        changedFamily["revealedFamily"] = nameof(LandscapeFamily.OldMassifs);
+        Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceProtocol.VerifyFailureAttribution(
+            commitments, JsonSerializer.SerializeToUtf8Bytes(changedFamily)));
+        JsonObject changedOpening = JsonNode.Parse(receipt)!.AsObject();
+        changedOpening["opening"] = new string('b', 64);
+        Assert.ThrowsExactly<InvalidDataException>(() => L03BEvidenceProtocol.VerifyFailureAttribution(
+            commitments, JsonSerializer.SerializeToUtf8Bytes(changedOpening)));
+    }
+
+    [TestMethod]
     public void RunnerTextKeepsTheExclusivePreflightAndSealedTrxProtocol()
     {
         string script = File.ReadAllText(Path.Combine(L03BTestSupport.FindRepositoryRoot(),
@@ -117,9 +168,24 @@ public sealed class EvidenceProtocolTests
         StringAssert.Contains(script, "FullyQualifiedName=ISRWorldGen.Tests.L03B.EvidenceArtifactTests.T0305AndT0306PublishAtomicBlindReviewEvidence");
         StringAssert.Contains(script, "--logger', \"trx;LogFileName=$trxName\"");
         StringAssert.Contains(script, "Write-SealedManifest");
+        StringAssert.Contains(script, "Publish-EvidenceFailure");
+        StringAssert.Contains(script, "evidence-s-failure-$head-");
+        StringAssert.Contains(script, "T03-06-S-failure-attribution.json");
         StringAssert.Contains(script, "[IO.FileOptions]::DeleteOnClose");
         Assert.IsFalse(script.Contains("[string]$Nonce", StringComparison.Ordinal));
     }
+
+    private static byte[] Commitments(string runId, string nonce) =>
+        L03BEvidenceProtocol.CreateAttributionCommitments(
+            runId,
+            Commit,
+            Tree,
+            FixturesBlob,
+            "Release",
+            TestHash,
+            CoreHash,
+            BlindOrder,
+            nonce);
 
     private static byte[] Manifest(
         int schemaVersion,

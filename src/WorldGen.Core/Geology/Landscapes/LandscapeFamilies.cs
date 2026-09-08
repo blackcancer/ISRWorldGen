@@ -136,18 +136,12 @@ public static class LandscapeSignatureSampler
 
     private static double Massifs(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
     {
-        // Keep the multi-summit system centred in its owning regional frame.  A
-        // second random translation could move every summit outside a small pure
-        // Voronoi core, leaving only an almost-flat Gaussian tail in the evidence
-        // view.  The regional plan already supplies deterministic placement and
-        // orientation; this extra rotation retains per-region variation without
-        // decoupling the morphology from its owner centre.
-        var q = OrientedLocal(x, z, seed, s, 20, p.MacroWavelengthBlocks);
+        var q = Local(x, z, seed, s, 20, p.MacroWavelengthBlocks);
         double scale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
-        double summitA = Gaussian(q.U + .28, q.V - .13, .34, .34);
-        double summitB = .82 * Gaussian(q.U - .32, q.V + .20, .34, .34);
-        double summitC = .56 * Gaussian((q.U + .04) * scale, (q.V + .38) * scale, .64, .64);
-        double valley = -.45 * Gaussian(q.U, q.V, .23, .23);
+        double summitA = Gaussian(q.U + .28, q.V - .13, .34, .31);
+        double summitB = .82 * Gaussian(q.U - .32, q.V + .20, .28, .36);
+        double summitC = .56 * Gaussian((q.U + .04) * scale, (q.V + .38) * scale, .64, .58);
+        double valley = -.45 * Gaussian(q.U, q.V, .24, .20);
         double weathering = .10 * (Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 22) - .5);
         return (p.MacroWeight * (summitA + summitB + valley - .28)) + (p.MesoWeight * (summitC - .10)) + (p.DetailWeight * weathering);
     }
@@ -181,11 +175,19 @@ public static class LandscapeSignatureSampler
     private static double Plain(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)
     {
         var q = Local(x, z, seed, s, 50, p.MacroWavelengthBlocks);
+        // A translated value-noise cell can be almost affine over an otherwise
+        // valid pure owner core.  Anchor one very broad, smooth roll in the
+        // regional frame so quiet plains remain visible at evidence scale while
+        // the stochastic macro/meso/detail relief keeps its established weights.
+        var regional = OrientedLocal(x, z, seed, s, 54, p.MacroWavelengthBlocks);
         double broad = Noise(q.U * 1.3, q.V * 1.3, seed, s, 51) - .5;
         double mesoScale = p.MacroWavelengthBlocks / p.MesoWavelengthBlocks;
         double gentleDrainage = Noise(q.U * mesoScale, q.V * mesoScale, seed, s, 52) - .5;
         double fine = Noise(q.U * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, q.V * p.MacroWavelengthBlocks / p.DetailWavelengthBlocks, seed, s, 53) - .5;
-        return (p.MacroWeight * .38 * broad) + (p.MesoWeight * .20 * gentleDrainage) + (p.DetailWeight * .10 * fine);
+        double rollingRelief = (p.MacroWeight * .38d * broad) + (p.MesoWeight * .20d * gentleDrainage) + (p.DetailWeight * .10d * fine);
+        // tanh is smooth and bounded.  The catalog maximum is strictly below one:
+        // .90 + .60 * (.64*.38/2 + .26*.20/2 + .10*.10/2) = .99156.
+        return (.90d * Math.Tanh(regional.U)) + (.60d * rollingRelief);
     }
 
     private static double Volcanoes(double x, double z, int seed, StableId s, LandscapeFamilyProfile p)

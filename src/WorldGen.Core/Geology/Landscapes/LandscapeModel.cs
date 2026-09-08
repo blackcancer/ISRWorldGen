@@ -322,7 +322,7 @@ public sealed class LandscapeModel
     private static Hash256 ComputeChecksum(LandscapeModel model, GenerationIdentity identity)
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        AppendString(hash, "ISRW-LANDSCAPE-MODEL-V7-CENTERED-MASSIF-CORES");
+        AppendString(hash, "ISRW-LANDSCAPE-MODEL-V7-BOUNDED-PLAIN-RELIEF");
         AppendInt32(hash, identity.NativeSeed); AppendUInt32(hash, identity.AlgorithmVersion); AppendUInt32(hash, identity.SchemaVersion);
         AppendHash(hash, identity.GeographyConfigHash); AppendHash(hash, identity.GenerationAssetHash); AppendString(hash, identity.DeterminismProfileId);
         AppendHash(hash, model.PlateSnapshotChecksum); AppendHash(hash, model.AtlasContentChecksum);
