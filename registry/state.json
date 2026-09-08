@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "updated_utc": "2026-09-08T07:51:05.0634034Z",
-  "integrated_commit": "9cbbf038225ba3eade93edacafa9e301493ebdea",
+  "updated_utc": "2026-09-08T08:05:17.8033278Z",
+  "integrated_commit": "70e74117194764762e117d6c1ef6615b09c4e100",
   "tasks": {
     "L00-A": {
       "status": "DONE",
@@ -234,11 +234,18 @@
       "blocker": null
     },
     "L04-C": {
-      "status": "BACKLOG",
-      "owner": null,
-      "branch": null,
-      "base_commit": null,
-      "evidence": [],
+      "status": "DONE",
+      "owner": "integrator:l04-c",
+      "branch": "agent/l04-c",
+      "base_commit": "df1df626b4558bd09cbb51b06beb158b45ebc71e",
+      "evidence": [
+        "worklogs/L04-C.md",
+        "commit:c72d6d2b44f7adecf0628237235b94f5cc26cddb",
+        "commit:6303d0b489db9e7c700c831b7b4ac7973b40cc02",
+        "commit:70e74117194764762e117d6c1ef6615b09c4e100",
+        "local:.local/L04C-integrated/tests/debug/L04C-integrated-debug.trx",
+        "local:.local/L04C-integrated/tests/release/L04C-integrated-release.trx"
+      ],
       "blocker": null
     },
     "L05-A": {
