@@ -35,6 +35,7 @@ public sealed class DepositCatalogAndPotentialTests
         Assert.ThrowsExactly<ArgumentException>(() => NativeDepositCatalogExtractor.Extract(manifest, content, Rules().Where(rule => rule.ResourceKey != "game:coal")));
         Assert.ThrowsExactly<ArgumentException>(() => NativeDepositCatalogExtractor.Extract(manifest, content, [Rule("game:cassiterite", "limestone", "game:deposit/cassiterite.json"), Rule("game:coal", "limestone", "game:deposit/coal.json")]));
         Assert.ThrowsExactly<ArgumentException>(() => NativeDepositCatalogExtractor.Extract(manifest, content, [Rule("game:cassiterite", "granite", "game:deposit/cassiterite.json", "game:coal"), Rule("game:coal", "limestone", "game:deposit/coal.json", "game:cassiterite")]));
+        Assert.ThrowsExactly<ArgumentException>(() => NativeDepositCatalogExtractor.Extract(manifest, content, [Rule("game:cassiterite", "granite", "game:deposit/cassiterite.json", provenance: "othermod"), Rule("game:coal", "limestone", "game:deposit/coal.json")]));
         Assert.ThrowsExactly<InvalidOperationException>(() => NativeDepositCatalogExtractor.Extract(Manifest(Content("content-r2")), content, Rules()));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new NativeDepositParameters(double.PositiveInfinity, 1d, 2d, 1d));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new DepositAltitudeRange(DepositAltitudeReference.WorldHeightFraction, 0d, double.NaN));
@@ -54,6 +55,12 @@ public sealed class DepositCatalogAndPotentialTests
         MineralPotentialReading coal = baseline.Readings.Single(reading => reading.ResourceKey == "game:coal");
         Assert.IsTrue(cassiterite.HostIsAdmissible);
         Assert.IsTrue(cassiterite.Intensity > 0d && cassiterite.Intensity < 1d);
+        double expectedCassiteriteIntensity = AnalyticPotential(new RockModelProperties(0.9d, 0.05d, 0.1d), 1d, 1d, 2d, 0.8d);
+        Assert.AreEqual(0.23d, cassiterite.Intensity, 1e-15, "Analytic fixture value: (0.9 + 0.05 + 2*0.1) / 4 * 0.8.");
+        Assert.AreEqual(expectedCassiteriteIntensity, cassiterite.Intensity, 1e-15, "The model must equal the independently calculated geological potential.");
+        MineralPotentialProfile coefficientMutant = new("potential-mutant", [new KeyValuePair<string, GeologicalPotentialCoefficients>("game:cassiterite", new(1d, 1d, 2d, 0.7d)), new KeyValuePair<string, GeologicalPotentialCoefficients>("game:coal", new(1d, 0d, 1d, 0.8d))]);
+        double mutantIntensity = new MineralPotentialModel(catalog, coefficientMutant, granite.Identity).Evaluate(granite, 18, 64, -9).Readings.Single(reading => reading.ResourceKey == "game:cassiterite").Intensity;
+        Assert.AreNotEqual(expectedCassiteriteIntensity, mutantIntensity, "A deliberately altered coefficient must diverge from the analytic oracle.");
         Assert.IsFalse(coal.HostIsAdmissible, "A forbidden host produces zero potential, not a fallback host.");
         Assert.AreEqual(0d, coal.Intensity);
         CollectionAssert.AreEqual(baseline.Readings.ToArray(), repeated.Readings.ToArray());
@@ -92,9 +99,12 @@ public sealed class DepositCatalogAndPotentialTests
         [new(Id(1), "granite", 1, new(128d, 0d, 0d), 128d)], [], []);
     private static NativeDepositCatalogManifest Manifest(ContentCatalogSnapshot content) => new(content.CatalogId, content.TargetVersion, "deposit-r1", content.Fingerprint, ["game"], ["game:cassiterite", "game:coal"], [new("game:cassiterite", RockFamily.Igneous)]);
     private static NativeDepositRule[] Rules() => [Rule("game:cassiterite", "granite", "game:deposit/cassiterite.json"), Rule("game:coal", "limestone", "game:deposit/coal.json")];
-    private static NativeDepositRule Rule(string resource, string host, string asset, string? parent = null) => new(resource, "game", asset, [host], new(DepositAltitudeReference.DepthBelowSurface, 8d, 64d), new(0.2d, 4d, 48d, 0.6d), "native-vein", parent, DepositSurfaceIndicator.NativeProbabilistic, "regional", "game:guide-minerals");
+    private static NativeDepositRule Rule(string resource, string host, string asset, string? parent = null, string provenance = "game") => new(resource, provenance, asset, [host], new(DepositAltitudeReference.DepthBelowSurface, 8d, 64d), new(0.2d, 4d, 48d, 0.6d), "native-vein", parent, DepositSurfaceIndicator.NativeProbabilistic, "regional", "game:guide-minerals");
     private static MineralPotentialProfile Profile() => new("potential-r1", [new KeyValuePair<string, GeologicalPotentialCoefficients>("game:cassiterite", new(1d, 1d, 2d, 0.8d)), new KeyValuePair<string, GeologicalPotentialCoefficients>("game:coal", new(1d, 0d, 1d, 0.8d))]);
     private static StableId Id(ulong ordinal) => StableId.Derive(RandomDomain.Geology, StableId.Zero, 16_000 + ordinal);
+    private static double AnalyticPotential(RockModelProperties properties, double erosionWeight, double solubilityWeight, double permeabilityWeight, double multiplier) =>
+        ((properties.ErosionResistance * erosionWeight) + (properties.Solubility * solubilityWeight) + (properties.Permeability * permeabilityWeight)) /
+        (erosionWeight + solubilityWeight + permeabilityWeight) * multiplier;
 
     private sealed class ForgedGeology(GeologyVolumeSnapshot inner) : IGeologyVolumeQuery
     {
