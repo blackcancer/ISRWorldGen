@@ -230,7 +230,15 @@ $initializationRefusalEvidenceOracleStatus = 'NOT_APPLICABLE'
 $delayedShutdownOracleStatus = 'NOT_APPLICABLE'
 $activeShutdownEvidenceOracleStatus = 'NOT_APPLICABLE'
 $reopenTransactionOracleStatus = 'NOT_APPLICABLE'
+$campaignStorageOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
+    $campaignStorageOraclePath = Join-Path $PSScriptRoot 'Test-L00CCampaignStorage.ps1'
+    $campaignStorageOracle = (& $campaignStorageOraclePath | Out-String | ConvertFrom-Json)
+    if ($campaignStorageOracle.Status -ne 'PASS' -or
+        [string]::IsNullOrWhiteSpace([string]$campaignStorageOracle.LegacyRecovery)) {
+        throw 'The current and legacy campaign-storage recovery oracle did not pass.'
+    }
+    $campaignStorageOracleStatus = $campaignStorageOracle.Status
     $markerOraclePath = Join-Path $PSScriptRoot 'Test-L00CMarkerPublication.ps1'
     $markerOracle = (& $markerOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
     if ($markerOracle.Status -ne 'PASS') {
@@ -340,6 +348,7 @@ $result = [ordered]@{
     DelayedShutdownOracle = $delayedShutdownOracleStatus
     ActiveShutdownEvidenceOracle = $activeShutdownEvidenceOracleStatus
     PersistedReopenTransactionOracle = $reopenTransactionOracleStatus
+    CampaignStorageRecoveryOracle = $campaignStorageOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }

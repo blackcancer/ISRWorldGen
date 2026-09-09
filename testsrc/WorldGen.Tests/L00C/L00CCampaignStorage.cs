@@ -15,23 +15,36 @@ internal sealed class L00CCampaignStorage
     // same IsReparse guard consumes it for every trust-chain hop.
     private static Func<string, FileAttributes> attributeReader = File.GetAttributes;
     internal static IDisposable OverrideAttributeReaderForTests(Func<string, FileAttributes> reader) { var prior=attributeReader; attributeReader=reader ?? throw new ArgumentNullException(nameof(reader)); return new RestoreAttributes(prior); }
+    private static Action<string>? transitionHook;
+    internal static IDisposable OverrideTransitionHookForTests(Action<string> hook) { var prior=transitionHook; transitionHook=hook ?? throw new ArgumentNullException(nameof(hook)); return new RestoreTransitionHook(prior); }
     private const string Prefix = "ISRWorldGen-L00C-";
     private const string ProvenanceName = "campaign-provenance.json";
     private const string CleanupName = "cleanup-receipt.json";
     private const string AbortDirectoryName = "abort";
     private const string AbortCleanupIntentName = "abort-cleanup-intent.json";
     private const string AbortCleanedName = "abort-cleaned.json";
+    private const string LegacyRecoveryManifestName = "legacy-prejournal-recovery-manifest.json";
+    private const string LegacyRecoverySealName = "legacy-prejournal-recovery-seal.json";
+    private const string LegacyRecoveryIntentName = "legacy-prejournal-recovery-intent.json";
+    private const string LegacyRecoveryCleanedName = "legacy-prejournal-recovery-cleaned.json";
+    internal const string SupportedLegacyRecoveryRunId = "a7290d12e6f54247bae27b71e2e571cf";
+    internal const int SupportedLegacyRecoveryProcessId = 74920;
+    internal const string LegacyRecoveryAttestation = "I-ATTEST-L00C-A7290D12-PRIMARY-RAW-ONLY";
     private L00CCampaignStorage(string root, string saves, string id, string campaign)
     {
         LaboratoryRoot = root; GameSavesDirectory = saves; RunId = id; CampaignRoot = campaign;
         EvidenceDirectory = Path.Combine(campaign, "evidence"); ProvenancePath = Path.Combine(campaign, ProvenanceName); CleanupReceiptPath = Path.Combine(campaign, CleanupName);
         AbortDirectory = Path.Combine(campaign, AbortDirectoryName); AbortCleanupIntentPath = Path.Combine(campaign, AbortCleanupIntentName); AbortCleanedPath = Path.Combine(campaign, AbortCleanedName);
+        LegacyRecoveryManifestPath = Path.Combine(campaign, LegacyRecoveryManifestName); LegacyRecoverySealPath = Path.Combine(campaign, LegacyRecoverySealName);
+        LegacyRecoveryIntentPath = Path.Combine(campaign, LegacyRecoveryIntentName); LegacyRecoveryCleanedPath = Path.Combine(campaign, LegacyRecoveryCleanedName);
         PrimarySavePath = Owned("activated-primary"); SecondarySavePath = Owned("activated-secondary");
     }
     internal string LaboratoryRoot { get; } internal string GameSavesDirectory { get; } internal string RunId { get; }
     internal string CampaignRoot { get; } internal string EvidenceDirectory { get; } internal string ProvenancePath { get; }
     internal string CleanupReceiptPath { get; } internal string PrimarySavePath { get; } internal string SecondarySavePath { get; }
     internal string AbortDirectory { get; } internal string AbortCleanupIntentPath { get; } internal string AbortCleanedPath { get; }
+    internal string LegacyRecoveryManifestPath { get; } internal string LegacyRecoverySealPath { get; }
+    internal string LegacyRecoveryIntentPath { get; } internal string LegacyRecoveryCleanedPath { get; }
 
     internal static L00CCampaignStorage Create(string laboratoryRoot, string gamePathsSaves) => CreateForRun(laboratoryRoot, gamePathsSaves, Guid.NewGuid().ToString("N"));
     // Deterministic seam for executable tests only; production never picks a run id.
@@ -105,6 +118,86 @@ internal sealed class L00CCampaignStorage
         int provenancePid=item.ValidateProvenance();
         if (File.Exists(item.CleanupReceiptPath)) { item.CleanupSealed(runtimeProcessId, provenancePid); return; }
         item.CleanupAborted(runtimeProcessId, provenancePid);
+    }
+
+    // One compatibility authority for the single residue left by the integrated
+    // pre-journal build.  The integrator must supply the already-inspected exact
+    // hashes and the literal attestation; this method never discovers candidates.
+    internal static string CreateLegacyPreJournalRecoveryManifest(
+        string laboratoryRoot,
+        string gamePathsSaves,
+        string runId,
+        int runtimeProcessId,
+        string primarySavePath,
+        string primarySaveSha256,
+        string provenanceSha256,
+        string integratorAttestation,
+        Func<bool> runtimeStopped)
+    {
+        RequireRuntimeStopped(runtimeStopped, "legacy recovery manifest");
+        RequireSupportedLegacyAuthority(runId, runtimeProcessId, integratorAttestation);
+        string root = CanonicalLab(laboratoryRoot); string saves = CanonicalDirectory(gamePathsSaves, "GamePaths.Saves");
+        var item = new L00CCampaignStorage(root, saves, runId, Child(Path.Combine(root, "campaigns"), runId));
+        if (!string.Equals(Path.GetFullPath(primarySavePath), item.PrimarySavePath, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("L00-C legacy primary path is not the pinned campaign target.");
+        item.ValidateLegacyManifestCreationShape(runtimeProcessId, primarySaveSha256, provenanceSha256);
+        string manifest = item.LegacyManifest(primarySaveSha256, provenanceSha256, runtimeProcessId, integratorAttestation);
+        RequireRuntimeStopped(runtimeStopped, "legacy manifest write");
+        WriteNewDurable(item.LegacyRecoveryManifestPath, manifest);
+        transitionHook?.Invoke("legacy-manifest-written");
+        string manifestHash = Hash(item.LegacyRecoveryManifestPath);
+        RequireRuntimeStopped(runtimeStopped, "legacy seal write");
+        WriteNewDurable(item.LegacyRecoverySealPath, item.LegacySeal(manifestHash, primarySaveSha256, runtimeProcessId));
+        transitionHook?.Invoke("legacy-seal-written");
+        return Hash(item.LegacyRecoverySealPath);
+    }
+
+    // This is intentionally not called by CleanupAfterRuntimeStopped.  An
+    // operator must select the dedicated legacy launcher and provide both
+    // sealed hashes.  A generic missing journal remains an unconditional refusal.
+    internal static void CleanupLegacyPreJournalAfterRuntimeStopped(
+        string laboratoryRoot,
+        string gamePathsSaves,
+        string runId,
+        int runtimeProcessId,
+        string manifestSha256,
+        string sealSha256,
+        Func<bool> runtimeStopped)
+    {
+        RequireRuntimeStopped(runtimeStopped, "legacy cleanup");
+        RequireSupportedLegacyAuthority(runId, runtimeProcessId, LegacyRecoveryAttestation);
+        string root = CanonicalLab(laboratoryRoot); string saves = CanonicalDirectory(gamePathsSaves, "GamePaths.Saves");
+        var item = new L00CCampaignStorage(root, saves, runId, Child(Path.Combine(root, "campaigns"), runId));
+        item.ValidateLegacyAuthority(runtimeProcessId, manifestSha256, sealSha256);
+        bool resuming = File.Exists(item.LegacyRecoveryIntentPath);
+        item.ValidateLegacyResidue(resuming);
+        if (File.Exists(item.LegacyRecoveryCleanedPath)) throw new InvalidOperationException("L00-C legacy recovery was already completed; replay refused.");
+        if (!resuming)
+        {
+            RequireRuntimeStopped(runtimeStopped, "legacy cleanup intent write");
+            WriteNewDurable(item.LegacyRecoveryIntentPath, item.LegacyIntent(manifestSha256, sealSha256, runtimeProcessId));
+            transitionHook?.Invoke("legacy-cleanup-intent-written");
+        }
+        item.ValidateLegacyAuthority(runtimeProcessId, manifestSha256, sealSha256);
+        item.ValidateLegacyIntent(runtimeProcessId, manifestSha256, sealSha256);
+        item.ValidateLegacyResidue(true);
+        if (File.Exists(item.PrimarySavePath))
+        {
+            RequireRuntimeStopped(runtimeStopped, "legacy primary deletion");
+            File.Delete(item.PrimarySavePath);
+            if (File.Exists(item.PrimarySavePath)) throw new IOException("L00-C legacy primary deletion did not complete.");
+            transitionHook?.Invoke("legacy-primary-deleted");
+        }
+        // Deletion is itself an interruption boundary. Re-establish the full
+        // authority, receipt and residue invariants before certifying completion;
+        // a post-delete mutation must strand the intent for inspection, not mint
+        // a misleading cleaned receipt.
+        item.ValidateLegacyAuthority(runtimeProcessId, manifestSha256, sealSha256);
+        item.ValidateLegacyIntent(runtimeProcessId, manifestSha256, sealSha256);
+        item.ValidateLegacyResidue(true);
+        string intentHash = Hash(item.LegacyRecoveryIntentPath);
+        RequireRuntimeStopped(runtimeStopped, "legacy cleaned receipt write");
+        WriteNewDurable(item.LegacyRecoveryCleanedPath, item.LegacyCleaned(manifestSha256, sealSha256, intentHash, runtimeProcessId));
+        transitionHook?.Invoke("legacy-cleaned-written");
     }
 
     // Existing sealed contract, kept deliberately separate from abort recovery.
@@ -243,12 +336,161 @@ internal sealed class L00CCampaignStorage
             if(!known||IsReparse(entry)) throw new InvalidOperationException("L00-C campaign root contains an unexpected or reparse entry.");
         }
     }
+    private void ValidateLegacyManifestCreationShape(int runtimeProcessId, string primarySaveSha256, string provenanceSha256)
+    {
+        ValidateHashArgument(primarySaveSha256, "primary"); ValidateHashArgument(provenanceSha256, "provenance");
+        EnsureLegacyTrust(false);
+        ValidateLegacyCampaignEntries(false, false);
+        RejectCurrentRecoveryArtifacts();
+        int provenancePid = ValidateProvenance();
+        if (provenancePid != runtimeProcessId || !string.Equals(Hash(ProvenancePath), provenanceSha256, StringComparison.Ordinal)) throw new InvalidOperationException("L00-C legacy provenance identity mismatch.");
+        ValidateLegacyOwnedNames();
+        if (!File.Exists(PrimarySavePath) || Directory.Exists(PrimarySavePath) || IsReparse(PrimarySavePath)) throw new InvalidOperationException("L00-C legacy primary raw residue is absent or unsafe.");
+        EnsureTrusted(PrimarySavePath, GameSavesDirectory);
+        if (!string.Equals(Hash(PrimarySavePath), primarySaveSha256, StringComparison.Ordinal)) throw new InvalidOperationException("L00-C legacy primary bytes do not match the manual attestation.");
+        RequireLegacyAbsent(MarkerPath(PrimarySavePath), "primary marker");
+        RequireLegacyAbsent(SecondarySavePath, "secondary save");
+        RequireLegacyAbsent(MarkerPath(SecondarySavePath), "secondary marker");
+        RequireLegacyAbsent(LegacyRecoveryManifestPath, "legacy manifest");
+        RequireLegacyAbsent(LegacyRecoverySealPath, "legacy seal");
+        RequireLegacyAbsent(LegacyRecoveryIntentPath, "legacy cleanup intent");
+        RequireLegacyAbsent(LegacyRecoveryCleanedPath, "legacy cleaned receipt");
+    }
+    private void ValidateLegacyAuthority(int runtimeProcessId, string manifestSha256, string sealSha256)
+    {
+        ValidateHashArgument(manifestSha256, "manifest"); ValidateHashArgument(sealSha256, "seal");
+        EnsureLegacyTrust(true);
+        bool hasIntent = File.Exists(LegacyRecoveryIntentPath), hasCleaned = File.Exists(LegacyRecoveryCleanedPath);
+        ValidateLegacyCampaignEntries(hasIntent, hasCleaned);
+        RejectCurrentRecoveryArtifacts();
+        if (!File.Exists(LegacyRecoveryManifestPath) || !File.Exists(LegacyRecoverySealPath)) throw new InvalidOperationException("L00-C legacy recovery authority is absent.");
+        if (!string.Equals(Hash(LegacyRecoveryManifestPath), manifestSha256, StringComparison.Ordinal) || !string.Equals(Hash(LegacyRecoverySealPath), sealSha256, StringComparison.Ordinal)) throw new InvalidOperationException("L00-C legacy sealed authority hash mismatch.");
+        var manifest = L00CStrictEvidenceJson.Parse(File.ReadAllText(LegacyRecoveryManifestPath));
+        manifest.Exactly("schema","runId","legacyShape","laboratoryRoot","gamePathsSaves","campaignRoot","provenancePath","provenanceSha256","runtimeProcessId","primarySave","primarySha256","primaryMarkerState","secondarySave","secondaryState","secondaryMarkerState","abortJournalState","integratorAttestation");
+        if (manifest.StringValue("schema") != "l00c-legacy-prejournal-recovery-manifest-v1" ||
+            manifest.StringValue("runId") != RunId || manifest.StringValue("legacyShape") != "primary-raw-only" ||
+            !SamePath(manifest.StringValue("laboratoryRoot"), LaboratoryRoot) || !SamePath(manifest.StringValue("gamePathsSaves"), GameSavesDirectory) ||
+            !SamePath(manifest.StringValue("campaignRoot"), CampaignRoot) || !SamePath(manifest.StringValue("provenancePath"), ProvenancePath) ||
+            manifest.Int("runtimeProcessId") != runtimeProcessId || !SamePath(manifest.StringValue("primarySave"), PrimarySavePath) ||
+            !ValidHash(manifest.StringValue("provenanceSha256")) || !ValidHash(manifest.StringValue("primarySha256")) ||
+            manifest.StringValue("primaryMarkerState") != "absent" || !SamePath(manifest.StringValue("secondarySave"), SecondarySavePath) ||
+            manifest.StringValue("secondaryState") != "absent" || manifest.StringValue("secondaryMarkerState") != "absent" ||
+            manifest.StringValue("abortJournalState") != "absent" || manifest.StringValue("integratorAttestation") != LegacyRecoveryAttestation)
+            throw new InvalidOperationException("L00-C legacy manifest identity mismatch.");
+        if (ValidateProvenance() != runtimeProcessId || !string.Equals(Hash(ProvenancePath), manifest.StringValue("provenanceSha256"), StringComparison.Ordinal)) throw new InvalidOperationException("L00-C legacy provenance changed after sealing.");
+        var seal = L00CStrictEvidenceJson.Parse(File.ReadAllText(LegacyRecoverySealPath));
+        seal.Exactly("schema","runId","manifestPath","manifestSha256","runtimeProcessId","primarySave","primarySha256");
+        if (seal.StringValue("schema") != "l00c-legacy-prejournal-recovery-seal-v1" || seal.StringValue("runId") != RunId ||
+            !SamePath(seal.StringValue("manifestPath"), LegacyRecoveryManifestPath) || seal.StringValue("manifestSha256") != manifestSha256 ||
+            seal.Int("runtimeProcessId") != runtimeProcessId || !SamePath(seal.StringValue("primarySave"), PrimarySavePath) ||
+            seal.StringValue("primarySha256") != manifest.StringValue("primarySha256"))
+            throw new InvalidOperationException("L00-C legacy seal identity mismatch.");
+    }
+    private void ValidateLegacyIntent(int runtimeProcessId, string manifestSha256, string sealSha256)
+    {
+        EnsureTrusted(LegacyRecoveryIntentPath, CampaignRoot);
+        if (!File.Exists(LegacyRecoveryIntentPath) || Directory.Exists(LegacyRecoveryIntentPath)) throw new InvalidOperationException("L00-C legacy cleanup intent is absent or unsafe.");
+        string intentText = File.ReadAllText(LegacyRecoveryIntentPath);
+        var intent = L00CStrictEvidenceJson.Parse(intentText);
+        intent.Exactly("schema","runId","runtimeProcessId","manifestSha256","sealSha256","primarySave","primarySha256");
+        var manifest = L00CStrictEvidenceJson.Parse(File.ReadAllText(LegacyRecoveryManifestPath));
+        if (intent.StringValue("schema") != "l00c-legacy-prejournal-recovery-intent-v1" || intent.StringValue("runId") != RunId ||
+            intent.Int("runtimeProcessId") != runtimeProcessId || intent.StringValue("manifestSha256") != manifestSha256 || intent.StringValue("sealSha256") != sealSha256 ||
+            !SamePath(intent.StringValue("primarySave"), PrimarySavePath) || intent.StringValue("primarySha256") != manifest.StringValue("primarySha256") ||
+            !string.Equals(intentText, LegacyIntent(manifestSha256, sealSha256, runtimeProcessId), StringComparison.Ordinal))
+            throw new InvalidOperationException("L00-C legacy cleanup intent identity mismatch.");
+    }
+    private void ValidateLegacyResidue(bool allowDeletedAfterIntent)
+    {
+        ValidateLegacyOwnedNames();
+        RequireLegacyAbsent(MarkerPath(PrimarySavePath), "primary marker");
+        RequireLegacyAbsent(SecondarySavePath, "secondary save");
+        RequireLegacyAbsent(MarkerPath(SecondarySavePath), "secondary marker");
+        bool exists = File.Exists(PrimarySavePath);
+        if (!exists && !allowDeletedAfterIntent) throw new InvalidOperationException("L00-C legacy primary disappeared before cleanup intent.");
+        if (Directory.Exists(PrimarySavePath) || IsReparse(PrimarySavePath)) throw new InvalidOperationException("L00-C legacy primary identity is unsafe.");
+        if (exists)
+        {
+            EnsureTrusted(PrimarySavePath, GameSavesDirectory);
+            var manifest = L00CStrictEvidenceJson.Parse(File.ReadAllText(LegacyRecoveryManifestPath));
+            if (!string.Equals(Hash(PrimarySavePath), manifest.StringValue("primarySha256"), StringComparison.Ordinal)) throw new InvalidOperationException("L00-C legacy primary bytes changed after sealing.");
+        }
+    }
+    private void EnsureLegacyTrust(bool requireSealedAuthority)
+    {
+        EnsureAllAncestors(LaboratoryRoot);
+        string campaigns = Path.Combine(LaboratoryRoot, "campaigns");
+        EnsureTrusted(campaigns, LaboratoryRoot); EnsureTrusted(CampaignRoot, campaigns); EnsureTrusted(ProvenancePath, CampaignRoot); EnsureTrusted(EvidenceDirectory, CampaignRoot);
+        if (requireSealedAuthority || File.Exists(LegacyRecoveryManifestPath)) EnsureTrusted(LegacyRecoveryManifestPath, CampaignRoot);
+        if (requireSealedAuthority || File.Exists(LegacyRecoverySealPath)) EnsureTrusted(LegacyRecoverySealPath, CampaignRoot);
+        if (File.Exists(LegacyRecoveryIntentPath)) EnsureTrusted(LegacyRecoveryIntentPath, CampaignRoot);
+        if (File.Exists(LegacyRecoveryCleanedPath)) EnsureTrusted(LegacyRecoveryCleanedPath, CampaignRoot);
+    }
+    private void ValidateLegacyCampaignEntries(bool allowIntent, bool allowCleaned)
+    {
+        if (!Directory.Exists(CampaignRoot) || IsReparse(CampaignRoot) || !File.Exists(ProvenancePath) || Directory.Exists(ProvenancePath) || !Directory.Exists(EvidenceDirectory) || File.Exists(EvidenceDirectory) || IsReparse(ProvenancePath) || IsReparse(EvidenceDirectory)) throw new InvalidOperationException("L00-C legacy campaign shape is not provenance plus evidence.");
+        foreach (string entry in Directory.EnumerateFileSystemEntries(CampaignRoot))
+        {
+            string name = Path.GetFileName(entry);
+            bool known = string.Equals(name, ProvenanceName, StringComparison.Ordinal) || string.Equals(name, "evidence", StringComparison.Ordinal) ||
+                string.Equals(name, LegacyRecoveryManifestName, StringComparison.Ordinal) || string.Equals(name, LegacyRecoverySealName, StringComparison.Ordinal) ||
+                (allowIntent && string.Equals(name, LegacyRecoveryIntentName, StringComparison.Ordinal)) || (allowCleaned && string.Equals(name, LegacyRecoveryCleanedName, StringComparison.Ordinal));
+            if (!known || IsReparse(entry)) throw new InvalidOperationException("L00-C legacy campaign contains an unexpected or reparse entry.");
+            if ((string.Equals(name, LegacyRecoveryManifestName, StringComparison.Ordinal) || string.Equals(name, LegacyRecoverySealName, StringComparison.Ordinal) || string.Equals(name, LegacyRecoveryIntentName, StringComparison.Ordinal) || string.Equals(name, LegacyRecoveryCleanedName, StringComparison.Ordinal)) && Directory.Exists(entry)) throw new InvalidOperationException("L00-C legacy receipt path is not a file.");
+        }
+    }
+    private void RejectCurrentRecoveryArtifacts()
+    {
+        RequireLegacyAbsent(AbortDirectory, "current abort journal"); RequireLegacyAbsent(CleanupReceiptPath, "sealed cleanup receipt");
+        RequireLegacyAbsent(AbortCleanupIntentPath, "current abort cleanup intent"); RequireLegacyAbsent(AbortCleanedPath, "current abort cleaned receipt");
+        RequireLegacyAbsent(Child(CampaignRoot, "abort-create-refused.json"), "native-create refusal receipt");
+    }
+    private void ValidateLegacyOwnedNames()
+    {
+        foreach (string entry in Directory.EnumerateFileSystemEntries(GameSavesDirectory))
+        {
+            string name = Path.GetFileName(entry);
+            if (!name.StartsWith(Prefix + RunId + "-", StringComparison.OrdinalIgnoreCase)) continue;
+            string full = Path.GetFullPath(entry);
+            if (!string.Equals(full, PrimarySavePath, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("L00-C legacy recovery refuses an unexpected owned-name residue.");
+        }
+    }
+    private string LegacyManifest(string primaryHash, string provenanceHash, int pid, string attestation) =>
+        "{\"schema\":\"l00c-legacy-prejournal-recovery-manifest-v1\",\"runId\":\"" + RunId + "\",\"legacyShape\":\"primary-raw-only\",\"laboratoryRoot\":\"" + Esc(LaboratoryRoot) + "\",\"gamePathsSaves\":\"" + Esc(GameSavesDirectory) + "\",\"campaignRoot\":\"" + Esc(CampaignRoot) + "\",\"provenancePath\":\"" + Esc(ProvenancePath) + "\",\"provenanceSha256\":\"" + provenanceHash + "\",\"runtimeProcessId\":" + pid + ",\"primarySave\":\"" + Esc(PrimarySavePath) + "\",\"primarySha256\":\"" + primaryHash + "\",\"primaryMarkerState\":\"absent\",\"secondarySave\":\"" + Esc(SecondarySavePath) + "\",\"secondaryState\":\"absent\",\"secondaryMarkerState\":\"absent\",\"abortJournalState\":\"absent\",\"integratorAttestation\":\"" + attestation + "\"}";
+    private string LegacySeal(string manifestHash, string primaryHash, int pid) =>
+        "{\"schema\":\"l00c-legacy-prejournal-recovery-seal-v1\",\"runId\":\"" + RunId + "\",\"manifestPath\":\"" + Esc(LegacyRecoveryManifestPath) + "\",\"manifestSha256\":\"" + manifestHash + "\",\"runtimeProcessId\":" + pid + ",\"primarySave\":\"" + Esc(PrimarySavePath) + "\",\"primarySha256\":\"" + primaryHash + "\"}";
+    private string LegacyIntent(string manifestHash, string sealHash, int pid)
+    {
+        var manifest = L00CStrictEvidenceJson.Parse(File.ReadAllText(LegacyRecoveryManifestPath));
+        return "{\"schema\":\"l00c-legacy-prejournal-recovery-intent-v1\",\"runId\":\"" + RunId + "\",\"runtimeProcessId\":" + pid + ",\"manifestSha256\":\"" + manifestHash + "\",\"sealSha256\":\"" + sealHash + "\",\"primarySave\":\"" + Esc(PrimarySavePath) + "\",\"primarySha256\":\"" + manifest.StringValue("primarySha256") + "\"}";
+    }
+    private string LegacyCleaned(string manifestHash, string sealHash, string intentHash, int pid) =>
+        "{\"schema\":\"l00c-legacy-prejournal-recovery-cleaned-v1\",\"runId\":\"" + RunId + "\",\"runtimeProcessId\":" + pid + ",\"manifestSha256\":\"" + manifestHash + "\",\"sealSha256\":\"" + sealHash + "\",\"intentSha256\":\"" + intentHash + "\",\"primarySave\":\"" + Esc(PrimarySavePath) + "\"}";
+    private static void RequireSupportedLegacyAuthority(string runId, int runtimeProcessId, string attestation)
+    {
+        CheckId(runId);
+        if (runId != SupportedLegacyRecoveryRunId || runtimeProcessId != SupportedLegacyRecoveryProcessId || attestation != LegacyRecoveryAttestation) throw new InvalidOperationException("L00-C legacy recovery authority is pinned to one attested run and PID.");
+    }
+    private static void RequireLegacyAbsent(string path, string label)
+    {
+        if (File.Exists(path) || Directory.Exists(path) || IsReparse(path)) throw new InvalidOperationException("L00-C legacy recovery requires absent " + label + ".");
+    }
+    private static void ValidateHashArgument(string hash, string label)
+    {
+        if (hash is null || !ValidHash(hash)) throw new InvalidOperationException("L00-C legacy " + label + " hash is invalid.");
+    }
+    private static void RequireRuntimeStopped(Func<bool>? runtimeStopped, string operation)
+    {
+        if (runtimeStopped is null || !runtimeStopped()) throw new InvalidOperationException("L00-C " + operation + " refuses while runtime is alive or PID was reused.");
+    }
+    private static bool SamePath(string left, string right) => string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
     private void ValidateCleanupReceipt(string text, int runtimeProcessId, int provenancePid)
     {
         var j=L00CStrictEvidenceJson.Parse(text); j.Exactly("schema","runId","runtimeStoppedRequired","runtimeProcessId","primarySave","primarySha256","secondarySave","secondarySha256");
         if(j.StringValue("schema")!="l00c-appdata-cleanup-v1"||j.StringValue("runId")!=RunId||!j.True("runtimeStoppedRequired")||j.Int("runtimeProcessId")!=runtimeProcessId||runtimeProcessId!=provenancePid||!string.Equals(j.StringValue("primarySave"),PrimarySavePath,StringComparison.OrdinalIgnoreCase)||!string.Equals(j.StringValue("secondarySave"),SecondarySavePath,StringComparison.OrdinalIgnoreCase)||!ValidHash(j.StringValue("primarySha256"))||!ValidHash(j.StringValue("secondarySha256")))throw new InvalidOperationException("L00-C cleanup cross-identity mismatch.");
     }
     private static bool ValidHash(string value) { if(value.Length!=64)return false; foreach(char c in value)if(!((c>='0'&&c<='9')||(c>='A'&&c<='F')))return false; return true; }
+    private static void WriteNewDurable(string path, string value) { using var f = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough); byte[] b = Encoding.UTF8.GetBytes(value); f.Write(b, 0, b.Length); f.Flush(true); }
     private static void EnsureTrusted(string path, string stopAt)
     {
         string current = Path.GetFullPath(path); string stop = Path.GetFullPath(stopAt).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -260,4 +502,5 @@ internal sealed class L00CCampaignStorage
         while (true) { if (IsReparse(current)) throw new InvalidOperationException("L00-C refuses reparse ancestor."); DirectoryInfo? parent = Directory.GetParent(current); if (parent is null) return; current = parent.FullName; }
     }
     private sealed class RestoreAttributes : IDisposable { private Func<string,FileAttributes>? prior; internal RestoreAttributes(Func<string,FileAttributes> value){prior=value;} public void Dispose(){var value=prior;prior=null;if(value is not null)attributeReader=value;} }
+    private sealed class RestoreTransitionHook : IDisposable { private Action<string>? prior; internal RestoreTransitionHook(Action<string>? value){prior=value;} public void Dispose(){var value=prior;prior=null;transitionHook=value;} }
 }

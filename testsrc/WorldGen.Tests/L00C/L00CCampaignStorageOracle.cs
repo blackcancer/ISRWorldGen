@@ -100,6 +100,7 @@ internal static class L00CCampaignStorageOracle
             foreach(int removed in new[]{0,1,2,3}) { var midDelete=AbortAt(root,saves,Guid.NewGuid().ToString("N"),4,false); string intent=AbortIntent(midDelete,pid); File.WriteAllText(midDelete.AbortCleanupIntentPath,intent); string[] ordered={L00CCampaignStorage.MarkerPath(midDelete.PrimarySavePath),midDelete.PrimarySavePath,L00CCampaignStorage.MarkerPath(midDelete.SecondarySavePath),midDelete.SecondarySavePath}; for(int n=0;n<=removed;n++) File.Delete(ordered[n]); L00CCampaignStorage.CleanupAfterRuntimeStopped(root,saves,midDelete.RunId,pid,()=>true); Check(!File.Exists(midDelete.PrimarySavePath)&&!File.Exists(midDelete.SecondarySavePath)); }
             var outOfOrder=AbortAt(root,saves,Guid.NewGuid().ToString("N"),4,false); File.WriteAllText(outOfOrder.AbortCleanupIntentPath,AbortIntent(outOfOrder,pid)); File.Delete(L00CCampaignStorage.MarkerPath(outOfOrder.SecondarySavePath)); AssertPreserved(outOfOrder,()=>L00CCampaignStorage.CleanupAfterRuntimeStopped(root,saves,outOfOrder.RunId,pid,()=>true));
             var resumeExtra=AbortAt(root,saves,Guid.NewGuid().ToString("N"),4,false); File.WriteAllText(resumeExtra.AbortCleanupIntentPath,AbortIntent(resumeExtra,pid)); File.WriteAllText(Path.Combine(saves,"ISRWorldGen-L00C-"+resumeExtra.RunId+"-EXTRA.vcdbs"),"extra"); AssertPreserved(resumeExtra,()=>L00CCampaignStorage.CleanupAfterRuntimeStopped(root,saves,resumeExtra.RunId,pid,()=>true));
+            RunLegacyRecoveryCases(temp);
             return 0;
         }
         finally { if (Directory.Exists(temp)) Directory.Delete(temp, true); }
@@ -129,6 +130,156 @@ internal static class L00CCampaignStorageOracle
     private static L00CCampaignStorage AbortAtWithIntentMarker(string root,string saves,string id,int state) { var x=AbortAt(root,saves,id,state,true); string save=state==1?x.PrimarySavePath:x.SecondarySavePath; string role=state==1?"activated-primary":"activated-secondary"; WriteMarker(x,role,save); return x; }
     private static void WriteMarker(L00CCampaignStorage x,string role,string save) => File.WriteAllText(L00CCampaignStorage.MarkerPath(save),"{\"schema\":\"l00c-appdata-save-marker-v1\",\"runId\":\""+x.RunId+"\",\"role\":\""+role+"\",\"savePath\":\""+save.Replace("\\","\\\\")+"\",\"provenancePath\":\""+x.ProvenancePath.Replace("\\","\\\\")+"\",\"sha256\":\""+HashFile(save)+"\"}");
     private static string AbortIntent(L00CCampaignStorage x,int pid) => "{\"schema\":\"l00c-appdata-abort-cleanup-intent-v1\",\"runId\":\""+x.RunId+"\",\"runtimeProcessId\":"+pid+",\"state\":\"secondary-created\",\"primarySaveSha256\":\""+HashFile(x.PrimarySavePath)+"\",\"primaryMarkerSha256\":\""+HashFile(L00CCampaignStorage.MarkerPath(x.PrimarySavePath))+"\",\"secondarySaveSha256\":\""+HashFile(x.SecondarySavePath)+"\",\"secondaryMarkerSha256\":\""+HashFile(L00CCampaignStorage.MarkerPath(x.SecondarySavePath))+"\"}";
+    private static void RunLegacyRecoveryCases(string temp)
+    {
+        const string id = L00CCampaignStorage.SupportedLegacyRecoveryRunId;
+        const int pid = L00CCampaignStorage.SupportedLegacyRecoveryProcessId;
+        string dummyHash = HashText("dummy");
+
+        // Neither the generic recovery nor the dedicated compatibility path may
+        // infer ownership from a pre-journal filename and provenance alone.
+        var absent = Legacy(temp, "absent-authority");
+        ExpectLegacyPreserved(absent, () => L00CCampaignStorage.CleanupAfterRuntimeStopped(absent.Root, absent.Saves, id, pid, () => true));
+        ExpectLegacyPreserved(absent, () => L00CCampaignStorage.CleanupLegacyPreJournalAfterRuntimeStopped(absent.Root, absent.Saves, id, pid, dummyHash, dummyHash, () => true));
+        ExpectLegacyPreserved(absent, () => L00CCampaignStorage.CreateLegacyPreJournalRecoveryManifest(absent.Root, absent.Saves, id, pid, absent.Primary, absent.PrimaryHash, absent.ProvenanceHash, L00CCampaignStorage.LegacyRecoveryAttestation, () => false));
+        ExpectLegacyPreserved(absent, () => L00CCampaignStorage.CreateLegacyPreJournalRecoveryManifest(absent.Root, absent.Saves, id, pid + 1, absent.Primary, absent.PrimaryHash, absent.ProvenanceHash, L00CCampaignStorage.LegacyRecoveryAttestation, () => true));
+        ExpectLegacyPreserved(absent, () => L00CCampaignStorage.CreateLegacyPreJournalRecoveryManifest(absent.Root, absent.Saves, id, pid, absent.Primary, absent.PrimaryHash, absent.ProvenanceHash, "NOT-ATTESTED", () => true));
+        ExpectLegacyPreserved(absent, () => L00CCampaignStorage.CreateLegacyPreJournalRecoveryManifest(absent.Root, absent.Saves, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", pid, absent.Primary, absent.PrimaryHash, absent.ProvenanceHash, L00CCampaignStorage.LegacyRecoveryAttestation, () => true));
+
+        // Manifest creation rejects every non-legacy shape before minting any
+        // deletion authority.
+        var markerAtMint = Legacy(temp, "marker-at-mint"); File.WriteAllText(L00CCampaignStorage.MarkerPath(markerAtMint.Primary), "unknown-marker");
+        ExpectLegacyPreserved(markerAtMint, () => Mint(markerAtMint)); Check(!File.Exists(markerAtMint.Manifest));
+        var secondaryAtMint = Legacy(temp, "secondary-at-mint"); File.WriteAllText(secondaryAtMint.Secondary, "unknown-secondary");
+        ExpectLegacyPreserved(secondaryAtMint, () => Mint(secondaryAtMint)); Check(!File.Exists(secondaryAtMint.Manifest));
+        var abortAtMint = Legacy(temp, "abort-at-mint"); Directory.CreateDirectory(Path.Combine(abortAtMint.Campaign, "abort"));
+        ExpectLegacyPreserved(abortAtMint, () => Mint(abortAtMint)); Check(!File.Exists(abortAtMint.Manifest));
+        var manifestCollision = Legacy(temp, "manifest-collision"); File.WriteAllText(manifestCollision.Manifest, "do-not-overwrite");
+        ExpectLegacyPreserved(manifestCollision, () => Mint(manifestCollision)); Check(File.ReadAllText(manifestCollision.Manifest) == "do-not-overwrite");
+        var sealCollision = Legacy(temp, "seal-collision"); File.WriteAllText(sealCollision.Seal, "do-not-overwrite");
+        ExpectLegacyPreserved(sealCollision, () => Mint(sealCollision)); Check(File.ReadAllText(sealCollision.Seal) == "do-not-overwrite");
+
+        // Exact primary-raw-only simulation.  Only that file is removed; the
+        // unrelated save, provenance, sealed authority and evidence survive.
+        var valid = Legacy(temp, "valid"); Mint(valid); byte[] original = File.ReadAllBytes(valid.Primary);
+        L00CCampaignStorage.CleanupLegacyPreJournalAfterRuntimeStopped(valid.Root, valid.Saves, id, pid, valid.ManifestHash, valid.SealHash, () => true);
+        Check(!File.Exists(valid.Primary) && File.Exists(valid.Sentinel) && File.Exists(valid.Provenance) && File.Exists(valid.Manifest) && File.Exists(valid.Seal) && Directory.Exists(valid.Evidence) && File.Exists(valid.Intent) && File.Exists(valid.Cleaned));
+        File.WriteAllBytes(valid.Primary, original);
+        ExpectLegacyPreserved(valid, () => L00CCampaignStorage.CleanupLegacyPreJournalAfterRuntimeStopped(valid.Root, valid.Saves, id, pid, valid.ManifestHash, valid.SealHash, () => true));
+
+        // All post-seal mismatches preserve the exact primary bytes and every
+        // colliding or unexpected entry.
+        var live = Legacy(temp, "live"); Mint(live); ExpectLegacyPreserved(live, () => Clean(live, () => false));
+        var wrongPid = Legacy(temp, "wrong-pid"); Mint(wrongPid); ExpectLegacyPreserved(wrongPid, () => L00CCampaignStorage.CleanupLegacyPreJournalAfterRuntimeStopped(wrongPid.Root, wrongPid.Saves, id, pid + 1, wrongPid.ManifestHash, wrongPid.SealHash, () => true));
+        var marker = Legacy(temp, "marker"); Mint(marker); string markerPath = L00CCampaignStorage.MarkerPath(marker.Primary); File.WriteAllText(markerPath, "late-marker"); ExpectLegacyPreserved(marker, () => Clean(marker)); Check(File.ReadAllText(markerPath) == "late-marker");
+        var secondary = Legacy(temp, "secondary"); Mint(secondary); File.WriteAllText(secondary.Secondary, "late-secondary"); ExpectLegacyPreserved(secondary, () => Clean(secondary)); Check(File.ReadAllText(secondary.Secondary) == "late-secondary");
+        var owned = Legacy(temp, "owned-extra"); Mint(owned); string ownedExtra = Path.Combine(owned.Saves, "ISRWorldGen-L00C-" + id + "-unknown.vcdbs"); File.WriteAllText(ownedExtra, "late-owned"); ExpectLegacyPreserved(owned, () => Clean(owned)); Check(File.ReadAllText(ownedExtra) == "late-owned");
+        var campaignExtra = Legacy(temp, "campaign-extra"); Mint(campaignExtra); string extraReceipt = Path.Combine(campaignExtra.Campaign, "unknown.json"); File.WriteAllText(extraReceipt, "late-campaign"); ExpectLegacyPreserved(campaignExtra, () => Clean(campaignExtra)); Check(File.ReadAllText(extraReceipt) == "late-campaign");
+        var manifestTamper = Legacy(temp, "manifest-tamper"); Mint(manifestTamper); File.AppendAllText(manifestTamper.Manifest, " "); ExpectLegacyPreserved(manifestTamper, () => Clean(manifestTamper));
+        var sealTamper = Legacy(temp, "seal-tamper"); Mint(sealTamper); File.AppendAllText(sealTamper.Seal, " "); ExpectLegacyPreserved(sealTamper, () => Clean(sealTamper));
+        var provenanceTamper = Legacy(temp, "provenance-tamper"); Mint(provenanceTamper); File.AppendAllText(provenanceTamper.Provenance, " "); ExpectLegacyPreserved(provenanceTamper, () => Clean(provenanceTamper));
+        var bytesChanged = Legacy(temp, "bytes-changed"); Mint(bytesChanged); File.AppendAllText(bytesChanged.Primary, "changed"); ExpectLegacyPreserved(bytesChanged, () => Clean(bytesChanged));
+        var manifestArg = Legacy(temp, "manifest-arg"); Mint(manifestArg); ExpectLegacyPreserved(manifestArg, () => L00CCampaignStorage.CleanupLegacyPreJournalAfterRuntimeStopped(manifestArg.Root, manifestArg.Saves, id, pid, dummyHash, manifestArg.SealHash, () => true));
+        var sealArg = Legacy(temp, "seal-arg"); Mint(sealArg); ExpectLegacyPreserved(sealArg, () => L00CCampaignStorage.CleanupLegacyPreJournalAfterRuntimeStopped(sealArg.Root, sealArg.Saves, id, pid, sealArg.ManifestHash, dummyHash, () => true));
+        var currentJournal = Legacy(temp, "current-journal"); Mint(currentJournal); Directory.CreateDirectory(Path.Combine(currentJournal.Campaign, "abort")); ExpectLegacyPreserved(currentJournal, () => Clean(currentJournal));
+
+        // Every trust-chain hop and the target identity shares the production
+        // reparse guard.  The deterministic seam changes only one attribute.
+        foreach (string part in new[]{"lab","campaigns","campaign","provenance","manifest","seal","primary"})
+        {
+            var x = Legacy(temp, "reparse-" + part); Mint(x);
+            string poison = part == "lab" ? x.Root : part == "campaigns" ? Path.Combine(x.Root, "campaigns") : part == "campaign" ? x.Campaign : part == "provenance" ? x.Provenance : part == "manifest" ? x.Manifest : part == "seal" ? x.Seal : x.Primary;
+            using (L00CCampaignStorage.OverrideAttributeReaderForTests(p => string.Equals(Path.GetFullPath(p), Path.GetFullPath(poison), StringComparison.OrdinalIgnoreCase) ? FileAttributes.ReparsePoint : File.GetAttributes(p)))
+                ExpectLegacyPreserved(x, () => Clean(x));
+        }
+
+        // A stateful process-death proof is re-evaluated at every external
+        // boundary.  Becoming live/reused before an effect blocks that effect;
+        // already-durable earlier states remain safely resumable or inert.
+        var proofManifest = Legacy(temp, "proof-manifest");
+        ExpectLegacyPreserved(proofManifest, () => MintWithProof(proofManifest, StatefulProof(true, false)));
+        Check(!File.Exists(proofManifest.Manifest) && !File.Exists(proofManifest.Seal));
+        var proofSeal = Legacy(temp, "proof-seal");
+        ExpectLegacyPreserved(proofSeal, () => MintWithProof(proofSeal, StatefulProof(true, true, false)));
+        Check(File.Exists(proofSeal.Manifest) && !File.Exists(proofSeal.Seal));
+        var proofIntent = Legacy(temp, "proof-intent"); Mint(proofIntent);
+        ExpectLegacyPreserved(proofIntent, () => Clean(proofIntent, StatefulProof(true, false)));
+        Check(!File.Exists(proofIntent.Intent));
+        var proofDelete = Legacy(temp, "proof-delete"); Mint(proofDelete);
+        ExpectLegacyPreserved(proofDelete, () => Clean(proofDelete, StatefulProof(true, true, false)));
+        Check(File.Exists(proofDelete.Intent) && !File.Exists(proofDelete.Cleaned));
+        Clean(proofDelete); Check(!File.Exists(proofDelete.Primary) && File.Exists(proofDelete.Cleaned));
+        var proofCleaned = Legacy(temp, "proof-cleaned"); Mint(proofCleaned);
+        Expect(() => Clean(proofCleaned, StatefulProof(true, true, true, false)));
+        Check(!File.Exists(proofCleaned.Primary) && File.Exists(proofCleaned.Intent) && !File.Exists(proofCleaned.Cleaned));
+        Clean(proofCleaned); Check(File.Exists(proofCleaned.Cleaned));
+
+        // Both cleanup interruption boundaries are resumable only from the
+        // immutable intent.  A changed intent is refused byte-for-byte.
+        var afterIntent = Legacy(temp, "after-intent"); Mint(afterIntent);
+        using (L00CCampaignStorage.OverrideTransitionHookForTests(stage => { if (stage == "legacy-cleanup-intent-written") throw new InvalidOperationException("simulated stop after intent"); })) ExpectLegacyPreserved(afterIntent, () => Clean(afterIntent));
+        Clean(afterIntent); Check(!File.Exists(afterIntent.Primary) && File.Exists(afterIntent.Cleaned));
+        var tamperedIntent = Legacy(temp, "tampered-intent"); Mint(tamperedIntent);
+        using (L00CCampaignStorage.OverrideTransitionHookForTests(stage => { if (stage == "legacy-cleanup-intent-written") throw new InvalidOperationException("simulated stop after intent"); })) ExpectLegacyPreserved(tamperedIntent, () => Clean(tamperedIntent));
+        File.AppendAllText(tamperedIntent.Intent, " trailing"); ExpectLegacyPreserved(tamperedIntent, () => Clean(tamperedIntent));
+        var afterDelete = Legacy(temp, "after-delete"); Mint(afterDelete);
+        using (L00CCampaignStorage.OverrideTransitionHookForTests(stage => { if (stage == "legacy-primary-deleted") throw new InvalidOperationException("simulated stop after delete"); })) Expect(() => Clean(afterDelete));
+        Check(!File.Exists(afterDelete.Primary) && File.Exists(afterDelete.Intent) && !File.Exists(afterDelete.Cleaned));
+        Clean(afterDelete); Check(File.Exists(afterDelete.Cleaned));
+        var tamperedAfterDelete = Legacy(temp, "tampered-after-delete"); Mint(tamperedAfterDelete);
+        using (L00CCampaignStorage.OverrideTransitionHookForTests(stage => { if (stage == "legacy-primary-deleted") File.AppendAllText(tamperedAfterDelete.Intent, " trailing"); })) Expect(() => Clean(tamperedAfterDelete));
+        Check(!File.Exists(tamperedAfterDelete.Primary) && File.Exists(tamperedAfterDelete.Intent) && !File.Exists(tamperedAfterDelete.Cleaned));
+
+        // A stop between manifest and seal leaves no cleanup authority and no
+        // automatic repair path; all save bytes remain untouched.
+        var halfMint = Legacy(temp, "half-mint");
+        using (L00CCampaignStorage.OverrideTransitionHookForTests(stage => { if (stage == "legacy-manifest-written") throw new InvalidOperationException("simulated stop after manifest"); })) ExpectLegacyPreserved(halfMint, () => Mint(halfMint));
+        Check(File.Exists(halfMint.Manifest) && !File.Exists(halfMint.Seal));
+        ExpectLegacyPreserved(halfMint, () => L00CCampaignStorage.CleanupLegacyPreJournalAfterRuntimeStopped(halfMint.Root, halfMint.Saves, id, pid, HashPath(halfMint.Manifest), dummyHash, () => true));
+    }
+    private static LegacyFixture Legacy(string temp, string name)
+    {
+        string container = Path.Combine(temp, "legacy-" + name); string root = Path.Combine(container, "repo", ".local", "L00C"); string saves = Path.Combine(container, "fake-GamePaths-Saves");
+        string campaign = Path.Combine(root, "campaigns", L00CCampaignStorage.SupportedLegacyRecoveryRunId); string evidence = Path.Combine(campaign, "evidence"); Directory.CreateDirectory(evidence); Directory.CreateDirectory(saves);
+        string primary = Path.Combine(saves, "ISRWorldGen-L00C-" + L00CCampaignStorage.SupportedLegacyRecoveryRunId + "-activated-primary.vcdbs");
+        string secondary = Path.Combine(saves, "ISRWorldGen-L00C-" + L00CCampaignStorage.SupportedLegacyRecoveryRunId + "-activated-secondary.vcdbs");
+        string provenance = Path.Combine(campaign, "campaign-provenance.json");
+        File.WriteAllText(primary, "legacy-primary-raw-only-" + name);
+        File.WriteAllText(provenance, "{\"schema\":\"l00c-appdata-campaign-v1\",\"runId\":\"" + L00CCampaignStorage.SupportedLegacyRecoveryRunId + "\",\"laboratoryRoot\":\"" + Json(root) + "\",\"gamePathsSaves\":\"" + Json(saves) + "\",\"primarySave\":\"" + Json(primary) + "\",\"secondarySave\":\"" + Json(secondary) + "\",\"processId\":" + L00CCampaignStorage.SupportedLegacyRecoveryProcessId + "}");
+        string sentinel = Path.Combine(saves, "unrelated-user-save.vcdbs"); File.WriteAllText(sentinel, "never-delete");
+        return new LegacyFixture(root, saves, campaign, evidence, provenance, primary, secondary, sentinel);
+    }
+    private static void Mint(LegacyFixture x)
+    {
+        x.SealHash = MintWithProof(x, () => true);
+        x.ManifestHash = HashPath(x.Manifest);
+    }
+    private static string MintWithProof(LegacyFixture x, Func<bool> stopped) => L00CCampaignStorage.CreateLegacyPreJournalRecoveryManifest(x.Root, x.Saves, L00CCampaignStorage.SupportedLegacyRecoveryRunId, L00CCampaignStorage.SupportedLegacyRecoveryProcessId, x.Primary, x.PrimaryHash, x.ProvenanceHash, L00CCampaignStorage.LegacyRecoveryAttestation, stopped);
+    private static void Clean(LegacyFixture x, Func<bool>? stopped = null) => L00CCampaignStorage.CleanupLegacyPreJournalAfterRuntimeStopped(x.Root, x.Saves, L00CCampaignStorage.SupportedLegacyRecoveryRunId, L00CCampaignStorage.SupportedLegacyRecoveryProcessId, x.ManifestHash, x.SealHash, stopped ?? (() => true));
+    private static Func<bool> StatefulProof(params bool[] values)
+    {
+        int index = 0;
+        return () => values[index < values.Length ? index++ : values.Length - 1];
+    }
+    private static void ExpectLegacyPreserved(LegacyFixture x, Action action)
+    {
+        byte[] before = File.ReadAllBytes(x.Primary); byte[] sentinel = File.ReadAllBytes(x.Sentinel); Expect(action);
+        Check(File.Exists(x.Primary) && Bytes(before, File.ReadAllBytes(x.Primary)) && Bytes(sentinel, File.ReadAllBytes(x.Sentinel)));
+    }
+    private static string HashPath(string path) { using SHA256 h = SHA256.Create(); using FileStream f = File.OpenRead(path); byte[] b = h.ComputeHash(f); var s = new StringBuilder(64); foreach (byte x in b) s.Append(x.ToString("X2")); return s.ToString(); }
+    private static string Json(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    private sealed class LegacyFixture
+    {
+        internal LegacyFixture(string root, string saves, string campaign, string evidence, string provenance, string primary, string secondary, string sentinel)
+        {
+            Root=root; Saves=saves; Campaign=campaign; Evidence=evidence; Provenance=provenance; Primary=primary; Secondary=secondary; Sentinel=sentinel;
+            Manifest=Path.Combine(campaign,"legacy-prejournal-recovery-manifest.json"); Seal=Path.Combine(campaign,"legacy-prejournal-recovery-seal.json"); Intent=Path.Combine(campaign,"legacy-prejournal-recovery-intent.json"); Cleaned=Path.Combine(campaign,"legacy-prejournal-recovery-cleaned.json");
+            PrimaryHash=HashPath(primary); ProvenanceHash=HashPath(provenance); ManifestHash=string.Empty; SealHash=string.Empty;
+        }
+        internal string Root { get; } internal string Saves { get; } internal string Campaign { get; } internal string Evidence { get; } internal string Provenance { get; }
+        internal string Primary { get; } internal string Secondary { get; } internal string Sentinel { get; } internal string Manifest { get; } internal string Seal { get; } internal string Intent { get; } internal string Cleaned { get; }
+        internal string PrimaryHash { get; } internal string ProvenanceHash { get; } internal string ManifestHash { get; set; } internal string SealHash { get; set; }
+    }
     private static void Check(bool value) { if (!value) throw new InvalidOperationException("L00-C AppData storage oracle failed."); }
     private static void Expect(Action action) { try { action(); } catch (InvalidOperationException) { return; } throw new InvalidOperationException("L00-C oracle expected refusal."); }
 }
