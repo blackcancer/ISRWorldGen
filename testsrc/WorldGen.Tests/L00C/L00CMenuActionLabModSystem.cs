@@ -32,8 +32,12 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         string root = RequireLaboratoryRoot();
         api.Event.LevelFinalize += OnLevelFinalize;
         levelFinalizeApi = api;
-        pendingLease = L00CProcessCampaignController.InstallOrSignal(api, root);
-        Mod.Logger.Notification("L00C_INPROCESS_HARNESS_READY: process-lifetime ScreenManager pump installed or signalled.");
+        L00CProcessCampaignInstallResult installed = L00CProcessCampaignController.InstallOrSignal(api, root);
+        pendingLease = installed.Lease;
+        if (installed.Accepted)
+            Mod.Logger.Notification("L00C_INPROCESS_HARNESS_READY: process-lifetime ScreenManager pump installed or signalled.");
+        else
+            Mod.Logger.Error("L00C_INPROCESS_HARNESS_REFUSED code=" + installed.Diagnostic);
 #endif
     }
 

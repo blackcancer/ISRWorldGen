@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Globalization;
 
@@ -16,28 +17,29 @@ public sealed class L00CMenuActionLaboratoryHost
     private readonly string evidenceDirectory;
     private readonly L00CMarkedSaveCell primary;
     private readonly L00CMarkedSaveCell secondary;
+    private readonly L00CCampaignStorage campaign;
     private readonly List<string> chronology = new();
     private State state = State.ExpectPrimaryMenu;
     private int primaryCycles;
     private int stableTicks;
 
-    private L00CMenuActionLaboratoryHost(string evidenceDirectory, L00CMarkedSaveCell primary, L00CMarkedSaveCell secondary)
-    { this.evidenceDirectory = evidenceDirectory; this.primary = primary; this.secondary = secondary; }
+    private L00CMenuActionLaboratoryHost(L00CCampaignStorage campaign, string evidenceDirectory, L00CMarkedSaveCell primary, L00CMarkedSaveCell secondary)
+    { this.campaign = campaign; this.evidenceDirectory = evidenceDirectory; this.primary = primary; this.secondary = secondary; }
 
     /// <summary>Creates a controller bound to two observed laboratory save cells.</summary>
-    public static L00CMenuActionLaboratoryHost Open(string laboratoryRoot, string evidenceDirectory, string primarySave, string secondarySave)
+    internal static L00CMenuActionLaboratoryHost Open(L00CCampaignStorage campaign, string evidenceDirectory, string primarySave, string secondarySave)
     {
         RequireDebugLaboratory();
-        L00CMarkedSaveCell primary = RequireMarkedSave(laboratoryRoot, primarySave, "activated-primary");
-        L00CMarkedSaveCell secondary = RequireMarkedSave(laboratoryRoot, secondarySave, "activated-secondary");
-        if (string.Equals(primary.SavePath, secondary.SavePath, StringComparison.OrdinalIgnoreCase) || primary.CellIndex == secondary.CellIndex)
-            throw new InvalidOperationException("L00-C requires distinct marked saves and distinct confirmed menu cells.");
-        string root = CanonicalLaboratoryRoot(laboratoryRoot);
+        if (campaign is null) throw new ArgumentNullException(nameof(campaign));
+        L00CMarkedSaveCell primary = RequireMarkedSave(campaign, primarySave, "activated-primary");
+        L00CMarkedSaveCell secondary = RequireMarkedSave(campaign, secondarySave, "activated-secondary");
+        if (string.Equals(primary.SavePath, secondary.SavePath, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("L00-C requires distinct marked saves.");
+        string root = CanonicalLaboratoryRoot(campaign.LaboratoryRoot);
         string evidence = Path.GetFullPath(evidenceDirectory);
         if (!IsUnder(evidence, root) || Directory.Exists(evidence) || File.Exists(evidence))
             throw new InvalidOperationException("L00-C evidence must be a new directory under the marked laboratory root.");
         Directory.CreateDirectory(evidence);
-        var host = new L00CMenuActionLaboratoryHost(evidence, primary, secondary);
+        var host = new L00CMenuActionLaboratoryHost(campaign, evidence, primary, secondary);
         host.Record("host-open", null, "ready");
         host.WriteReceipt("opened");
         return host;
@@ -59,7 +61,8 @@ public sealed class L00CMenuActionLaboratoryHost
     {
         RequireDebugLaboratory();
         if (state != State.PrimaryMenuOpen || primaryCycles >= RequiredPrimaryCycles) throw new InvalidOperationException("L00-C primary open is outside the expected transition.");
-        L00CMenuActionReceipt receipt = L00CMenuActionDriver.ReopenPrimaryWorld(singleplayerScreen, primary.CellIndex);
+        int cellIndex = RebindCurrentCell(singleplayerScreen, primary.SavePath);
+        L00CMenuActionReceipt receipt = L00CMenuActionDriver.ReopenPrimaryWorld(singleplayerScreen, cellIndex);
         primaryCycles++; state = State.PrimaryWorldOpen;
         Record(receipt.Action, primary, receipt.TargetMethod); WriteReceipt("primary-open-" + primaryCycles);
     }
@@ -69,7 +72,8 @@ public sealed class L00CMenuActionLaboratoryHost
     {
         RequireDebugLaboratory();
         if (state != State.SecondaryMenuOpen || primaryCycles != RequiredPrimaryCycles) throw new InvalidOperationException("L00-C secondary open is outside the expected transition.");
-        L00CMenuActionReceipt receipt = L00CMenuActionDriver.ReopenPrimaryWorld(singleplayerScreen, secondary.CellIndex);
+        int cellIndex = RebindCurrentCell(singleplayerScreen, secondary.SavePath);
+        L00CMenuActionReceipt receipt = L00CMenuActionDriver.ReopenPrimaryWorld(singleplayerScreen, cellIndex);
         state = State.SecondaryWorldOpen;
         Record("open-secondary-world", secondary, receipt.TargetMethod); WriteReceipt("secondary-open");
     }
@@ -125,7 +129,7 @@ public sealed class L00CMenuActionLaboratoryHost
                 if (++stableTicks < 3 || !L00CMenuActionDriver.TryFindClientSession(screenManager, out object? clientMain, out _) || clientMain is null) return false;
                 stableTicks = 0; ReturnToMainMenu(clientMain, screenManager); return false;
             case State.ReadyToComplete:
-                Complete(); return true;
+                Complete(); campaign.SealForExternalCleanup(); return true;
             case State.Completed:
                 return true;
             default:
@@ -135,33 +139,30 @@ public sealed class L00CMenuActionLaboratoryHost
 
     private void Record(string action, L00CMarkedSaveCell? target, string method)
     {
-        string targetText = target is null ? "none" : target.Role + "|" + target.SavePath + "|cell=" + target.CellIndex + "|confirmed=true";
+        string targetText = target is null ? "none" : target.Role + "|" + target.SavePath + "|rebound=true";
         chronology.Add(DateTimeOffset.UtcNow.ToString("o") + "|" + action + "|" + targetText + "|" + method);
     }
 
     private void WriteReceipt(string phase)
     {
         string receipt = Path.Combine(evidenceDirectory, string.Format("{0:D2}-{1}.json", chronology.Count, phase));
-        string json = "{\"schema\":\"l00c-menu-action-lab-v2\",\"phase\":\"" + Escape(phase) + "\",\"state\":\"" + state + "\",\"strictWorkflow\":\"five-primary-menu-open-return;secondary-menu-open-final-return\",\"finalSecondaryReturnRequired\":true,\"primaryCycles\":" + primaryCycles + ",\"primaryCellIndex\":" + primary.CellIndex + ",\"secondaryCellIndex\":" + secondary.CellIndex + ",\"driverVersion\":\"" + L00CMenuActionDriver.RequiredLibVersion + "\",\"driverVintagestoryLibSha256\":\"" + L00CMenuActionDriver.RequiredLibSha256 + "\",\"chronology\":[" + string.Join(",", chronology.ConvertAll(x => "\"" + Escape(x) + "\"")) + "]}";
+        string json = "{\"schema\":\"l00c-menu-action-lab-v3\",\"phase\":\"" + Escape(phase) + "\",\"state\":\"" + state + "\",\"strictWorkflow\":\"five-primary-menu-open-return;secondary-menu-open-final-return\",\"finalSecondaryReturnRequired\":true,\"primaryCycles\":" + primaryCycles + ",\"cellBinding\":\"rebound-by-canonical-path-before-every-click\",\"driverVersion\":\"" + L00CMenuActionDriver.RequiredLibVersion + "\",\"driverVintagestoryLibSha256\":\"" + L00CMenuActionDriver.RequiredLibSha256 + "\",\"chronology\":[" + string.Join(",", chronology.ConvertAll(x => "\"" + Escape(x) + "\"")) + "]}";
         using var stream = new FileStream(receipt, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         byte[] bytes = Encoding.UTF8.GetBytes(json); stream.Write(bytes, 0, bytes.Length);
     }
 
-    private static L00CMarkedSaveCell RequireMarkedSave(string laboratoryRoot, string save, string expectedRole)
+    private static L00CMarkedSaveCell RequireMarkedSave(L00CCampaignStorage campaign, string save, string expectedRole)
     {
-        string root = CanonicalLaboratoryRoot(laboratoryRoot);
+        string root = CanonicalLaboratoryRoot(campaign.LaboratoryRoot);
         string savePath = Path.GetFullPath(save);
-        if (!File.Exists(savePath) || !Directory.Exists(root) || !IsUnder(savePath, Path.Combine(root, "saves")) || !savePath.EndsWith(".vcdbs", StringComparison.OrdinalIgnoreCase) || !File.Exists(Path.Combine(root, ".isrworldgen-lab"))) throw new InvalidOperationException("L00-C refuses an unmarked or out-of-laboratory save.");
-        string marker = savePath + ".l00c-lab.json";
+        if (!File.Exists(savePath) || !Directory.Exists(root) || !L00CCampaignStorage.IsCampaignSavePath(root, campaign.GameSavesDirectory, savePath)) throw new InvalidOperationException("L00-C refuses an unmarked or out-of-campaign save.");
+        string marker = L00CCampaignStorage.MarkerPath(savePath);
         if (!File.Exists(marker)) throw new InvalidOperationException("L00-C save marker is absent.");
         L00CStrictJsonObject json = L00CStrictJsonObject.Parse(File.ReadAllText(marker));
-        json.RequireExactly("Schema", "WorldRole", "SavePath", "LaboratoryRoot", "ClientSaveCellIndex", "ClientCellBindingConfirmed", "CreatedUtc");
-        string markerRoot = Path.GetFullPath(json.RequiredString("LaboratoryRoot"));
-        string markerSave = Path.GetFullPath(json.RequiredString("SavePath"));
-        string role = json.RequiredString("WorldRole");
-        int cell = json.RequiredNonNegativeInt("ClientSaveCellIndex");
-        if (!string.Equals(json.RequiredString("Schema"), "l00c-lab-save-marker-v1", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(json.RequiredString("CreatedUtc")) || !string.Equals(markerRoot, root, StringComparison.OrdinalIgnoreCase) || !string.Equals(markerSave, savePath, StringComparison.OrdinalIgnoreCase) || !string.Equals(role, expectedRole, StringComparison.Ordinal) || !json.RequiredTrue("ClientCellBindingConfirmed")) throw new InvalidOperationException("L00-C marker does not canonically bind this laboratory save and confirmed client cell.");
-        return new L00CMarkedSaveCell(role, savePath, cell);
+        json.RequireExactly("schema", "runId", "role", "savePath", "provenancePath", "sha256");
+        string markerSave = Path.GetFullPath(json.RequiredString("savePath")); string role = json.RequiredString("role");
+        if (!string.Equals(json.RequiredString("schema"), "l00c-appdata-save-marker-v1", StringComparison.Ordinal) || !string.Equals(json.RequiredString("runId"), campaign.RunId, StringComparison.Ordinal) || !string.Equals(json.RequiredString("provenancePath"), campaign.ProvenancePath, StringComparison.OrdinalIgnoreCase) || !string.Equals(markerSave, savePath, StringComparison.OrdinalIgnoreCase) || !string.Equals(role, expectedRole, StringComparison.Ordinal)) throw new InvalidOperationException("L00-C marker does not canonically bind this campaign save.");
+        return new L00CMarkedSaveCell(role, savePath);
     }
 
     private static string CanonicalLaboratoryRoot(string path)
@@ -170,6 +171,29 @@ public sealed class L00CMenuActionLaboratoryHost
         DirectoryInfo? parent = Directory.GetParent(root);
         if (parent is null || !string.Equals(Path.GetFileName(root), "L00C", StringComparison.OrdinalIgnoreCase) || !string.Equals(parent.Name, ".local", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("L00-C requires the real repository .local\\L00C root.");
         return root;
+    }
+
+    // The native menu can sort/reload between every return.  No index survives
+    // this boundary: inspect this exact screen's entries immediately before the
+    // guarded OnClickCellLeft call, and reject vanished/duplicate paths.
+    private static int RebindCurrentCell(object screen, string expectedSavePath)
+    {
+        Type type = screen.GetType();
+        FieldInfo entries = type.GetField("entries", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new InvalidOperationException("L00-C singleplayer entries drifted.");
+        Array values = entries.GetValue(screen) as Array ?? throw new InvalidOperationException("L00-C singleplayer entries absent.");
+        Type entryType = entries.FieldType.GetElementType() ?? throw new InvalidOperationException("L00-C save-entry shape drifted.");
+        FieldInfo filename = entryType.GetField("Filename", BindingFlags.Instance | BindingFlags.Public) ?? throw new InvalidOperationException("L00-C save-entry filename drifted.");
+        int found = -1;
+        for (int i = 0; i < values.Length; i++)
+        {
+            object? entry = values.GetValue(i);
+            if (entry is null || filename.GetValue(entry) is not string value) continue;
+            if (!string.Equals(Path.GetFullPath(value), Path.GetFullPath(expectedSavePath), StringComparison.OrdinalIgnoreCase)) continue;
+            if (found >= 0) throw new InvalidOperationException("L00-C refuses duplicate live save cell.");
+            found = i;
+        }
+        if (found < 0 || !File.Exists(expectedSavePath)) throw new InvalidOperationException("L00-C refuses disappeared live save cell.");
+        return found;
     }
 
     private static bool IsUnder(string path, string root) => path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
@@ -183,7 +207,7 @@ public sealed class L00CMenuActionLaboratoryHost
     }
     private static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
     private enum State { ExpectPrimaryMenu, PrimaryMenuOpen, PrimaryWorldOpen, ExpectSecondaryMenu, SecondaryMenuOpen, SecondaryWorldOpen, ReadyToComplete, Completed }
-    private sealed class L00CMarkedSaveCell { internal L00CMarkedSaveCell(string role, string savePath, int cellIndex) { Role = role; SavePath = savePath; CellIndex = cellIndex; } internal string Role { get; } internal string SavePath { get; } internal int CellIndex { get; } }
+    private sealed class L00CMarkedSaveCell { internal L00CMarkedSaveCell(string role, string savePath) { Role = role; SavePath = savePath; } internal string Role { get; } internal string SavePath { get; } }
 
     // Small strict object parser: no external JSON package, duplicate keys, trailing data,
     // fractions and scientific notation are refused before marker values are consumed.

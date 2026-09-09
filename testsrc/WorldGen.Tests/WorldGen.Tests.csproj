@@ -40,6 +40,9 @@
     <Compile Remove="L00C\L00CMenuActionLaboratoryHost.cs" />
     <Compile Remove="L00C\L00CMenuActionDriver.cs" />
     <Compile Remove="L00C\L00CFixtureBootstrap.cs" />
+    <Compile Remove="L00C\L00CCampaignStorage.cs" />
+    <Compile Remove="L00C\L00CStrictEvidenceJson.cs" />
+    <Compile Remove="L00C\L00CCampaignInstallFailure.cs" />
     <Compile Remove="L00C\L00CProcessCampaignController.cs" />
     <Compile Remove="L00C\L00CManagerLeaseLifecycle.cs" />
     <Compile Remove="L00C\L00CManagerLeaseLifecycleTests.cs" />
@@ -49,5 +52,7 @@
     <!-- Stand-alone reflection oracle; it supplies its own entry point and is
          invoked by its PowerShell wrapper, not by the MSTest assembly. -->
     <Compile Remove="L00C\L00CClientSessionResolverTests.cs" />
+    <Compile Remove="L00C\L00CCampaignStorageOracle.cs" />
+    <Compile Remove="L00C\L00CMenuCellRebindingOracle.cs" />
   </ItemGroup>
 </Project>

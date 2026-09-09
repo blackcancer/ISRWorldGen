@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $project = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
 $testProject = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\WorldGen.Tests.csproj'
-$sources = @('L00CMenuActionLabModSystem.cs','L00CMenuActionLaboratoryHost.cs','L00CMenuActionDriver.cs','L00CFixtureBootstrap.cs','L00CProcessCampaignController.cs','L00CNativeFixtureOracle.cs') | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$sources = @('L00CMenuActionLabModSystem.cs','L00CMenuActionLaboratoryHost.cs','L00CMenuActionDriver.cs','L00CFixtureBootstrap.cs','L00CCampaignStorage.cs','L00CCampaignInstallFailure.cs','L00CProcessCampaignController.cs','L00CNativeFixtureOracle.cs') | ForEach-Object { Join-Path $PSScriptRoot $_ }
 foreach ($file in @($project, $testProject) + $sources) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Required in-process L00-C input is missing: $file" } }
 $projectXml = Get-Content -LiteralPath $project -Raw; $testXml = Get-Content -LiteralPath $testProject -Raw
 foreach ($source in $sources) {

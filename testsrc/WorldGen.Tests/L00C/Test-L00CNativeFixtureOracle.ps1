@@ -3,7 +3,7 @@ param([string]$GamePath = 'D:\Jeux\Vintagestory')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$sources = @('L00CMenuActionDriver.cs','L00CMenuActionLaboratoryHost.cs','L00CFixtureBootstrap.cs','L00CNativeFixtureOracle.cs') | ForEach-Object { Join-Path $root $_ }
+$sources = @('L00CMenuActionDriver.cs','L00CMenuActionLaboratoryHost.cs','L00CFixtureBootstrap.cs','L00CStrictEvidenceJson.cs','L00CCampaignStorage.cs','L00CNativeFixtureOracle.cs') | ForEach-Object { Join-Path $root $_ }
 $csc = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
 foreach ($path in @($sources + $csc, (Join-Path $GamePath 'VintagestoryLib.dll'), (Join-Path $GamePath 'VintagestoryAPI.dll'), (Join-Path $GamePath 'Lib\Newtonsoft.Json.dll'))) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "L00-C native fixture oracle is missing $path" } }
 $out = Join-Path ([IO.Path]::GetTempPath()) ('l00c-native-fixture-oracle-' + [Guid]::NewGuid().ToString('N') + '.dll')

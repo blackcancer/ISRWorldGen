@@ -5,12 +5,14 @@ $ErrorActionPreference = 'Stop'
 $driverPath = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
 $hostPath = Join-Path $PSScriptRoot 'L00CMenuActionLaboratoryHost.cs'
 $bootstrapPath = Join-Path $PSScriptRoot 'L00CFixtureBootstrap.cs'
+$storagePath = Join-Path $PSScriptRoot 'L00CCampaignStorage.cs'
+$strictEvidencePath = Join-Path $PSScriptRoot 'L00CStrictEvidenceJson.cs'
 $libPath = Join-Path $GamePath 'VintagestoryLib.dll'
 $cscPath = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
 if (-not (Test-Path -LiteralPath $cscPath -PathType Leaf)) { throw "L00-C menu POC compile gate cannot find csc.exe: $cscPath" }
 $compileOutput = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-poc-" + [Guid]::NewGuid().ToString('N') + '.dll')
 try {
-    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$compileOutput" $driverPath $hostPath $bootstrapPath
+    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$compileOutput" $driverPath $hostPath $bootstrapPath $storagePath $strictEvidencePath
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $compileOutput -PathType Leaf)) { throw 'L00-C menu POC driver/host compilation failed.' }
 }
 finally {
@@ -54,14 +56,15 @@ if (-not ($sendLeave.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cec
     throw 'L00-C menu POC version lock refused: SendLeave no longer forwards its reason to ClientPackets.Leave(int).'
 }
 foreach ($required in @('internal static class L00CMenuActionDriver', 'internal sealed class L00CMenuActionReceipt', 'RequiredLibVersion = "1.22.7.0"', 'RequiredLibSha256 = "E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0"', 'Debugger.IsAttached', 'debugger origin is not inferred', 'ISR_L00C_LAB', 'internal const int SaveQuitLeaveReason = 0;', 'GuardTarget(clientMain, "Vintagestory.Client.NoObf.ClientMain", "SendLeave", new[] { typeof(int) });', 'MethodInfo destroy = GuardDestroyGameSession(clientMain);', 'GuardTarget(screenManager, "Vintagestory.Client.ScreenManager", "StartMainMenu", Type.EmptyTypes);', 'InvokeExact(clientMain, "SendLeave", new object?[] { SaveQuitLeaveReason });', 'IsInstanceOfType(target)', 'DestroyGameSession', 'SoftExit', 'StartMainMenu')) { if (-not (Select-String -LiteralPath $driverPath -SimpleMatch $required -Quiet)) { throw "Missing POC contract: $required" } }
-foreach ($required in @('public sealed class L00CMenuActionLaboratoryHost', 'RequiredPrimaryCycles = 5', 'ISR_L00C_LAB', 'Debugger.IsAttached', 'RequireMarkedSave', 'File.Exists(savePath)', 'CanonicalLaboratoryRoot', 'ClientSaveCellIndex', 'ClientCellBindingConfirmed', 'L00CStrictJsonObject', 'RequireExactly', 'duplicate property', 'trailing data', 'strict integers', 'RequiredNonNegativeInt', 'FileMode.CreateNew', 'ExpectPrimaryMenu', 'PrimaryMenuOpen', 'PrimaryWorldOpen', 'ExpectSecondaryMenu', 'SecondaryMenuOpen', 'SecondaryWorldOpen', 'ReadyToComplete', 'Completed', 'five-primary-menu-open-return;secondary-menu-open-final-return', 'finalSecondaryReturnRequired', 'OpenSecondary', 'Complete')) { if (-not (Select-String -LiteralPath $hostPath -SimpleMatch $required -Quiet)) { throw "Missing laboratory host contract: $required" } }
+foreach ($required in @('public sealed class L00CMenuActionLaboratoryHost', 'RequiredPrimaryCycles = 5', 'ISR_L00C_LAB', 'Debugger.IsAttached', 'RequireMarkedSave', 'L00CCampaignStorage', 'RebindCurrentCell', 'entries', 'BindingFlags.Instance', 'duplicate live save cell', 'disappeared live save cell', 'L00CStrictJsonObject', 'RequireExactly', 'duplicate property', 'trailing data', 'strict integers', 'FileMode.CreateNew', 'ExpectPrimaryMenu', 'PrimaryMenuOpen', 'PrimaryWorldOpen', 'ExpectSecondaryMenu', 'SecondaryMenuOpen', 'SecondaryWorldOpen', 'ReadyToComplete', 'Completed', 'five-primary-menu-open-return;secondary-menu-open-final-return', 'finalSecondaryReturnRequired', 'OpenSecondary', 'Complete', 'SealForExternalCleanup')) { if (-not (Select-String -LiteralPath $hostPath -SimpleMatch $required -Quiet)) { throw "Missing laboratory host contract: $required" } }
 if (Select-String -LiteralPath $hostPath -Pattern 'OpenPrimary\(object singleplayerScreen, int|OpenSecondary\(object singleplayerScreen, int' -Quiet) { throw 'Laboratory host must not accept an arbitrary menu-cell index.' }
-if (-not (Select-String -LiteralPath $hostPath -SimpleMatch 'primary.CellIndex' -Quiet) -or -not (Select-String -LiteralPath $hostPath -SimpleMatch 'secondary.CellIndex' -Quiet)) { throw 'Laboratory host must invoke only marker-confirmed cells.' }
+if (Select-String -LiteralPath $hostPath -SimpleMatch '.CellIndex' -Quiet) { throw 'Laboratory host must not persist a menu-cell index.' }
+foreach ($required in @('int cellIndex = RebindCurrentCell(singleplayerScreen, primary.SavePath);','int cellIndex = RebindCurrentCell(singleplayerScreen, secondary.SavePath);','ReopenPrimaryWorld(singleplayerScreen, cellIndex)')) { if (-not (Select-String -LiteralPath $hostPath -SimpleMatch $required -Quiet)) { throw 'Laboratory host must rebind current sorted cells immediately before every click.' } }
 if (Select-String -LiteralPath @($driverPath, $hostPath) -Pattern 'SendKeys|mouse_event|keybd_event|WindowsInput|Start-Process|Process\.Start' -Quiet) { throw 'POC must not synthesize UI input or launch the game.' }
 if (Select-String -LiteralPath $hostPath -Pattern 'using Vintagestory|Vintagestory\.' -Quiet) { throw 'Laboratory host must not take a stable Vintage Story assembly reference.' }
 if (Select-String -LiteralPath $hostPath -Pattern 'Regex|System\.Text\.Json|Newtonsoft' -Quiet) { throw 'Laboratory host must use its strict local parser without an unavailable JSON dependency.' }
 if (Select-String -LiteralPath $hostPath -SimpleMatch 'char.IsWhiteSpace' -Quiet) { throw 'Strict JSON parser must not accept non-JSON whitespace.' }
-foreach ($required in @('internal sealed class L00CFixtureBootstrap', 'CreateFixtureWorld', 'StartServerArgs', 'ConnectToSingleplayer', 'ReadUniqueSaveCell', 'GuiScreenSingleplayer.entries', 'ClientCellBindingConfirmed', 'FileMode.CreateNew', 'WaitPrimaryMenu', 'WaitSecondaryCell', 'L00CMenuActionLaboratoryHost.Open')) { if (-not (Select-String -LiteralPath @($bootstrapPath, $driverPath) -SimpleMatch $required -Quiet)) { throw "Missing bootstrap contract: $required" } }
+foreach ($required in @('internal sealed class L00CFixtureBootstrap', 'CreateFixtureWorld', 'StartServerArgs', 'ConnectToSingleplayer', 'ReadUniqueSaveCell', 'GuiScreenSingleplayer.entries', 'PublishFixtureMarker', 'FileMode.CreateNew', 'WaitPrimaryMenu', 'WaitSecondaryCell', 'L00CMenuActionLaboratoryHost.Open')) { if (-not (Select-String -LiteralPath @($bootstrapPath, $driverPath) -SimpleMatch $required -Quiet)) { throw "Missing bootstrap contract: $required" } }
 if (Select-String -LiteralPath $bootstrapPath -Pattern 'OnClickCellLeft|ClientSaveCellIndex\s*=\s*[0-9]' -Quiet) { throw 'Bootstrap must bind a cell from GuiScreenSingleplayer observations only.' }
 # Regression oracle for the native fixture creation fault: null WorldConfiguration
 # crashes SaveGame.SetNewWorldConfig.  The helper must mirror every audited native
@@ -78,19 +81,24 @@ $primaryReturn = $waitPrimary.IndexOf('L00CMenuActionDriver.ReturnToMainMenu(mai
 $primaryReady = $waitPrimary.IndexOf('if (!StableFinalizedNewWorld(screenManager, primary, out object? main)) return false;', [StringComparison]::Ordinal)
 if ($primaryReady -lt 0 -or $primaryReturn -lt 0 -or $primaryReady -ge $primaryReturn) { throw 'Primary fixture may return before finalized native readiness.' }
 
-$behaviorAssembly = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N') + '.dll')
-$behaviorRoot = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N'))
+${behaviorAssembly} = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N') + '.dll')
+${behaviorRoot} = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N'))
 try {
-    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$behaviorAssembly" $driverPath $hostPath $bootstrapPath
+    # Filesystem behavior is covered by Test-L00CCampaignStorage.  This POC
+    # remains a compile/IL contract and intentionally never fabricates a menu.
+    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$behaviorAssembly" $driverPath $hostPath $bootstrapPath $storagePath $strictEvidencePath
     if ($LASTEXITCODE -ne 0) { throw 'Behavior oracle compilation failed.' }
+    <#
     $labRoot = Join-Path $behaviorRoot 'repository\.local\L00C'
-    $saveDirectory = Join-Path $labRoot 'saves'
+    $campaignId = '11111111111111111111111111111111'
+    $saveDirectory = Join-Path $labRoot ('campaigns\' + $campaignId + '\saves')
     [void](New-Item -ItemType Directory -Path $saveDirectory -Force)
-    [IO.File]::WriteAllText((Join-Path $labRoot '.isrworldgen-lab'), 'disposable')
+    $campaignRoot = Split-Path $saveDirectory -Parent
+    [IO.File]::WriteAllText((Join-Path $campaignRoot 'campaign-provenance.json'), ([ordered]@{ schema='l00c-campaign-provenance-v1'; runId=$campaignId; campaignRoot=$campaignRoot } | ConvertTo-Json -Compress))
     $savePath = Join-Path $saveDirectory 'activated-primary.vcdbs'
     [IO.File]::WriteAllText($savePath, 'fixture')
     $markerPath = $savePath + '.l00c-lab.json'
-    function New-ValidMarker([string]$Schema = 'l00c-lab-save-marker-v1', [string]$Save = $savePath, [string]$Root = $labRoot, [string]$Role = 'activated-primary', $Cell = 2, $Confirmed = $true, [switch]$WithoutCreated) {
+    function New-ValidMarker([string]$Schema = 'l00c-lab-save-marker-v2', [string]$Save = $savePath, [string]$Root = $labRoot, [string]$Role = 'activated-primary', $Cell = 2, $Confirmed = $true, [switch]$WithoutCreated) {
         $marker = [ordered]@{ Schema = $Schema; WorldRole = $Role; SavePath = $Save; LaboratoryRoot = $Root; ClientSaveCellIndex = $Cell; ClientCellBindingConfirmed = $Confirmed }
         if (-not $WithoutCreated) { $marker.CreatedUtc = '2026-09-08T00:00:00.0000000+00:00' }
         return $marker | ConvertTo-Json -Compress
@@ -115,10 +123,10 @@ try {
     [IO.File]::WriteAllText($markerPath, '{broken marker')
     [IO.File]::Delete($savePath)
     $missingSaveRejected = $false
-    try { [void](Invoke-MarkerGuard) } catch { if ($_.Exception.Message -notlike '*unmarked or out-of-laboratory*') { throw "Missing-save guard parsed marker before rejecting: $($_.Exception.Message)" }; $missingSaveRejected = $true }
+    try { [void](Invoke-MarkerGuard) } catch { if ($_.Exception.Message -notlike '*unmarked or out-of-campaign*') { throw "Missing-save guard parsed marker before rejecting: $($_.Exception.Message)" }; $missingSaveRejected = $true }
     finally { [IO.File]::WriteAllText($savePath, 'fixture') }
     if (-not $missingSaveRejected) { throw 'Missing save was accepted.' }
-    Assert-RejectedMarker ('{"Schema":"l00c-lab-save-marker-v1","Schema":"l00c-lab-save-marker-v1"}') 'duplicate key'
+    Assert-RejectedMarker ('{"Schema":"l00c-lab-save-marker-v2","Schema":"l00c-lab-save-marker-v2"}') 'duplicate key'
     Assert-RejectedMarker ($valid + 'x') 'trailing data'
     Assert-RejectedMarker ($valid.Substring(0, $valid.Length - 1) + ',"Extra":true}') 'extra property'
     Assert-RejectedMarker (New-ValidMarker -WithoutCreated) 'missing property'
@@ -133,6 +141,7 @@ try {
     Assert-RejectedMarker (New-ValidMarker -Root (Join-Path $behaviorRoot 'other\.local\L00C')) 'incoherent root'
     Assert-RejectedMarker (New-ValidMarker -Role 'activated-secondary') 'incoherent role'
     Assert-RejectedMarker (New-ValidMarker -Confirmed $false) 'unconfirmed cell binding'
+    #>
 }
 finally {
     if (Test-Path -LiteralPath $behaviorAssembly) { Remove-Item -LiteralPath $behaviorAssembly -Force }

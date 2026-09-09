@@ -7,6 +7,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using Vintagestory.API.Client;
+using Vintagestory.API.Config;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
@@ -25,8 +26,10 @@ internal sealed class L00CProcessCampaignController
     private static readonly L00CProcessCampaignInstallTransaction<L00CProcessCampaignController> installTransaction = new();
     private static L00CManagerLeaseLifecycle? bootstrapLease;
     private static string? bootstrapRoot;
+    private static L00CCampaignStorage? bootstrapCampaign;
     private readonly object screenManager;
     private readonly string root;
+    private readonly L00CCampaignStorage campaign;
     private readonly string evidence;
     private L00CFixtureBootstrap? bootstrap;
     private L00CMenuActionLaboratoryHost? host;
@@ -34,29 +37,34 @@ internal sealed class L00CProcessCampaignController
     private bool terminal;
     private int sessionSignals;
 
-    private L00CProcessCampaignController(object manager, string laboratoryRoot)
+    private L00CProcessCampaignController(object manager, L00CCampaignStorage campaignStorage)
     {
-        screenManager = manager; root = laboratoryRoot;
-        evidence = Path.Combine(root, "menu-action-evidence", DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffffffZ"));
-        bootstrap = new L00CFixtureBootstrap(root, evidence);
+        screenManager = manager; campaign = campaignStorage; root = campaign.LaboratoryRoot;
+        evidence = campaign.EvidenceDirectory;
+        bootstrap = new L00CFixtureBootstrap(campaign);
     }
 
-    internal static L00CManagerLeaseToken? InstallOrSignal(ICoreClientAPI api, string laboratoryRoot)
+    internal static L00CProcessCampaignInstallResult InstallOrSignal(ICoreClientAPI api, string laboratoryRoot)
     {
         RequireDebugLaboratory();
         if (api is null) throw new ArgumentNullException(nameof(api));
         string root = Path.GetFullPath(laboratoryRoot);
         lock (Gate)
         {
-            if (installTransaction.TrySignalSameRoot(root, value => value.root, value => value.SignalSessionReady())) return null;
-            if (bootstrapLease is not null) { RequireSameRoot(bootstrapRoot!, root); return null; } // one retry listener/pump per process
-            var seams = new VintageManagerLeaseSeams(api, root);
+            if (installTransaction.TrySignalSameRoot(root, value => value.root, value => value.SignalSessionReady())) return L00CProcessCampaignInstallResult.Succeeded(null, "signalled");
+            if (bootstrapLease is not null) { RequireSameRoot(bootstrapRoot!, root); return L00CProcessCampaignInstallResult.Succeeded(null, "waiting"); } // one retry listener/pump per process
+            // The actual Vanilla menu discovery root.  This is intentionally
+            // read-only configuration access: no dataPath override/seam exists.
+            L00CCampaignStorage campaign = L00CCampaignStorage.Create(root, GamePaths.Saves);
+            var seams = new VintageManagerLeaseSeams(api, campaign);
             var engine = new L00CManagerLeaseLifecycle(seams);
-            bootstrapLease = engine; bootstrapRoot = root;
+            bootstrapLease = engine; bootstrapRoot = root; bootstrapCampaign = campaign;
             L00CManagerLeaseToken token = new(engine.Dispose);
             seams.Set(engine, token);
             engine.Start();
-            return bootstrapLease is null ? null : token;
+            return engine.Terminal && !engine.Installed
+                ? L00CProcessCampaignInstallResult.Refused("lease-terminal")
+                : L00CProcessCampaignInstallResult.Succeeded(bootstrapLease is null ? null : token, "installed-or-waiting");
         }
     }
 
@@ -77,21 +85,30 @@ internal sealed class L00CProcessCampaignController
     // Invoked at the ModSystem disposal boundary. This cannot hand off a campaign;
     // it only makes a pending session listener terminal and clears all references.
 
-    private static bool TryInstallResolvedLocked(string laboratoryRoot, object manager, string phase)
+    private static bool TryInstallResolvedLocked(L00CCampaignStorage campaign, object manager, string phase)
     {
-        if (manager is null) { WriteLeaseReceipt(laboratoryRoot, "install-fault", "null-manager"); return false; }
+        if (manager is null) { WriteLeaseReceipt(campaign, "install-fault", "null-manager"); return false; }
         L00CProcessCampaignController? candidate = null;
         try
         {
-            candidate = new L00CProcessCampaignController(manager, laboratoryRoot);
+            candidate = new L00CProcessCampaignController(manager, campaign);
+        }
+        catch (Exception exception)
+        {
+            candidate?.UnregisterAndClearSingleton();
+            WriteLeaseReceipt(campaign, L00CCampaignInstallFailure.ConstructionStatus, L00CCampaignInstallFailure.ConstructionDetail(phase, exception));
+            return false;
+        }
+        try
+        {
             candidate.SignalSessionReady();
             installTransaction.Install(candidate, value => value.QueuePump());
             return true;
         }
         catch (Exception exception)
         {
-            candidate?.UnregisterAndClearSingleton();
-            WriteLeaseReceipt(laboratoryRoot, "install-pump-fault", phase + "-" + exception.GetType().Name);
+            candidate.UnregisterAndClearSingleton();
+            WriteLeaseReceipt(campaign, L00CCampaignInstallFailure.PumpEnqueueStatus, L00CCampaignInstallFailure.PumpEnqueueDetail(phase, exception));
             return false;
         }
     }
@@ -139,11 +156,11 @@ internal sealed class L00CProcessCampaignController
         if (detail is not null) writer.WriteLine("detail=" + detail);
     }
 
-    private static void WriteLeaseReceipt(string laboratoryRoot, string status, string detail)
+    private static void WriteLeaseReceipt(L00CCampaignStorage campaign, string status, string detail)
     {
         try
         {
-            string directory = Path.Combine(laboratoryRoot, "manager-availability-evidence"); Directory.CreateDirectory(directory);
+            string directory = campaign.EvidenceDirectory; Directory.CreateDirectory(directory);
             string file = Path.Combine(directory, DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffffffZ") + "-" + status + ".txt");
             using var stream = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             using var writer = new StreamWriter(stream);
@@ -156,10 +173,10 @@ internal sealed class L00CProcessCampaignController
     private sealed class VintageManagerLeaseSeams : IL00CManagerLeaseSeams
     {
         private ICoreClientAPI? api;
-        private readonly string root;
+        private readonly L00CCampaignStorage campaign;
         private L00CManagerLeaseLifecycle? engine;
         private L00CManagerLeaseToken? token;
-        internal VintageManagerLeaseSeams(ICoreClientAPI clientApi, string laboratoryRoot) { api = clientApi; root = laboratoryRoot; }
+        internal VintageManagerLeaseSeams(ICoreClientAPI clientApi, L00CCampaignStorage campaignStorage) { api = clientApi; campaign = campaignStorage; }
         public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
         internal void Set(L00CManagerLeaseLifecycle value, L00CManagerLeaseToken leaseToken) { engine = value; token = leaseToken; }
         public L00CManagerResolutionStatus Resolve(out object? manager)
@@ -180,13 +197,13 @@ internal sealed class L00CProcessCampaignController
         }
         public void Install(object manager)
         {
-            lock (Gate) { if (!TryInstallResolvedLocked(root, manager, "lease")) throw new InvalidOperationException("L00-C controller install refused."); }
+            lock (Gate) { if (!TryInstallResolvedLocked(campaign, manager, "lease")) throw new InvalidOperationException("L00-C controller install refused."); }
         }
-        public void Receipt(string status, string detail) => WriteLeaseReceipt(root, status, detail);
+        public void Receipt(string status, string detail) => WriteLeaseReceipt(campaign, status, detail);
         public void Release()
         {
             api = null; token?.Complete(); token = null;
-            lock (Gate) { if (ReferenceEquals(bootstrapLease, engine)) { bootstrapLease = null; bootstrapRoot = null; } }
+            lock (Gate) { if (ReferenceEquals(bootstrapLease, engine)) { bootstrapLease = null; bootstrapRoot = null; bootstrapCampaign = null; } }
             engine = null;
         }
     }
@@ -200,4 +217,14 @@ internal sealed class L00CProcessCampaignController
             throw new InvalidOperationException("L00-C process campaign controller requires Debugger.IsAttached and ISR_L00C_LAB=1.");
 #endif
     }
+}
+
+internal sealed class L00CProcessCampaignInstallResult
+{
+    private L00CProcessCampaignInstallResult(bool accepted, L00CManagerLeaseToken? lease, string diagnostic) { Accepted = accepted; Lease = lease; Diagnostic = diagnostic; }
+    internal bool Accepted { get; }
+    internal L00CManagerLeaseToken? Lease { get; }
+    internal string Diagnostic { get; }
+    internal static L00CProcessCampaignInstallResult Succeeded(L00CManagerLeaseToken? lease, string diagnostic) => new(true, lease, diagnostic);
+    internal static L00CProcessCampaignInstallResult Refused(string diagnostic) => new(false, null, diagnostic);
 }

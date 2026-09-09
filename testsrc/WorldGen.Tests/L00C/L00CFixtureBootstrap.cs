@@ -13,6 +13,7 @@ namespace ISRWorldGen.L00C.Laboratory;
 internal sealed class L00CFixtureBootstrap
 {
     private readonly string root;
+    private readonly L00CCampaignStorage campaign;
     private readonly string evidence;
     private readonly Fixture primary;
     private readonly Fixture secondary;
@@ -20,18 +21,17 @@ internal sealed class L00CFixtureBootstrap
     private bool bindingMenuRequested;
     private State state = State.WaitPrimaryMenu;
 
-    internal L00CFixtureBootstrap(string laboratoryRoot, string evidenceDirectory)
+    internal L00CFixtureBootstrap(L00CCampaignStorage campaign)
     {
         RequireDebugLaboratory();
-        root = CanonicalLaboratoryRoot(laboratoryRoot);
+        if (campaign is null) throw new ArgumentNullException(nameof(campaign));
+        this.campaign = campaign;
+        root = CanonicalLaboratoryRoot(campaign.LaboratoryRoot);
         if (!Directory.Exists(root)) throw new InvalidOperationException("L00-C bootstrap requires the existing repository .local\\L00C root.");
-        if (Directory.Exists(evidenceDirectory) || File.Exists(evidenceDirectory)) throw new InvalidOperationException("L00-C bootstrap evidence must be new.");
-        evidence = Path.GetFullPath(evidenceDirectory);
-        if (!IsUnder(evidence, root)) throw new InvalidOperationException("L00-C bootstrap evidence must remain under its laboratory root.");
-        Directory.CreateDirectory(evidence);
-        string saves = Path.Combine(root, "saves"); Directory.CreateDirectory(saves);
-        primary = new Fixture("activated-primary", Path.Combine(saves, "activated-primary.vcdbs"));
-        secondary = new Fixture("activated-secondary", Path.Combine(saves, "activated-secondary.vcdbs"));
+        evidence = Path.GetFullPath(campaign.EvidenceDirectory);
+        if (!Directory.Exists(evidence) || !IsUnder(evidence, campaign.CampaignRoot)) throw new InvalidOperationException("L00-C bootstrap evidence must be the attested campaign evidence directory.");
+        primary = new Fixture("activated-primary", campaign.PrimarySavePath);
+        secondary = new Fixture("activated-secondary", campaign.SecondarySavePath);
         if (File.Exists(primary.SavePath) || File.Exists(secondary.SavePath)) throw new InvalidOperationException("L00-C bootstrap refuses to overwrite a fixture save.");
         Receipt("bootstrap-open", null, "ready");
     }
@@ -61,7 +61,7 @@ internal sealed class L00CFixtureBootstrap
             case State.WaitSecondaryCell:
                 if (!TryBind(screenManager, secondary)) return false;
                 Publish(secondary); Receipt("secondary-cell-confirmed", secondary, "GuiScreenSingleplayer.entries");
-                completedHost = L00CMenuActionLaboratoryHost.Open(root, Path.Combine(evidence, "campaign"), primary.SavePath, secondary.SavePath);
+        completedHost = L00CMenuActionLaboratoryHost.Open(campaign, Path.Combine(evidence, "menu-actions"), primary.SavePath, secondary.SavePath);
                 state = State.Completed; Receipt("bootstrap-complete", null, "host-open"); return true;
             case State.Completed: return true;
             default: throw new InvalidOperationException("L00-C bootstrap entered an unknown state.");
@@ -70,6 +70,9 @@ internal sealed class L00CFixtureBootstrap
 
     private void Create(object screenManager, Fixture fixture)
     {
+        // A post-prepare collision is a hard refusal immediately before native
+        // StartServerArgs/ConnectToSingleplayer; no existing save is ever used.
+        campaign.RequireVacantNativeCreateTarget(fixture.Role, fixture.SavePath);
         fixture.LevelFinalizeObserved = false;
         L00CMenuActionReceipt receipt = L00CMenuActionDriver.CreateFixtureWorld(screenManager, fixture.Role, fixture.SavePath);
         Receipt(receipt.Action, fixture, receipt.TargetMethod);
@@ -135,15 +138,10 @@ internal sealed class L00CFixtureBootstrap
     private void Publish(Fixture fixture)
     {
         if (fixture.CellIndex < 0 || !File.Exists(fixture.SavePath)) throw new InvalidOperationException("L00-C bootstrap cannot publish an unobserved fixture.");
-        string marker = fixture.SavePath + ".l00c-lab.json";
-        if (File.Exists(marker)) throw new InvalidOperationException("L00-C bootstrap refuses to replace an existing cell marker.");
-        string json = "{\"Schema\":\"l00c-lab-save-marker-v1\",\"WorldRole\":\"" + fixture.Role + "\",\"SavePath\":\"" + Escape(fixture.SavePath) + "\",\"LaboratoryRoot\":\"" + Escape(root) + "\",\"ClientSaveCellIndex\":" + fixture.CellIndex + ",\"ClientCellBindingConfirmed\":true,\"CreatedUtc\":\"" + DateTimeOffset.UtcNow.ToString("o") + "\"}";
-        using (var markerStream = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { byte[] bytes = Encoding.UTF8.GetBytes(json); markerStream.Write(bytes, 0, bytes.Length); }
-        string lab = Path.Combine(root, ".isrworldgen-lab");
-        if (!File.Exists(lab))
-        {
-            using var markerStream = new FileStream(lab, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        } // Publish only after real native evidence.
+        campaign.PublishFixtureMarker(fixture.Role, fixture.SavePath);
+        // The cell index is proof that creation reached Vanilla discovery only.
+        // It is deliberately not persisted: every later click rebinding scans the
+        // freshly loaded/sorted GuiScreenSingleplayer entries by canonical path.
     }
     private void Receipt(string phase, Fixture? fixture, string detail)
     {
