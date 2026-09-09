@@ -3,7 +3,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using ISRWorldGen.WorldgenProbe;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -34,13 +33,39 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) return;
         string root = RequireLaboratoryRoot();
         RecordF5LaunchAcquisition(root);
+        if (levelFinalizeApi is not null)
+        {
+            if (!ReferenceEquals(levelFinalizeApi, api))
+                throw new InvalidOperationException("L00-C refuses to reuse one ModSystem across distinct client sessions.");
+            Mod.Logger.Notification("L00C_INPROCESS_HARNESS_READY: duplicate StartClientSide matched the acquired process/session and made no changes.");
+            return;
+        }
         L00CProcessCampaignInstallResult installed = L00CProcessCampaignController.InstallOrSignal(api, root);
-        pendingLease = installed.Lease;
         if (installed.Accepted)
         {
-            finalizeLease = installed.FinalizeLease ?? throw new InvalidOperationException("L00-C accepted install omitted its finalize-session lease.");
-            api.Event.LevelFinalize += OnLevelFinalize;
+            L00CLevelFinalizeSessionLease sessionLease = installed.FinalizeLease
+                ?? throw new InvalidOperationException("L00-C accepted install omitted its finalize-session lease.");
+            pendingLease = installed.Lease;
+            finalizeLease = sessionLease;
             levelFinalizeApi = api;
+            try
+            {
+                api.Event.LevelFinalize += OnLevelFinalize;
+            }
+            catch
+            {
+                // Event accessors are external code.  A throwing add may have
+                // attached before failing, so make one bounded removal attempt.
+                try { api.Event.LevelFinalize -= OnLevelFinalize; }
+                catch { /* controller/session compensation below is authoritative */ }
+                levelFinalizeApi = null;
+                finalizeLease = null;
+                L00CManagerLeaseToken? retained = pendingLease;
+                pendingLease = null;
+                retained?.Complete();
+                L00CProcessCampaignController.AbortSessionRegistration(sessionLease);
+                throw;
+            }
             Mod.Logger.Notification("L00C_INPROCESS_HARNESS_READY: process-lifetime ScreenManager pump installed or signalled.");
         }
         else
@@ -55,12 +80,14 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         ICoreClientAPI? subscribed = levelFinalizeApi;
         levelFinalizeApi = null;
         if (subscribed is not null) subscribed.Event.LevelFinalize -= OnLevelFinalize;
-        L00CLevelFinalizeSessionLease? retainedFinalizeLease = finalizeLease;
-        finalizeLease = null;
-        if (retainedFinalizeLease is not null) L00CProcessCampaignController.RetireSession(retainedFinalizeLease);
+        // A pending bootstrap token must observe the current session generation
+        // before RetireSession clears it.  Superseded tokens are already inert.
         L00CManagerLeaseToken? retained = pendingLease;
         pendingLease = null;
         retained?.Cancel();
+        L00CLevelFinalizeSessionLease? retainedFinalizeLease = finalizeLease;
+        finalizeLease = null;
+        if (retainedFinalizeLease is not null) L00CProcessCampaignController.RetireSession(retainedFinalizeLease);
 #endif
         base.Dispose();
     }
@@ -85,7 +112,6 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
 
     private static void RecordF5LaunchAcquisition(string laboratoryRoot)
     {
-        const string protocol = "l00c-f5-debug-transaction-v2";
         string root = Path.GetFullPath(laboratoryRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         DirectoryInfo? local = Directory.GetParent(root);
         DirectoryInfo? repository = local?.Parent;
@@ -112,54 +138,23 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
 
         using Process current = Process.GetCurrentProcess();
         string executablePath = Path.GetFullPath(Environment.ProcessPath ?? current.MainModule?.FileName ?? throw new InvalidOperationException("L00-C cannot attest its process executable."));
-        string[] arguments = Environment.GetCommandLineArgs();
-        var json = new StringBuilder(1024);
-        json.Append("{\"schemaVersion\":2,\"protocol\":\"").Append(protocol)
-            .Append("\",\"status\":\"CHILD_ACQUIRED\",\"transactionId\":\"").Append(transactionId)
-            .Append("\",\"nonce\":\"").Append(nonce)
-            .Append("\",\"transactionDirectory\":\"").Append(Escape(transactionDirectory))
-            .Append("\",\"laboratoryRoot\":\"").Append(Escape(root))
-            .Append("\",\"solutionPath\":\"").Append(Escape(solutionPath))
-            .Append("\",\"visualStudioProcessId\":").Append(visualStudioProcessId)
-            .Append(",\"processId\":").Append(Environment.ProcessId)
-            .Append(",\"processStartUtc\":\"").Append(current.StartTime.ToUniversalTime().ToString("o"))
-            .Append("\",\"recordedUtc\":\"").Append(DateTimeOffset.UtcNow.ToString("o"))
-            .Append("\",\"debuggerAttached\":").Append(Debugger.IsAttached ? "true" : "false")
-            .Append(",\"executablePath\":\"").Append(Escape(executablePath))
-            .Append("\",\"commandLine\":\"").Append(Escape(Environment.CommandLine))
-            .Append("\",\"arguments\":[");
-        for (int index = 1; index < arguments.Length; index++)
-        {
-            if (index > 1) json.Append(',');
-            json.Append('"').Append(Escape(arguments[index])).Append('"');
-        }
-        json.Append("]}");
-        byte[] bytes = Encoding.UTF8.GetBytes(json.ToString());
-        string receiptPath = Path.Combine(transactionDirectory, "child-acquisition.json");
-        string publishingPath = receiptPath + ".publishing";
-        if (File.Exists(receiptPath))
-            throw new InvalidOperationException("L00-C F5 child acquisition receipt already exists; replay is forbidden before any write.");
-        bool publishingCreated = false;
-        try
-        {
-            using (var stream = new FileStream(publishingPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-            {
-                publishingCreated = true;
-                stream.Write(bytes, 0, bytes.Length);
-                stream.Flush(true);
-            }
-            // The final authoritative name is never visible until the complete
-            // receipt is durable. A hard stop leaves only .publishing, which
-            // never unlocks host-side restoration.
-            File.Move(publishingPath, receiptPath);
-        }
-        catch
-        {
-            // Normal publication failures are not crashes: remove only our
-            // fixed, transaction-owned non-authoritative residue.
-            if (publishingCreated && File.Exists(publishingPath)) File.Delete(publishingPath);
-            throw;
-        }
+        string[] commandLine = Environment.GetCommandLineArgs();
+        var arguments = new string[Math.Max(0, commandLine.Length - 1)];
+        if (arguments.Length > 0) Array.Copy(commandLine, 1, arguments, 0, arguments.Length);
+        var identity = new L00CF5LaunchIdentity(
+            transactionId,
+            nonce,
+            transactionDirectory,
+            root,
+            solutionPath,
+            visualStudioProcessId,
+            current.Id,
+            current.StartTime.ToUniversalTime().ToString("o"),
+            Debugger.IsAttached,
+            executablePath,
+            Environment.CommandLine,
+            arguments);
+        L00CF5LaunchAcquisition.Record(transactionDirectory, identity, DateTimeOffset.UtcNow);
     }
 
     private static string RequiredEnvironment(string name)
@@ -183,26 +178,4 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         return true;
     }
 
-    private static string Escape(string value)
-    {
-        var escaped = new StringBuilder(value.Length + 16);
-        foreach (char character in value)
-        {
-            switch (character)
-            {
-                case '\\': escaped.Append("\\\\"); break;
-                case '"': escaped.Append("\\\""); break;
-                case '\b': escaped.Append("\\b"); break;
-                case '\f': escaped.Append("\\f"); break;
-                case '\n': escaped.Append("\\n"); break;
-                case '\r': escaped.Append("\\r"); break;
-                case '\t': escaped.Append("\\t"); break;
-                default:
-                    if (character < 0x20) escaped.Append("\\u").Append(((int)character).ToString("X4"));
-                    else escaped.Append(character);
-                    break;
-            }
-        }
-        return escaped.ToString();
-    }
 }

@@ -11,10 +11,11 @@ $storage = Join-Path $PSScriptRoot 'L00CCampaignStorage.cs'
 $driver = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
 $modSystem = Join-Path $PSScriptRoot 'L00CMenuActionLabModSystem.cs'
 $installFailure = Join-Path $PSScriptRoot 'L00CCampaignInstallFailure.cs'
+$managerLease = Join-Path $PSScriptRoot 'L00CManagerLeaseLifecycle.cs'
 $levelFinalizeGate = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CLevelFinalizeGate.cs'
 $levelFinalizeOracle = Join-Path $PSScriptRoot 'L00CLevelFinalizeGateOracle.cs'
 $csc = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
-foreach ($file in @($controller, $laboratoryHost, $bootstrap, $storage, $driver, $modSystem, $installFailure, $levelFinalizeGate, $levelFinalizeOracle, $csc)) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing process campaign source: $file" } }
+foreach ($file in @($controller, $laboratoryHost, $bootstrap, $storage, $driver, $modSystem, $installFailure, $managerLease, $levelFinalizeGate, $levelFinalizeOracle, $csc)) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing process campaign source: $file" } }
 
 $oracleAssemblyPath = Join-Path ([IO.Path]::GetTempPath()) ('l00c-level-finalize-gate-' + [Guid]::NewGuid().ToString('N') + '.dll')
 try {
@@ -33,6 +34,7 @@ $hostText = Get-Content -LiteralPath $laboratoryHost -Raw
 $bootstrapText = Get-Content -LiteralPath $bootstrap -Raw
 $storageText = Get-Content -LiteralPath $storage -Raw
 $modSystemText = Get-Content -LiteralPath $modSystem -Raw
+$managerLeaseText = Get-Content -LiteralPath $managerLease -Raw
 function Assert-Contains([string]$Value, [string]$Needle, [string]$Label) { if ($Value.IndexOf($Needle, [StringComparison]::Ordinal) -lt 0) { throw "$Label is missing: $Needle" } }
 function Assert-Before([string]$Value, [string]$First, [string]$Second, [string]$Label) {
     $a = $Value.IndexOf($First, [StringComparison]::Ordinal); $b = $Value.IndexOf($Second, [StringComparison]::Ordinal)
@@ -51,9 +53,17 @@ Assert-Contains $driverText 'GameUnavailable' 'Explicit unavailable resolution s
 Assert-Contains $driverText 'RunningScreenUnavailable' 'Explicit running-screen status'
 Assert-Contains $driverText 'ManagerUnavailable' 'Explicit manager status'
 Assert-Contains $driverText 'ApiTypeMismatch' 'Explicit API mismatch terminal status'
-Assert-Contains $text 'public void Release()' 'Adapter clears API after engine terminal state'
+Assert-Contains $text 'private sealed class VintageManagerLeaseSeams : L00CManagerLeaseAdapter' 'Production adapter uses the executable acquired-lease guard'
+Assert-Contains $managerLeaseText 'public void Release()' 'Shared adapter invalidates acquired lease on release'
+Assert-Contains $managerLeaseText 'RequireAcquired();' 'Shared adapter requires the acquired lease for install and API operations'
+Assert-Before $managerLeaseText 'seams.Install(manager!);' 'seams.Release();' 'Manager handoff installs before irrevocable release'
 Assert-Contains $text 'api = null; token?.Complete(); token = null;' 'Adapter release clears API and token'
-Assert-Contains $text 'L00CManagerLeaseToken token = new(engine.Dispose);' 'Token-based session disposal cleanup'
+Assert-Contains $text 'L00CManagerLeaseToken token = CreateBootstrapCancelToken(engine, finalizeLease);' 'Initial session receives generation-bound bootstrap cancellation'
+Assert-Contains $text 'L00CManagerLeaseToken transferredToken = CreateBootstrapCancelToken(bootstrapLease, finalizeLease);' 'Replacement session receives transferred bootstrap cancellation'
+Assert-Contains $text '!ReferenceEquals(bootstrapLease, engine) || !ReferenceEquals(bootstrapFinalizeLease, owner)' 'Stale session token cannot cancel the current bootstrap owner'
+Assert-Contains $text 'L00CLevelFinalizeSessionLease initialSession = bootstrapFinalizeLease' 'Atomic handoff captures the current non-revoked session context'
+Assert-Contains $text 'if (initialSession.Revoked)' 'Atomic handoff refuses a revoked session context'
+Assert-Contains $text 'TryInstallResolvedLocked(campaign, manager, initialSession, "lease")' 'Atomic handoff passes its acquired context explicitly'
 Assert-Contains $text 'schema=l00c-manager-availability-v1' 'Availability receipt schema'
 Assert-Contains $text 'L00CMenuActionDriver.EnqueueMainThreadTask(Pump);' 'Main-thread pump'
 Assert-Contains $installFailureText 'controller-construction-fault' 'Construction fault diagnostic'
@@ -63,6 +73,15 @@ Assert-Contains $text 'L00CCampaignInstallFailure.PumpEnqueueStatus' 'Bounded en
 Assert-Contains $installFailureText 'internal static class L00CCampaignInstallFailure' 'Install-failure contract owns diagnostic constants'
 Assert-Contains $modSystemText 'if (installed.Accepted)' 'Ready publication only after accepted install'
 Assert-Contains $modSystemText 'L00C_INPROCESS_HARNESS_REFUSED code=' 'Refusal diagnostic instead of ready publication'
+Assert-Contains $modSystemText 'if (levelFinalizeApi is not null)' 'Duplicate StartClientSide guard'
+Assert-Contains $modSystemText 'ReferenceEquals(levelFinalizeApi, api)' 'Duplicate StartClientSide requires the same session API'
+Assert-Contains $modSystemText 'duplicate StartClientSide matched the acquired process/session and made no changes' 'Duplicate StartClientSide no-op evidence'
+Assert-Before $modSystemText 'if (levelFinalizeApi is not null)' 'L00CProcessCampaignController.InstallOrSignal(api, root)' 'Duplicate StartClientSide returns before a second controller signal/subscription'
+Assert-Contains $modSystemText 'L00CF5LaunchAcquisition.Record(transactionDirectory, identity, DateTimeOffset.UtcNow);' 'Idempotent exact F5 acquisition recorder'
+Assert-Before $modSystemText 'retained?.Cancel();' 'L00CProcessCampaignController.RetireSession(retainedFinalizeLease);' 'Dispose cancels current bootstrap ownership before retiring its generation'
+Assert-Contains $modSystemText 'L00CProcessCampaignController.AbortSessionRegistration(sessionLease);' 'Subscription failure invokes generation-bound controller compensation'
+Assert-Contains $text 'installTransaction.AbortIfSessionOwned(' 'Subscription compensation uses the real publication transaction'
+Assert-Contains $text 'value => value.currentSession' 'Subscription compensation is bound to the failed session generation'
 Assert-Contains $storageText 'campaign collision preserves existing data' 'Collision refusal without reuse'
 Assert-Contains $storageText 'campaign-provenance.json' 'Persisted campaign provenance'
 Assert-Contains $storageText 'Guid.NewGuid().ToString("N")' 'Fresh stable run id'

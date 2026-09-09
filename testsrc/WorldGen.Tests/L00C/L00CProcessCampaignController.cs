@@ -12,15 +12,6 @@ using Vintagestory.API.Config;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
-/// <summary>Abort capability retained by a session ModSystem; it never exposes an API.</summary>
-internal sealed class L00CManagerLeaseToken
-{
-    private Action? cancel;
-    internal L00CManagerLeaseToken(Action cancelAction) { cancel = cancelAction; }
-    internal void Cancel() { Action? action = cancel; cancel = null; action?.Invoke(); }
-    internal void Complete() { cancel = null; }
-}
-
 internal sealed class L00CProcessCampaignController
 {
     private static readonly object Gate = new();
@@ -36,6 +27,7 @@ internal sealed class L00CProcessCampaignController
     private L00CFixtureBootstrap? bootstrap;
     private L00CMenuActionLaboratoryHost? host;
     private readonly L00CLevelFinalizeGate levelFinalizeGate = new();
+    private L00CLevelFinalizeSessionLease? currentSession;
     private bool pumpQueued;
     private bool terminal;
     private int sessionSignals;
@@ -46,6 +38,7 @@ internal sealed class L00CProcessCampaignController
         evidence = campaign.EvidenceDirectory;
         bootstrap = new L00CFixtureBootstrap(campaign);
         levelFinalizeGate.AdoptSession(initialSession);
+        currentSession = initialSession;
     }
 
     internal static L00CProcessCampaignInstallResult InstallOrSignal(ICoreClientAPI api, string laboratoryRoot)
@@ -63,7 +56,8 @@ internal sealed class L00CProcessCampaignController
                 RequireSameRoot(bootstrapRoot!, root);
                 bootstrapFinalizeLease?.Revoke();
                 bootstrapFinalizeLease = finalizeLease;
-                return L00CProcessCampaignInstallResult.Succeeded(null, finalizeLease, "waiting");
+                L00CManagerLeaseToken transferredToken = CreateBootstrapCancelToken(bootstrapLease, finalizeLease);
+                return L00CProcessCampaignInstallResult.Succeeded(transferredToken, finalizeLease, "waiting");
             } // one retry listener/pump per process
             // The actual Vanilla menu discovery root.  This is intentionally
             // read-only configuration access: no dataPath override/seam exists.
@@ -71,13 +65,32 @@ internal sealed class L00CProcessCampaignController
             var seams = new VintageManagerLeaseSeams(api, campaign);
             var engine = new L00CManagerLeaseLifecycle(seams);
             bootstrapLease = engine; bootstrapRoot = root; bootstrapCampaign = campaign; bootstrapFinalizeLease = finalizeLease;
-            L00CManagerLeaseToken token = new(engine.Dispose);
+            L00CManagerLeaseToken token = CreateBootstrapCancelToken(engine, finalizeLease);
             seams.Set(engine, token);
             engine.Start();
             return engine.Terminal && !engine.Installed
                 ? L00CProcessCampaignInstallResult.Refused("lease-terminal")
                 : L00CProcessCampaignInstallResult.Succeeded(bootstrapLease is null ? null : token, finalizeLease, "installed-or-waiting");
         }
+    }
+
+    private static L00CManagerLeaseToken CreateBootstrapCancelToken(
+        L00CManagerLeaseLifecycle engine,
+        L00CLevelFinalizeSessionLease owner)
+    {
+        return new L00CManagerLeaseToken(() =>
+        {
+            lock (Gate)
+            {
+                // A prior ModSystem may outlive the session that superseded it.
+                // Only the token matching both the active engine and the latest
+                // finalize-session generation is allowed to cancel bootstrap.
+                if (!ReferenceEquals(bootstrapLease, engine) || !ReferenceEquals(bootstrapFinalizeLease, owner))
+                    return false;
+                engine.Dispose();
+                return true;
+            }
+        });
     }
 
     // The session ModSystem forwards IClientEventAPI.LevelFinalize here. The
@@ -133,7 +146,10 @@ internal sealed class L00CProcessCampaignController
         lock (Gate)
         {
             if (installTransaction.Active is L00CProcessCampaignController active)
+            {
                 active.levelFinalizeGate.RetireSession(session);
+                if (ReferenceEquals(active.currentSession, session)) active.currentSession = null;
+            }
             else
             {
                 if (ReferenceEquals(bootstrapFinalizeLease, session)) bootstrapFinalizeLease = null;
@@ -142,17 +158,46 @@ internal sealed class L00CProcessCampaignController
         }
     }
 
+    internal static void AbortSessionRegistration(L00CLevelFinalizeSessionLease session)
+    {
+        if (session is null) throw new ArgumentNullException(nameof(session));
+        lock (Gate)
+        {
+            if (installTransaction.AbortIfSessionOwned(
+                session,
+                value => value.currentSession,
+                value =>
+                {
+                    WriteLeaseReceipt(value.campaign, "session-registration-fault", "level-finalize-subscription");
+                    value.UnregisterAndClearSingleton();
+                })) return;
+            if (ReferenceEquals(bootstrapFinalizeLease, session))
+            {
+                bootstrapLease?.Dispose();
+                return;
+            }
+            session.Revoke();
+        }
+    }
+
     // Invoked at the ModSystem disposal boundary. This cannot hand off a campaign;
     // it only makes a pending session listener terminal and clears all references.
 
-    private static bool TryInstallResolvedLocked(L00CCampaignStorage campaign, object manager, string phase)
+    private static bool TryInstallResolvedLocked(
+        L00CCampaignStorage campaign,
+        object manager,
+        L00CLevelFinalizeSessionLease initialSession,
+        string phase)
     {
         if (manager is null) { WriteLeaseReceipt(campaign, "install-fault", "null-manager"); return false; }
+        if (initialSession is null || initialSession.Revoked)
+        {
+            WriteLeaseReceipt(campaign, "install-fault", "revoked-session-context");
+            return false;
+        }
         L00CProcessCampaignController? candidate = null;
         try
         {
-            L00CLevelFinalizeSessionLease initialSession = bootstrapFinalizeLease
-                ?? throw new InvalidOperationException("L00-C controller install has no client-session finalize lease.");
             candidate = new L00CProcessCampaignController(manager, campaign, initialSession);
         }
         catch (Exception exception)
@@ -165,7 +210,6 @@ internal sealed class L00CProcessCampaignController
         {
             candidate.SignalSessionReady();
             installTransaction.Install(candidate, value => value.QueuePump());
-            bootstrapFinalizeLease = null;
             return true;
         }
         catch (Exception exception)
@@ -183,7 +227,7 @@ internal sealed class L00CProcessCampaignController
     }
 
     private void SignalSessionReady() { checked { sessionSignals++; } }
-    private void SignalSessionReady(L00CLevelFinalizeSessionLease session) { levelFinalizeGate.AdoptSession(session); SignalSessionReady(); }
+    private void SignalSessionReady(L00CLevelFinalizeSessionLease session) { levelFinalizeGate.AdoptSession(session); currentSession = session; SignalSessionReady(); }
     private void QueuePump() { if (!terminal && !pumpQueued) { pumpQueued = true; L00CMenuActionDriver.EnqueueMainThreadTask(Pump); } }
 
     private void Pump()
@@ -208,7 +252,7 @@ internal sealed class L00CProcessCampaignController
 
     private void Complete() { WriteTerminal("complete", null); UnregisterAndClearSingleton(); }
     private void Fault(Exception exception) { WriteTerminal("refused", exception.Message); UnregisterAndClearSingleton(); }
-    private void UnregisterAndClearSingleton() { terminal = true; levelFinalizeGate.Close(); bootstrap = null; host = null; pumpQueued = false; installTransaction.Clear(this); }
+    private void UnregisterAndClearSingleton() { terminal = true; levelFinalizeGate.Close(); currentSession = null; bootstrap = null; host = null; pumpQueued = false; installTransaction.Clear(this); }
 
     private void WriteTerminal(string status, string? detail)
     {
@@ -234,37 +278,50 @@ internal sealed class L00CProcessCampaignController
     }
 
     // Production adapter: this is the sole pre-handoff owner of the client API.
-    private sealed class VintageManagerLeaseSeams : IL00CManagerLeaseSeams
+    private sealed class VintageManagerLeaseSeams : L00CManagerLeaseAdapter
     {
         private ICoreClientAPI? api;
         private readonly L00CCampaignStorage campaign;
         private L00CManagerLeaseLifecycle? engine;
         private L00CManagerLeaseToken? token;
         internal VintageManagerLeaseSeams(ICoreClientAPI clientApi, L00CCampaignStorage campaignStorage) { api = clientApi; campaign = campaignStorage; }
-        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+        protected override DateTimeOffset ReadUtcNow() => DateTimeOffset.UtcNow;
         internal void Set(L00CManagerLeaseLifecycle value, L00CManagerLeaseToken leaseToken) { engine = value; token = leaseToken; }
-        public L00CManagerResolutionStatus Resolve(out object? manager)
+        protected override L00CManagerResolutionStatus ResolveAcquired(out object? manager)
         {
-            if (api is null) { manager = null; return L00CManagerResolutionStatus.ApiTypeMismatch; }
-            L00CManagerResolution result = L00CMenuActionDriver.ResolveScreenManagerFromClientApi(api);
+            ICoreClientAPI retained = api ?? throw new InvalidOperationException("L00-C API lease is terminal.");
+            L00CManagerResolution result = L00CMenuActionDriver.ResolveScreenManagerFromClientApi(retained);
             manager = result.ScreenManager; return result.Status;
         }
-        public long Register(Action callback)
+        protected override long RegisterAcquired(Action callback)
         {
             ICoreClientAPI retained = api ?? throw new InvalidOperationException("L00-C API lease is terminal.");
             return retained.Event.RegisterGameTickListener(_ => callback(), 50);
         }
-        public void Unregister(long listenerId)
+        protected override void UnregisterAcquired(long listenerId)
         {
             ICoreClientAPI retained = api ?? throw new InvalidOperationException("L00-C API lease is terminal.");
             retained.Event.UnregisterGameTickListener(listenerId);
         }
-        public void Install(object manager)
+        protected override void InstallAcquired(object manager)
         {
-            lock (Gate) { if (!TryInstallResolvedLocked(campaign, manager, "lease")) throw new InvalidOperationException("L00-C controller install refused."); }
+            lock (Gate)
+            {
+                if (!ReferenceEquals(bootstrapLease, engine) || !ReferenceEquals(bootstrapCampaign, campaign))
+                    throw new InvalidOperationException("L00-C controller install lost its acquired bootstrap ownership.");
+                L00CLevelFinalizeSessionLease initialSession = bootstrapFinalizeLease
+                    ?? throw new InvalidOperationException("L00-C controller install has no client-session finalize lease.");
+                if (initialSession.Revoked)
+                    throw new InvalidOperationException("L00-C controller install refuses a revoked client-session context.");
+                if (!TryInstallResolvedLocked(campaign, manager, initialSession, "lease"))
+                    throw new InvalidOperationException("L00-C controller install refused.");
+                if (!ReferenceEquals(bootstrapFinalizeLease, initialSession))
+                    throw new InvalidOperationException("L00-C controller install context changed during atomic publication.");
+                bootstrapFinalizeLease = null;
+            }
         }
-        public void Receipt(string status, string detail) => WriteLeaseReceipt(campaign, status, detail);
-        public void Release()
+        protected override void WriteReceipt(string status, string detail) => WriteLeaseReceipt(campaign, status, detail);
+        protected override void ReleaseAcquired()
         {
             api = null; token?.Complete(); token = null;
             lock (Gate)
