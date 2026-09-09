@@ -62,6 +62,9 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private Exception? laboratoryConfigurationFailure;
     private ProbeMarker? marker;
     private L00CLifecycleMarker? lifecycleMarker;
+    private L00CLifecycleShutdownIdentity? lifecycleShutdownIdentity;
+    private L00CLifecycleShutdownLease? lifecycleShutdownLease;
+    private int lifecycleAttestationSequence;
     private FixtureSnapshot? preLightingSnapshot;
     private FixtureSnapshot? initialSnapshot;
     private HaloSnapshot? initialHaloSnapshot;
@@ -166,6 +169,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private void CloseProbeStateAfterInitializationFailure()
     {
         Interlocked.Increment(ref worldRunId);
+        CloseLifecycleShutdownBarrier();
         active = false;
         marker = null;
         lifecycleMarker = null;
@@ -176,22 +180,16 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         // Close both asynchronous gates before any external API or handler
         // restoration can throw. Late callbacks are harmless from here on.
-        long delayedListenerId = delayedShutdown.Cancel();
-        transientLoadCallbacks.Reset();
-
         Exception? cleanupFailure = null;
-        if (delayedListenerId > 0)
+        try
         {
-            try
-            {
-                api?.Event.UnregisterCallback(delayedListenerId);
-                api?.Logger.Notification($"L00C_DELAYED_SHUTDOWN_CANCELLED instance={instanceId} reason=initialization-failure listener={delayedListenerId}");
-            }
-            catch (Exception exception)
-            {
-                cleanupFailure = exception;
-            }
+            delayedShutdown.CancelAndUnregister();
         }
+        catch (Exception exception)
+        {
+            cleanupFailure = exception;
+        }
+        transientLoadCallbacks.Reset();
 
         try
         {
@@ -338,6 +336,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         RestoreResult priorRestore,
         bool sameHandlerSet)
     {
+        lifecycleShutdownIdentity = L00CLifecycleShutdownIdentity.Create(runId, instanceId, saveGame.SavegameIdentifier, checked(++lifecycleAttestationSequence));
+        lifecycleShutdownLease = L00CLifecycleShutdownBarrier.Open(lifecycleShutdownIdentity);
         L00CLifecycleMarker? persisted = ReadLifecycleMarker(saveGame);
         if (saveGame.IsNew)
         {
@@ -411,7 +411,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                     throw new InvalidOperationException("L00-C lifecycle scenario acquired spatial state or lost its persistent marker.");
                 }
                 Log($"L00C_LIFECYCLE_STABLE instance={instanceId} marker={lifecycleMarker.MarkerId} run={runId} open={lifecycleMarker.OpenCount} requests=0 callbacks=0 writes=0 handlersowned=False");
-                RequestActiveShutdown(runId, "lifecycle-stable");
+                L00CLifecycleShutdownBarrier.Arm(lifecycleShutdownLease ?? throw new InvalidOperationException("L00-C lifecycle shutdown lease is absent."));
             }
             catch (Exception exception)
             {
@@ -426,6 +426,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void BeginWorldTransition()
     {
+        CloseLifecycleShutdownBarrier();
         markerPublication.BeginWorldTransition();
         CancelDelayedShutdown("world-initialize");
         marker = null;
@@ -435,6 +436,14 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         initialSnapshot = null;
         initialHaloSnapshot = null;
         ResetTransientLoadCallbacks("world-initialize");
+    }
+
+    private void CloseLifecycleShutdownBarrier()
+    {
+        L00CLifecycleShutdownLease? lease = lifecycleShutdownLease;
+        lifecycleShutdownLease = null;
+        lifecycleShutdownIdentity = null;
+        if (lease is not null) _ = L00CLifecycleShutdownBarrier.Close(lease);
     }
 
     private RestoreResult RestoreOwnedHandlerSet(string reason)
@@ -743,26 +752,20 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
 
         ICoreServerAPI serverApi = RequireApi();
-        DelayedShutdownReservation reservation = delayedShutdown.Begin(
-            () => FireDelayedShutdown(runId, reason));
-        long listenerId = 0;
         try
         {
-            listenerId = serverApi.Event.RegisterCallback(
-                _ => delayedShutdown.Complete(reservation),
-                delayMilliseconds);
-            Log($"L00C_DELAYED_SHUTDOWN_ARMED instance={instanceId} run={runId} reason={reason} delayms={delayMilliseconds} listener={listenerId}");
-            if (!delayedShutdown.Attach(reservation, listenerId))
-            {
-                serverApi.Event.UnregisterCallback(listenerId);
-            }
+            delayedShutdown.Schedule(delayMilliseconds, (callback, delay) => serverApi.Event.RegisterCallback(_ => callback(), delay), serverApi.Event.UnregisterCallback, () => FireDelayedShutdown(runId, reason));
+            Log($"L00C_DELAYED_SHUTDOWN_ARMED instance={instanceId} run={runId} reason={reason} delayms={delayMilliseconds}");
         }
-        catch
+        catch (Exception exception)
         {
-            delayedShutdown.Reject(reservation);
-            if (listenerId > 0)
+            try
             {
-                serverApi.Event.UnregisterCallback(listenerId);
+                delayedShutdown.CancelAndUnregister();
+            }
+            catch (Exception cleanupException)
+            {
+                throw new AggregateException(exception, cleanupException);
             }
             throw;
         }
@@ -794,14 +797,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void CancelDelayedShutdown(string reason)
     {
-        long listenerId = delayedShutdown.Cancel();
-        if (listenerId <= 0)
-        {
-            return;
-        }
-        ICoreServerAPI? serverApi = api;
-        serverApi?.Event.UnregisterCallback(listenerId);
-        serverApi?.Logger.Notification($"L00C_DELAYED_SHUTDOWN_CANCELLED instance={instanceId} reason={reason} listener={listenerId}");
+        delayedShutdown.CancelAndUnregister();
+        api?.Logger.Notification($"L00C_DELAYED_SHUTDOWN_CANCELLED instance={instanceId} reason={reason}");
     }
 
     private void RequestProbeColumn(long runId)
@@ -1000,7 +997,14 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 // Validation shutdown and callback closure do not depend on logging.
             }
 
-            long delayedListenerId = delayedShutdown.Cancel();
+            try
+            {
+                delayedShutdown.CancelAndUnregister();
+            }
+            catch (Exception unregisterException)
+            {
+                result = new AggregateException(result, unregisterException);
+            }
             int cancelled = transientLoadCallbacks.Reset();
             try
             {
@@ -1009,17 +1013,6 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             catch
             {
                 // Both callback gates are already closed.
-            }
-            if (delayedListenerId > 0)
-            {
-                try
-                {
-                    serverApi.Event.UnregisterCallback(delayedListenerId);
-                }
-                catch (Exception unregisterException)
-                {
-                    result = new AggregateException(result, unregisterException);
-                }
             }
             try
             {
@@ -2005,6 +1998,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     {
         Interlocked.Exchange(ref disposalStarted, 1);
         Interlocked.Increment(ref worldRunId);
+        CloseLifecycleShutdownBarrier();
         ICoreServerAPI? serverApi = api;
         Exception? disposeFailure = null;
         if (serverApi is not null)

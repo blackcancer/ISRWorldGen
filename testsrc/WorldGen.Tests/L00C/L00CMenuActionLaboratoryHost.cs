@@ -7,6 +7,7 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Globalization;
+using ISRWorldGen.WorldgenProbe;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
@@ -21,7 +22,9 @@ public sealed class L00CMenuActionLaboratoryHost
     private readonly List<string> chronology = new();
     private State state = State.ExpectPrimaryMenu;
     private int primaryCycles;
+    private int fixtureSequence = 2;
     private int stableTicks;
+    private bool levelFinalizeObserved;
 
     private L00CMenuActionLaboratoryHost(L00CCampaignStorage campaign, string evidenceDirectory, L00CMarkedSaveCell primary, L00CMarkedSaveCell secondary)
     { this.campaign = campaign; this.evidenceDirectory = evidenceDirectory; this.primary = primary; this.secondary = secondary; }
@@ -62,8 +65,23 @@ public sealed class L00CMenuActionLaboratoryHost
         RequireDebugLaboratory();
         if (state != State.PrimaryMenuOpen || primaryCycles >= RequiredPrimaryCycles) throw new InvalidOperationException("L00-C primary open is outside the expected transition.");
         int cellIndex = RebindCurrentCell(singleplayerScreen, primary.SavePath);
-        L00CMenuActionReceipt receipt = L00CMenuActionDriver.ReopenPrimaryWorld(singleplayerScreen, cellIndex);
-        primaryCycles++; state = State.PrimaryWorldOpen;
+        levelFinalizeObserved = false;
+        int openingSequence = checked(fixtureSequence + 1);
+        L00CNativeOpenReservation opening = L00CProcessCampaignController.BeginNativeOpen(openingSequence);
+        L00CMenuActionReceipt receipt;
+        try
+        {
+            receipt = L00CMenuActionDriver.ReopenPrimaryWorld(singleplayerScreen, cellIndex);
+            L00CProcessCampaignController.CompleteNativeOpen(opening);
+        }
+        catch
+        {
+            _ = L00CProcessCampaignController.AbortNativeOpen(opening);
+            throw;
+        }
+        fixtureSequence = openingSequence;
+        state = State.PrimaryWorldOpen;
+        primaryCycles++;
         Record(receipt.Action, primary, receipt.TargetMethod); WriteReceipt("primary-open-" + primaryCycles);
     }
 
@@ -73,20 +91,47 @@ public sealed class L00CMenuActionLaboratoryHost
         RequireDebugLaboratory();
         if (state != State.SecondaryMenuOpen || primaryCycles != RequiredPrimaryCycles) throw new InvalidOperationException("L00-C secondary open is outside the expected transition.");
         int cellIndex = RebindCurrentCell(singleplayerScreen, secondary.SavePath);
-        L00CMenuActionReceipt receipt = L00CMenuActionDriver.ReopenPrimaryWorld(singleplayerScreen, cellIndex);
+        levelFinalizeObserved = false;
+        int openingSequence = checked(fixtureSequence + 1);
+        L00CNativeOpenReservation opening = L00CProcessCampaignController.BeginNativeOpen(openingSequence);
+        L00CMenuActionReceipt receipt;
+        try
+        {
+            receipt = L00CMenuActionDriver.ReopenPrimaryWorld(singleplayerScreen, cellIndex);
+            L00CProcessCampaignController.CompleteNativeOpen(opening);
+        }
+        catch
+        {
+            _ = L00CProcessCampaignController.AbortNativeOpen(opening);
+            throw;
+        }
+        fixtureSequence = openingSequence;
         state = State.SecondaryWorldOpen;
         Record("open-secondary-world", secondary, receipt.TargetMethod); WriteReceipt("secondary-open");
     }
 
     /// <summary>Returns from the active laboratory world through audited client actions.</summary>
-    public void ReturnToMainMenu(object clientMain, object screenManager)
+    private void ReturnToMainMenu(L00CFinalizedSessionAttestation attestation, object screenManager)
     {
         RequireDebugLaboratory();
         L00CMarkedSaveCell target;
         if (state == State.PrimaryWorldOpen) target = primary;
         else if (state == State.SecondaryWorldOpen) target = secondary;
         else throw new InvalidOperationException("L00-C return is outside the expected transition.");
-        L00CMenuActionReceipt receipt = L00CMenuActionDriver.ReturnToMainMenu(clientMain, screenManager);
+        L00CLifecycleShutdownIdentity identity = L00CLifecycleShutdownBarrier.RequireCurrentIdentity();
+        L00CLifecycleReturnReservation reservation = L00CLifecycleShutdownBarrier.PrepareReturn(
+            identity, attestation.ClientSavegameGuid, target.Role, target.SavePath, attestation.StartServerSavePath, fixtureSequence);
+        L00CMenuActionReceipt receipt;
+        try
+        {
+            receipt = L00CMenuActionDriver.ReturnToMainMenu(attestation.ClientMain, screenManager,
+                () => L00CLifecycleShutdownBarrier.BeginNativeReturn(reservation));
+        }
+        catch
+        {
+            _ = L00CLifecycleShutdownBarrier.AbortBeforeNativeReturn(reservation);
+            throw;
+        }
         state = target == primary ? (primaryCycles == RequiredPrimaryCycles ? State.ExpectSecondaryMenu : State.ExpectPrimaryMenu) : State.ReadyToComplete;
         Record(receipt.Action, target, receipt.TargetMethod); WriteReceipt("returned-main-menu");
     }
@@ -124,10 +169,15 @@ public sealed class L00CMenuActionLaboratoryHost
                 return false;
             case State.PrimaryWorldOpen:
             case State.SecondaryWorldOpen:
-                // This callback is public API lifecycle evidence that the client is ticking.
-                // Three ticks prevent a same-frame menu mutation after ConnectToSingleplayer.
-                if (++stableTicks < 3 || !L00CMenuActionDriver.TryFindClientSession(screenManager, out object? clientMain, out _) || clientMain is null) return false;
-                stableTicks = 0; ReturnToMainMenu(clientMain, screenManager); return false;
+                L00CMarkedSaveCell activeTarget = state == State.PrimaryWorldOpen ? primary : secondary;
+                if (!L00CMenuActionDriver.TryFindFinalizedWorldSession(screenManager, activeTarget.SavePath, false,
+                        levelFinalizeObserved, out L00CFinalizedSessionAttestation? session) || session is null)
+                {
+                    stableTicks = 0;
+                    return false;
+                }
+                if (++stableTicks < 3) return false;
+                stableTicks = 0; ReturnToMainMenu(session, screenManager); return false;
             case State.ReadyToComplete:
                 Complete(); campaign.SealForExternalCleanup(); return true;
             case State.Completed:
@@ -135,6 +185,15 @@ public sealed class L00CMenuActionLaboratoryHost
             default:
                 throw new InvalidOperationException("L00-C laboratory host reached an unknown state.");
         }
+    }
+
+    // A signal received before a native save click is deliberately ignored;
+    // each opened session must produce its own LevelFinalize.
+    internal void SignalLevelFinalize(int finalizedFixtureSequence)
+    {
+        if ((state != State.PrimaryWorldOpen && state != State.SecondaryWorldOpen) || finalizedFixtureSequence != fixtureSequence)
+            throw new InvalidOperationException("L00-C host received LevelFinalize for another open epoch.");
+        levelFinalizeObserved = true;
     }
 
     private void Record(string action, L00CMarkedSaveCell? target, string method)

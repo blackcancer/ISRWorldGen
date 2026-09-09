@@ -77,13 +77,12 @@ $closeEnd = $source.IndexOf('private void InitializeWorldCore()', $closeStart, [
 $closeMethod = $source.Substring($closeStart, $closeEnd - $closeStart)
 $invalidateIndex = $closeMethod.IndexOf('Interlocked.Increment(ref worldRunId)', [StringComparison]::Ordinal)
 $markerCloseIndex = $closeMethod.IndexOf('markerPublication.BeginWorldTransition()', [StringComparison]::Ordinal)
-$delayedCloseIndex = $closeMethod.IndexOf('delayedShutdown.Cancel()', [StringComparison]::Ordinal)
+$delayedCloseIndex = $closeMethod.IndexOf('delayedShutdown.CancelAndUnregister()', [StringComparison]::Ordinal)
 $callbackCloseIndex = $closeMethod.IndexOf('transientLoadCallbacks.Reset()', [StringComparison]::Ordinal)
-$externalUnregisterIndex = $closeMethod.IndexOf('api?.Event.UnregisterCallback(delayedListenerId)', [StringComparison]::Ordinal)
 $restoreIndex = $closeMethod.IndexOf('RestoreOwnedHandlerSet("initialization-failure")', [StringComparison]::Ordinal)
 if ($invalidateIndex -lt 0 -or $markerCloseIndex -le $invalidateIndex -or $delayedCloseIndex -le $markerCloseIndex -or
-    $callbackCloseIndex -le $delayedCloseIndex -or $externalUnregisterIndex -le $callbackCloseIndex -or
-    $restoreIndex -le $externalUnregisterIndex -or $closeMethod -notmatch 'active = false' -or $closeMethod -notmatch 'marker = null') {
+    $callbackCloseIndex -le $delayedCloseIndex -or $restoreIndex -le $callbackCloseIndex -or
+    $closeMethod -notmatch 'active = false' -or $closeMethod -notmatch 'marker = null') {
     throw 'Initialization failure does not close both callback gates before fallible external cleanup and handler restoration.'
 }
 
@@ -108,7 +107,7 @@ try {
     if (@($handleCalls | Where-Object { $_ -match 'InitializationFailClosedGate::Fail' }).Count -ne 1 -or
         @($closureCalls | Where-Object { $_ -match 'IServerAPI::ShutDown' }).Count -ne 1 -or
         @($closeIlCalls | Where-Object { $_ -match 'MarkerPublicationGate::BeginWorldTransition' }).Count -ne 1 -or
-        @($closeIlCalls | Where-Object { $_ -match 'DelayedShutdownGate::Cancel' }).Count -ne 1 -or
+        @($closeIlCalls | Where-Object { $_ -match 'DelayedShutdownGate::CancelAndUnregister' }).Count -ne 1 -or
         @($closeIlCalls | Where-Object { $_ -match 'TransientLoadCallbackGate::Reset' }).Count -ne 1 -or
         @($closeIlCalls | Where-Object { $_ -match 'RestoreOwnedHandlerSet' }).Count -ne 1) {
         throw 'The built fail-closed IL does not close publication/callbacks/handlers and call ShutDown exactly once.'

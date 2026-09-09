@@ -4,6 +4,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using ISRWorldGen.WorldgenProbe;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 
@@ -18,6 +19,7 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
     // This token never exposes an API. It is only a cancellation capability for
     // the short bootstrap listener and becomes inert before controller handoff.
     private L00CManagerLeaseToken? pendingLease;
+    private L00CLevelFinalizeSessionLease? finalizeLease;
     private ICoreClientAPI? levelFinalizeApi;
 
     /// <inheritdoc />
@@ -32,12 +34,15 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         if (!string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) return;
         string root = RequireLaboratoryRoot();
         RecordF5LaunchAcquisition(root);
-        api.Event.LevelFinalize += OnLevelFinalize;
-        levelFinalizeApi = api;
         L00CProcessCampaignInstallResult installed = L00CProcessCampaignController.InstallOrSignal(api, root);
         pendingLease = installed.Lease;
         if (installed.Accepted)
+        {
+            finalizeLease = installed.FinalizeLease ?? throw new InvalidOperationException("L00-C accepted install omitted its finalize-session lease.");
+            api.Event.LevelFinalize += OnLevelFinalize;
+            levelFinalizeApi = api;
             Mod.Logger.Notification("L00C_INPROCESS_HARNESS_READY: process-lifetime ScreenManager pump installed or signalled.");
+        }
         else
             Mod.Logger.Error("L00C_INPROCESS_HARNESS_REFUSED code=" + installed.Diagnostic);
 #endif
@@ -50,6 +55,9 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         ICoreClientAPI? subscribed = levelFinalizeApi;
         levelFinalizeApi = null;
         if (subscribed is not null) subscribed.Event.LevelFinalize -= OnLevelFinalize;
+        L00CLevelFinalizeSessionLease? retainedFinalizeLease = finalizeLease;
+        finalizeLease = null;
+        if (retainedFinalizeLease is not null) L00CProcessCampaignController.RetireSession(retainedFinalizeLease);
         L00CManagerLeaseToken? retained = pendingLease;
         pendingLease = null;
         retained?.Cancel();
@@ -57,7 +65,14 @@ public sealed class L00CMenuActionLabModSystem : ModSystem
         base.Dispose();
     }
 
-    private void OnLevelFinalize() => L00CProcessCampaignController.SignalLevelFinalize();
+    private void OnLevelFinalize()
+    {
+        // Capture happens before entering the process-controller lock. A stale
+        // callback already in flight before a menu click can never acquire the
+        // epoch published after that click.
+        L00CLevelFinalizeSignal? signal = finalizeLease?.Capture();
+        L00CProcessCampaignController.SignalLevelFinalize(signal);
+    }
 
     private static string RequireLaboratoryRoot()
     {

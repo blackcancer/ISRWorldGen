@@ -163,6 +163,45 @@ function Get-CecilBodyText($Method) {
     return (($Method.Body.Instructions | ForEach-Object { "$($_.OpCode) $($_.Operand)" }) -join "`n")
 }
 
+$saveGameImplementation = Require-CecilType 'SaveGame'
+$savegameIdentifierField = $saveGameImplementation.Fields | Where-Object Name -eq 'SavegameIdentifier' | Select-Object -First 1
+$createNewSaveBody = Get-CecilBodyText (Require-CecilMethod $saveGameImplementation 'CreateNew' 1)
+$afterDeserializationBody = Get-CecilBodyText (Require-CecilMethod $saveGameImplementation 'afterDeserialization' 0)
+$startServerArgsImplementation = Require-CecilType 'Vintagestory.Common.StartServerArgs'
+$saveFileLocationField = $startServerArgsImplementation.Fields | Where-Object Name -eq 'SaveFileLocation' | Select-Object -First 1
+$clientMainImplementation = Require-CecilType 'Vintagestory.Client.NoObf.ClientMain'
+$clientSaveGuidGetter = Require-CecilMethod $clientMainImplementation 'get_SavegameIdentifier' 0
+$clientSaveGuidBody = Get-CecilBodyText $clientSaveGuidGetter
+if ($null -eq $savegameIdentifierField -or $savegameIdentifierField.FieldType.FullName -ne 'System.String' -or
+    $null -eq $saveFileLocationField -or $saveFileLocationField.FieldType.FullName -ne 'System.String' -or
+    $clientSaveGuidGetter.ReturnType.FullName -ne 'System.String' -or
+    $createNewSaveBody -notmatch 'System.Guid::NewGuid' -or $createNewSaveBody -notmatch 'System.Object::ToString' -or
+    $createNewSaveBody -notmatch 'stfld System.String SaveGame::SavegameIdentifier' -or
+    $afterDeserializationBody -notmatch 'System.Guid::NewGuid' -or $afterDeserializationBody -notmatch 'System.Object::ToString' -or
+    $afterDeserializationBody -notmatch 'stfld System.String SaveGame::SavegameIdentifier' -or
+    $clientSaveGuidBody -notmatch 'System.String Vintagestory.Client.NoObf.ServerInformation::SavegameIdentifier') {
+    throw 'Savegame GUID generation/client exposure or the distinct StartServerArgs save path drifted.'
+}
+
+$serverEventImplementation = Require-CecilType 'Vintagestory.Server.ServerEventAPI'
+$eventManagerImplementation = Require-CecilType 'Vintagestory.Common.EventManager'
+$serverMainForDelayed = Require-CecilType 'Vintagestory.Server.ServerMain'
+$serverEventRegisterBody = Get-CecilBodyText (Require-CecilMethod $serverEventImplementation 'RegisterCallback' 2)
+$serverEventUnregisterBody = Get-CecilBodyText (Require-CecilMethod $serverEventImplementation 'UnregisterCallback' 1)
+$serverRegisterBody = Get-CecilBodyText (Require-CecilMethod $serverMainForDelayed 'RegisterCallback' 2)
+$serverUnregisterBody = Get-CecilBodyText (Require-CecilMethod $serverMainForDelayed 'UnregisterCallback' 1)
+$addDelayedBody = Get-CecilBodyText (Require-CecilMethod $eventManagerImplementation 'AddDelayedCallback' 2)
+$removeDelayedBody = Get-CecilBodyText (Require-CecilMethod $eventManagerImplementation 'RemoveDelayedCallback' 1)
+$incrementIndex = $addDelayedBody.IndexOf('System.Threading.Interlocked::Increment', [StringComparison]::Ordinal)
+$insertIndex = $addDelayedBody.IndexOf('ConcurrentDictionary`2<System.Int64,Vintagestory.Common.DelayedCallback>::set_Item', [StringComparison]::Ordinal)
+$returnIndex = $addDelayedBody.LastIndexOf("ret ", [StringComparison]::Ordinal)
+if ($serverEventRegisterBody -notmatch 'ServerMain::RegisterCallback' -or $serverRegisterBody -notmatch 'EventManager::AddDelayedCallback' -or
+    $incrementIndex -lt 0 -or $insertIndex -le $incrementIndex -or $returnIndex -le $insertIndex -or
+    $serverEventUnregisterBody -notmatch 'ServerMain::UnregisterCallback' -or $serverUnregisterBody -notmatch 'EventManager::RemoveDelayedCallback' -or
+    $removeDelayedBody -notmatch 'ConcurrentDictionary`2<System.Int64,Vintagestory.Common.DelayedCallback>::TryRemove') {
+    throw 'Native delayed callback registration/removal transaction drifted.'
+}
+
 $commonEventApi = $apiDefinition.MainModule.Types | Where-Object FullName -eq 'Vintagestory.API.Common.IEventAPI' | Select-Object -First 1
 if ($null -eq $commonEventApi) {
     throw 'Required delayed-callback API type is missing: Vintagestory.API.Common.IEventAPI'
@@ -306,6 +345,9 @@ $result = [ordered]@{
     InitWorldGenFailureSemantics = 'catch-log-continue'
     RunGameSystemOrder = 'ModHandler=6;LoadAndSave=28'
     DelayedCallbackApi = 'RegisterCallback(Action<float>,int)->long;UnregisterCallback(long)'
+    SavegameIdentity = 'SaveGame.CreateNew/afterDeserialization:Guid.NewGuid().ToString();ClientMain.SavegameIdentifier:string'
+    SavePathIdentity = 'StartServerArgs.SaveFileLocation:string;distinct-from-savegame-guid'
+    DelayedCallbackImplementation = 'ServerEventAPI->ServerMain->EventManager;Interlocked id then dictionary insert before return;exact-id removal'
 }
 
 $json = $result | ConvertTo-Json -Depth 5

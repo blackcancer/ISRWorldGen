@@ -11,7 +11,20 @@ $storage = Join-Path $PSScriptRoot 'L00CCampaignStorage.cs'
 $driver = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
 $modSystem = Join-Path $PSScriptRoot 'L00CMenuActionLabModSystem.cs'
 $installFailure = Join-Path $PSScriptRoot 'L00CCampaignInstallFailure.cs'
-foreach ($file in @($controller, $laboratoryHost, $bootstrap, $storage, $driver, $modSystem, $installFailure)) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing process campaign source: $file" } }
+$levelFinalizeGate = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CLevelFinalizeGate.cs'
+$levelFinalizeOracle = Join-Path $PSScriptRoot 'L00CLevelFinalizeGateOracle.cs'
+$csc = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
+foreach ($file in @($controller, $laboratoryHost, $bootstrap, $storage, $driver, $modSystem, $installFailure, $levelFinalizeGate, $levelFinalizeOracle, $csc)) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing process campaign source: $file" } }
+
+$oracleAssemblyPath = Join-Path ([IO.Path]::GetTempPath()) ('l00c-level-finalize-gate-' + [Guid]::NewGuid().ToString('N') + '.dll')
+try {
+    & $csc /nologo /target:library "/define:DEBUG,L00C_STANDALONE_ORACLE" /nullable:enable /warnaserror /langversion:latest "/out:$oracleAssemblyPath" $levelFinalizeGate $levelFinalizeOracle
+    if ($LASTEXITCODE -ne 0) { throw 'L00-C LevelFinalize concurrent oracle compilation failed.' }
+    $oracleAssembly = [Reflection.Assembly]::LoadFrom($oracleAssemblyPath)
+    $run = $oracleAssembly.GetType('ISRWorldGen.L00C.Laboratory.L00CLevelFinalizeGateOracle', $true).GetMethod('Run', [Reflection.BindingFlags]'Static,NonPublic')
+    if ($null -eq $run -or [int]$run.Invoke($null, @()) -ne 8) { throw 'L00-C LevelFinalize concurrent oracle did not execute all eight sessions.' }
+}
+finally { if (Test-Path -LiteralPath $oracleAssemblyPath) { try { Remove-Item -LiteralPath $oracleAssemblyPath -Force } catch { } } }
 
 $text = Get-Content -LiteralPath $controller -Raw
 $driverText = Get-Content -LiteralPath $driver -Raw
@@ -31,7 +44,7 @@ function Assert-Before([string]$Value, [string]$First, [string]$Second, [string]
 Assert-Contains $text 'private static readonly L00CProcessCampaignInstallTransaction<L00CProcessCampaignController> installTransaction = new();' 'Transactional singleton'
 Assert-Contains $text 'private static L00CManagerLeaseLifecycle? bootstrapLease;' 'Shared bootstrap lease engine singleton'
 Assert-Contains $text 'installTransaction.TrySignalSameRoot(root' 'Singleton/root signal branch'
-Assert-Contains $text 'value => value.SignalSessionReady()' 'Subsequent session signal'
+Assert-Contains $text 'value => value.SignalSessionReady(finalizeLease)' 'Subsequent owner-scoped session signal'
 Assert-Contains $text 'var engine = new L00CManagerLeaseLifecycle(seams);' 'Shared engine immediate handoff'
 Assert-Contains $text 'RegisterGameTickListener(_ => callback(), 50)' '50ms session retry listener adapter'
 Assert-Contains $driverText 'GameUnavailable' 'Explicit unavailable resolution status'
@@ -67,18 +80,25 @@ if ($text -notmatch 'private ICoreClientAPI\? api;' -or $text -notmatch 'api = n
 
 Assert-Before $hostText 'ExpectPrimaryMenu' 'ExpectSecondaryMenu' 'Primary cycles before secondary campaign phase'
 Assert-Contains $hostText 'state != State.SecondaryMenuOpen || primaryCycles != RequiredPrimaryCycles' 'Five primary cycles gate secondary open'
-Assert-Contains $hostText 'ReturnToMainMenu(clientMain, screenManager)' 'Return transition evidence'
+Assert-Contains $hostText 'ReturnToMainMenu(attestation.ClientMain, screenManager' 'Return transition evidence'
 Assert-Contains $bootstrapText 'WaitPrimaryMenu' 'Primary bootstrap state'
 Assert-Contains $bootstrapText 'WaitSecondaryCell' 'Secondary bootstrap state'
 Assert-Contains $bootstrapText 'L00CMenuActionDriver.EnterSingleplayerMenu(menu);' 'Native menu transition for live cell binding'
 Assert-Contains $bootstrapText 'ReadUniqueSaveCell' 'Observed save-cell binding'
 Assert-Contains $modSystemText 'api.Event.LevelFinalize += OnLevelFinalize;' 'Native LevelFinalize subscription'
 Assert-Contains $modSystemText 'subscribed.Event.LevelFinalize -= OnLevelFinalize;' 'Native LevelFinalize unsubscription'
-Assert-Contains $modSystemText 'L00CProcessCampaignController.SignalLevelFinalize();' 'LevelFinalize forwarding'
-Assert-Contains $text 'internal static void SignalLevelFinalize()' 'Process-level finalization signal'
-Assert-Contains $text 'active.bootstrap?.SignalLevelFinalize();' 'Bootstrap receives finalization signal'
-Assert-Contains $bootstrapText 'internal void SignalLevelFinalize()' 'Fixture finalization latch'
+Assert-Contains $modSystemText 'L00CLevelFinalizeSignal? signal = finalizeLease?.Capture();' 'LevelFinalize captures owner/epoch before controller lock'
+Assert-Contains $modSystemText 'L00CProcessCampaignController.SignalLevelFinalize(signal);' 'Owner-scoped LevelFinalize forwarding'
+Assert-Contains $text 'internal static void SignalLevelFinalize(L00CLevelFinalizeSignal? signal)' 'Process-level finalization signal'
+Assert-Contains $text 'active.levelFinalizeGate.TryAccept(signal, out int fixtureSequence)' 'Exact owner/epoch acceptance'
+Assert-Contains $text 'active.bootstrap?.SignalLevelFinalize(fixtureSequence);' 'Bootstrap receives exact finalization epoch'
+Assert-Contains $text 'active.host?.SignalLevelFinalize(fixtureSequence);' 'Five-cycle host receives exact finalization epoch'
+Assert-Contains $bootstrapText 'internal void SignalLevelFinalize(int fixtureSequence)' 'Fixture finalization latch'
 Assert-Contains $bootstrapText 'fixture.LevelFinalizeObserved' 'Finalization latch required before return'
+Assert-Contains $hostText 'internal void SignalLevelFinalize(int finalizedFixtureSequence)' 'Host finalization latch'
+Assert-Contains $bootstrapText 'L00CProcessCampaignController.BeginNativeOpen(fixture.Sequence)' 'Creation open epoch begins before native click'
+Assert-Contains $hostText 'L00CProcessCampaignController.BeginNativeOpen(openingSequence)' 'Reopen epoch begins before native click'
+Assert-Contains $hostText 'TryFindFinalizedWorldSession(screenManager, activeTarget.SavePath, false' 'Reopen finalization/path contract'
 if ($bootstrapText.IndexOf('clientPlayingFired` is the audited client-side LevelFinalize gate', [StringComparison]::Ordinal) -ge 0) { throw 'Player-ready flag must not be mislabeled as LevelFinalize.' }
 Assert-Contains $hostText 'expectedRole' 'Role rejection'
 Assert-Contains $hostText 'requires distinct marked saves' 'Distinct role/cell rejection'
@@ -92,5 +112,6 @@ Assert-Contains $hostText 'requires distinct marked saves' 'Distinct role/cell r
     InvalidRoleAndPathRejection = 'PASS: marked-save role/path/cell guards remain in host'
     TerminalCleanup = 'PASS: terminal state stops requeue and clears singleton'
     CampaignIsolation = 'PASS: every new run owns a fresh attested campaigns/<run-id> root; collision and constructor/enqueue diagnostics are explicit'
-    Scope = 'Deterministic source contract only; no Vintage Story process was launched.'
+    LevelFinalizeEpochOracle = 'PASS: stale pre-click refused; Retire/open owner gap then current ModSystem accepted for exact 8 sessions'
+    Scope = 'Executable production-gate concurrency plus deterministic source contract; no Vintage Story process was launched.'
 } | ConvertTo-Json -Depth 4

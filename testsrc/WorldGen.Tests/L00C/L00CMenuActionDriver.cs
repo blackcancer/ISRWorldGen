@@ -56,6 +56,22 @@ internal sealed class L00CMenuActionReceipt
     public bool Completed { get; private set; }
 }
 
+internal sealed class L00CFinalizedSessionAttestation
+{
+    internal L00CFinalizedSessionAttestation(object clientMain, string clientSavegameGuid, string startServerSavePath, bool isNew)
+    {
+        ClientMain = clientMain;
+        ClientSavegameGuid = clientSavegameGuid;
+        StartServerSavePath = startServerSavePath;
+        IsNew = isNew;
+    }
+
+    internal object ClientMain { get; }
+    internal string ClientSavegameGuid { get; }
+    internal string StartServerSavePath { get; }
+    internal bool IsNew { get; }
+}
+
 /// <summary>Version/hash locked reflection bridge for the audited 1.22.7 client menu actions.</summary>
 internal static class L00CMenuActionDriver
 {
@@ -87,9 +103,10 @@ internal static class L00CMenuActionDriver
     }
 
     /// <summary>Requires a separately subscribed native LevelFinalize event, then checks the playable client state.</summary>
-    internal static bool TryFindFinalizedNewWorldSession(object screenManager, string expectedSavePath, bool levelFinalizeObserved, out object? clientMain)
+    internal static bool TryFindFinalizedWorldSession(object screenManager, string expectedSavePath, bool expectedIsNew,
+        bool levelFinalizeObserved, out L00CFinalizedSessionAttestation? attestation)
     {
-        clientMain = null;
+        attestation = null;
         if (string.IsNullOrWhiteSpace(expectedSavePath)) throw new ArgumentException("L00-C expected save path is required.", nameof(expectedSavePath));
         if (!TryFindClientSession(screenManager, out object? main, out _) || main is null) return false;
         Assembly lib = FindLoadedLib(); RequireAuditedLibrary(lib);
@@ -110,29 +127,37 @@ internal static class L00CMenuActionDriver
         FieldInfo serverArgs = RequireDeclaredInstanceField(runningType, "serverargs", argsType, true, 0x1073);
         object? nativeArgs = serverArgs.GetValue(runningScreen);
         bool argsPresent = nativeArgs is not null;
-        bool pathMatches = argsPresent && ReadStartServerArgsString(nativeArgs!, "SaveFileLocation", 0x0f0e).Equals(Path.GetFullPath(expectedSavePath), StringComparison.OrdinalIgnoreCase);
-        bool isNew = argsPresent && ReadStartServerArgsBool(nativeArgs!, "IsNew", 0x0f1b) is true;
-        if (!IsNewWorldReadinessSatisfied(levelFinalizeObserved, true, true, true, true, true, true, argsPresent, pathMatches, isNew)) return false;
-        clientMain = main;
+        string observedSavePath = argsPresent ? Path.GetFullPath(ReadStartServerArgsString(nativeArgs!, "SaveFileLocation", 0x0f0e)) : string.Empty;
+        bool pathMatches = argsPresent && observedSavePath.Equals(Path.GetFullPath(expectedSavePath), StringComparison.OrdinalIgnoreCase);
+        bool? observedIsNew = argsPresent ? ReadStartServerArgsBool(nativeArgs!, "IsNew", 0x0f1b) : null;
+        bool isNewMatches = observedIsNew.HasValue && observedIsNew.Value == expectedIsNew;
+        string clientSavegameGuid = ReadClientSavegameGuid(mainType, main);
+        bool guidValid = Guid.TryParseExact(clientSavegameGuid, "D", out Guid parsedClientGuid);
+        if (!IsWorldReadinessSatisfied(levelFinalizeObserved, true, true, true, true, true, true, argsPresent, pathMatches, isNewMatches, guidValid)) return false;
+        attestation = new L00CFinalizedSessionAttestation(main, parsedClientGuid.ToString("D"), observedSavePath, observedIsNew!.Value);
         return true;
     }
 
     // Executable oracle seam. The production caller supplies the first argument
     // from IClientEventAPI.LevelFinalize; this function never infers it from a
     // convenient-but-unrelated readiness flag.
-    internal static bool IsNewWorldReadinessSatisfied(bool levelFinalizeObserved, bool clientPlayingFired, bool spawned,
+    internal static bool IsWorldReadinessSatisfied(bool levelFinalizeObserved, bool clientPlayingFired, bool spawned,
         bool assetsReceived, bool blocksReceivedAndLoaded, bool doneColorMaps, bool doneBlockAndItemShapeLoading,
-        bool serverArgsPresent, bool savePathMatches, bool isNew)
+        bool serverArgsPresent, bool savePathMatches, bool isNewMatches, bool clientSavegameGuidValid)
         => levelFinalizeObserved && clientPlayingFired && spawned && assetsReceived && blocksReceivedAndLoaded &&
-           doneColorMaps && doneBlockAndItemShapeLoading && serverArgsPresent && savePathMatches && isNew;
+           doneColorMaps && doneBlockAndItemShapeLoading && serverArgsPresent && savePathMatches && isNewMatches && clientSavegameGuidValid;
 
-    internal static L00CMenuActionReceipt ReturnToMainMenu(object clientMain, object screenManager)
+    internal static L00CMenuActionReceipt ReturnToMainMenu(object clientMain, object screenManager, Action beginNativeReturn)
     {
+        if (beginNativeReturn is null) throw new ArgumentNullException(nameof(beginNativeReturn));
         // All type/version/hash/method checks run before SendLeave or any session mutation.
         GuardTarget(clientMain, "Vintagestory.Client.NoObf.ClientMain", "SendLeave", new[] { typeof(int) });
         MethodInfo destroy = GuardDestroyGameSession(clientMain);
         GuardTarget(screenManager, "Vintagestory.Client.ScreenManager", "StartMainMenu", Type.EmptyTypes);
         // Same shutdown chain as Save & Quit: SendLeave(0) → DestroyGameSession(false, SoftExit) → StartMainMenu.
+        // This callback is deliberately after every reflection/IL guard and
+        // immediately before the first native mutation.
+        beginNativeReturn();
         InvokeExact(clientMain, "SendLeave", new object?[] { SaveQuitLeaveReason });
         Type exitType = destroy.GetParameters()[1].ParameterType;
         InvokeMethod(clientMain, destroy, new object?[] { false, Enum.Parse(exitType, "SoftExit") });
@@ -413,6 +438,16 @@ internal static class L00CMenuActionDriver
 
     private static bool? ReadStartServerArgsBool(object args, string name, int token)
         => RequireStartServerArgsField(args.GetType(), name, token, true).GetValue(args) as bool?;
+
+    private static string ReadClientSavegameGuid(Type mainType, object clientMain)
+    {
+        PropertyInfo? property = mainType.GetProperty("SavegameIdentifier", BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+        MethodInfo? getter = property?.GetMethod;
+        if (property?.PropertyType != typeof(string) || property.SetMethod is not null || getter is null || !getter.IsPublic ||
+            getter.IsStatic || getter.MetadataToken != 0x0600247d || getter.GetParameters().Length != 0)
+            throw new InvalidOperationException("L00-C bootstrap refused: audited ClientMain.SavegameIdentifier getter drifted.");
+        return property.GetValue(clientMain) as string ?? string.Empty;
+    }
 
     // This is intentionally a fixed audited chain, not an object-graph search:
     // ClientCoreAPI.game -> ClientMain.ScreenRunningGame -> GuiScreen.ScreenManager.

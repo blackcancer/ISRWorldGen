@@ -33,13 +33,13 @@ internal static class L00CNativeFixtureOracle
         object token = config.GetType().GetProperty("Token")?.GetValue(config) ?? throw new InvalidOperationException("Jworldconfig token is null.");
         PropertyInfo indexer = token.GetType().GetProperty("Item", new[] { typeof(string) }) ?? throw new InvalidOperationException("JObject indexer absent.");
         RequireToken(indexer, token, "worldWidth", "4096"); RequireToken(indexer, token, "worldLength", "4096"); RequireToken(indexer, token, "isrworldgenProfileId", "laboratory");
-        if (!L00CMenuActionDriver.IsNewWorldReadinessSatisfied(true, true, true, true, true, true, true, true, true, true))
+        if (!L00CMenuActionDriver.IsWorldReadinessSatisfied(true, true, true, true, true, true, true, true, true, true, true))
             throw new InvalidOperationException("Fully proven readiness was refused.");
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 11; i++)
         {
-            bool[] values = { true, true, true, true, true, true, true, true, true, true };
+            bool[] values = { true, true, true, true, true, true, true, true, true, true, true };
             values[i] = false;
-            if (L00CMenuActionDriver.IsNewWorldReadinessSatisfied(values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9]))
+            if (L00CMenuActionDriver.IsWorldReadinessSatisfied(values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9], values[10]))
                 throw new InvalidOperationException("False readiness permitted return at predicate index " + i + ".");
         }
         return 0;

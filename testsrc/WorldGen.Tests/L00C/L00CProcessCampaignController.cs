@@ -6,6 +6,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using ISRWorldGen.WorldgenProbe;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
 
@@ -27,21 +28,24 @@ internal sealed class L00CProcessCampaignController
     private static L00CManagerLeaseLifecycle? bootstrapLease;
     private static string? bootstrapRoot;
     private static L00CCampaignStorage? bootstrapCampaign;
+    private static L00CLevelFinalizeSessionLease? bootstrapFinalizeLease;
     private readonly object screenManager;
     private readonly string root;
     private readonly L00CCampaignStorage campaign;
     private readonly string evidence;
     private L00CFixtureBootstrap? bootstrap;
     private L00CMenuActionLaboratoryHost? host;
+    private readonly L00CLevelFinalizeGate levelFinalizeGate = new();
     private bool pumpQueued;
     private bool terminal;
     private int sessionSignals;
 
-    private L00CProcessCampaignController(object manager, L00CCampaignStorage campaignStorage)
+    private L00CProcessCampaignController(object manager, L00CCampaignStorage campaignStorage, L00CLevelFinalizeSessionLease initialSession)
     {
         screenManager = manager; campaign = campaignStorage; root = campaign.LaboratoryRoot;
         evidence = campaign.EvidenceDirectory;
         bootstrap = new L00CFixtureBootstrap(campaign);
+        levelFinalizeGate.AdoptSession(initialSession);
     }
 
     internal static L00CProcessCampaignInstallResult InstallOrSignal(ICoreClientAPI api, string laboratoryRoot)
@@ -49,35 +53,91 @@ internal sealed class L00CProcessCampaignController
         RequireDebugLaboratory();
         if (api is null) throw new ArgumentNullException(nameof(api));
         string root = Path.GetFullPath(laboratoryRoot);
+        L00CLevelFinalizeSessionLease finalizeLease = L00CLevelFinalizeGate.CreateSessionLease();
         lock (Gate)
         {
-            if (installTransaction.TrySignalSameRoot(root, value => value.root, value => value.SignalSessionReady())) return L00CProcessCampaignInstallResult.Succeeded(null, "signalled");
-            if (bootstrapLease is not null) { RequireSameRoot(bootstrapRoot!, root); return L00CProcessCampaignInstallResult.Succeeded(null, "waiting"); } // one retry listener/pump per process
+            if (installTransaction.TrySignalSameRoot(root, value => value.root, value => value.SignalSessionReady(finalizeLease)))
+                return L00CProcessCampaignInstallResult.Succeeded(null, finalizeLease, "signalled");
+            if (bootstrapLease is not null)
+            {
+                RequireSameRoot(bootstrapRoot!, root);
+                bootstrapFinalizeLease?.Revoke();
+                bootstrapFinalizeLease = finalizeLease;
+                return L00CProcessCampaignInstallResult.Succeeded(null, finalizeLease, "waiting");
+            } // one retry listener/pump per process
             // The actual Vanilla menu discovery root.  This is intentionally
             // read-only configuration access: no dataPath override/seam exists.
             L00CCampaignStorage campaign = L00CCampaignStorage.Create(root, GamePaths.Saves);
             var seams = new VintageManagerLeaseSeams(api, campaign);
             var engine = new L00CManagerLeaseLifecycle(seams);
-            bootstrapLease = engine; bootstrapRoot = root; bootstrapCampaign = campaign;
+            bootstrapLease = engine; bootstrapRoot = root; bootstrapCampaign = campaign; bootstrapFinalizeLease = finalizeLease;
             L00CManagerLeaseToken token = new(engine.Dispose);
             seams.Set(engine, token);
             engine.Start();
             return engine.Terminal && !engine.Installed
                 ? L00CProcessCampaignInstallResult.Refused("lease-terminal")
-                : L00CProcessCampaignInstallResult.Succeeded(bootstrapLease is null ? null : token, "installed-or-waiting");
+                : L00CProcessCampaignInstallResult.Succeeded(bootstrapLease is null ? null : token, finalizeLease, "installed-or-waiting");
         }
     }
 
     // The session ModSystem forwards IClientEventAPI.LevelFinalize here. The
     // process pump owns fixture state, so a disposed world cannot retain it.
-    internal static void SignalLevelFinalize()
+    internal static void SignalLevelFinalize(L00CLevelFinalizeSignal? signal)
     {
+        if (signal is null) return;
         lock (Gate)
         {
             if (installTransaction.Active is L00CProcessCampaignController active && !active.terminal)
             {
-                active.bootstrap?.SignalLevelFinalize();
+                if (!active.levelFinalizeGate.TryAccept(signal, out int fixtureSequence)) return;
+                active.bootstrap?.SignalLevelFinalize(fixtureSequence);
+                active.host?.SignalLevelFinalize(fixtureSequence);
                 active.QueuePump();
+            }
+        }
+    }
+
+    internal static L00CNativeOpenReservation BeginNativeOpen(int fixtureSequence)
+    {
+        lock (Gate)
+        {
+            L00CProcessCampaignController active = installTransaction.Active
+                ?? throw new InvalidOperationException("L00-C native open has no process campaign owner.");
+            if (active.terminal) throw new InvalidOperationException("L00-C native open owner is terminal.");
+            return active.levelFinalizeGate.BeginOpen(fixtureSequence);
+        }
+    }
+
+    internal static void CompleteNativeOpen(L00CNativeOpenReservation reservation)
+    {
+        lock (Gate)
+        {
+            L00CProcessCampaignController active = installTransaction.Active
+                ?? throw new InvalidOperationException("L00-C native open completion has no process campaign owner.");
+            active.levelFinalizeGate.CompleteOpen(reservation);
+        }
+    }
+
+    internal static bool AbortNativeOpen(L00CNativeOpenReservation reservation)
+    {
+        lock (Gate)
+        {
+            return installTransaction.Active is L00CProcessCampaignController active &&
+                active.levelFinalizeGate.AbortOpen(reservation);
+        }
+    }
+
+    internal static void RetireSession(L00CLevelFinalizeSessionLease session)
+    {
+        if (session is null) throw new ArgumentNullException(nameof(session));
+        lock (Gate)
+        {
+            if (installTransaction.Active is L00CProcessCampaignController active)
+                active.levelFinalizeGate.RetireSession(session);
+            else
+            {
+                if (ReferenceEquals(bootstrapFinalizeLease, session)) bootstrapFinalizeLease = null;
+                session.Revoke();
             }
         }
     }
@@ -91,7 +151,9 @@ internal sealed class L00CProcessCampaignController
         L00CProcessCampaignController? candidate = null;
         try
         {
-            candidate = new L00CProcessCampaignController(manager, campaign);
+            L00CLevelFinalizeSessionLease initialSession = bootstrapFinalizeLease
+                ?? throw new InvalidOperationException("L00-C controller install has no client-session finalize lease.");
+            candidate = new L00CProcessCampaignController(manager, campaign, initialSession);
         }
         catch (Exception exception)
         {
@@ -103,6 +165,7 @@ internal sealed class L00CProcessCampaignController
         {
             candidate.SignalSessionReady();
             installTransaction.Install(candidate, value => value.QueuePump());
+            bootstrapFinalizeLease = null;
             return true;
         }
         catch (Exception exception)
@@ -120,6 +183,7 @@ internal sealed class L00CProcessCampaignController
     }
 
     private void SignalSessionReady() { checked { sessionSignals++; } }
+    private void SignalSessionReady(L00CLevelFinalizeSessionLease session) { levelFinalizeGate.AdoptSession(session); SignalSessionReady(); }
     private void QueuePump() { if (!terminal && !pumpQueued) { pumpQueued = true; L00CMenuActionDriver.EnqueueMainThreadTask(Pump); } }
 
     private void Pump()
@@ -144,7 +208,7 @@ internal sealed class L00CProcessCampaignController
 
     private void Complete() { WriteTerminal("complete", null); UnregisterAndClearSingleton(); }
     private void Fault(Exception exception) { WriteTerminal("refused", exception.Message); UnregisterAndClearSingleton(); }
-    private void UnregisterAndClearSingleton() { terminal = true; bootstrap = null; host = null; pumpQueued = false; installTransaction.Clear(this); }
+    private void UnregisterAndClearSingleton() { terminal = true; levelFinalizeGate.Close(); bootstrap = null; host = null; pumpQueued = false; installTransaction.Clear(this); }
 
     private void WriteTerminal(string status, string? detail)
     {
@@ -203,7 +267,14 @@ internal sealed class L00CProcessCampaignController
         public void Release()
         {
             api = null; token?.Complete(); token = null;
-            lock (Gate) { if (ReferenceEquals(bootstrapLease, engine)) { bootstrapLease = null; bootstrapRoot = null; bootstrapCampaign = null; } }
+            lock (Gate)
+            {
+                if (ReferenceEquals(bootstrapLease, engine))
+                {
+                    bootstrapLease = null; bootstrapRoot = null; bootstrapCampaign = null;
+                    bootstrapFinalizeLease?.Revoke(); bootstrapFinalizeLease = null;
+                }
+            }
             engine = null;
         }
     }
@@ -221,10 +292,12 @@ internal sealed class L00CProcessCampaignController
 
 internal sealed class L00CProcessCampaignInstallResult
 {
-    private L00CProcessCampaignInstallResult(bool accepted, L00CManagerLeaseToken? lease, string diagnostic) { Accepted = accepted; Lease = lease; Diagnostic = diagnostic; }
+    private L00CProcessCampaignInstallResult(bool accepted, L00CManagerLeaseToken? lease, L00CLevelFinalizeSessionLease? finalizeLease, string diagnostic)
+    { Accepted = accepted; Lease = lease; FinalizeLease = finalizeLease; Diagnostic = diagnostic; }
     internal bool Accepted { get; }
     internal L00CManagerLeaseToken? Lease { get; }
+    internal L00CLevelFinalizeSessionLease? FinalizeLease { get; }
     internal string Diagnostic { get; }
-    internal static L00CProcessCampaignInstallResult Succeeded(L00CManagerLeaseToken? lease, string diagnostic) => new(true, lease, diagnostic);
-    internal static L00CProcessCampaignInstallResult Refused(string diagnostic) => new(false, null, diagnostic);
+    internal static L00CProcessCampaignInstallResult Succeeded(L00CManagerLeaseToken? lease, L00CLevelFinalizeSessionLease finalizeLease, string diagnostic) => new(true, lease, finalizeLease, diagnostic);
+    internal static L00CProcessCampaignInstallResult Refused(string diagnostic) => new(false, null, null, diagnostic);
 }

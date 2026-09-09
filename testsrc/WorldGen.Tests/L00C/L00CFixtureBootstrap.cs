@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using ISRWorldGen.WorldgenProbe;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
@@ -30,8 +31,8 @@ internal sealed class L00CFixtureBootstrap
         if (!Directory.Exists(root)) throw new InvalidOperationException("L00-C bootstrap requires the existing repository .local\\L00C root.");
         evidence = Path.GetFullPath(campaign.EvidenceDirectory);
         if (!Directory.Exists(evidence) || !IsUnder(evidence, campaign.CampaignRoot)) throw new InvalidOperationException("L00-C bootstrap evidence must be the attested campaign evidence directory.");
-        primary = new Fixture("activated-primary", campaign.PrimarySavePath);
-        secondary = new Fixture("activated-secondary", campaign.SecondarySavePath);
+        primary = new Fixture("activated-primary", campaign.PrimarySavePath, 1);
+        secondary = new Fixture("activated-secondary", campaign.SecondarySavePath, 2);
         if (File.Exists(primary.SavePath) || File.Exists(secondary.SavePath)) throw new InvalidOperationException("L00-C bootstrap refuses to overwrite a fixture save.");
         Receipt("bootstrap-open", null, "ready");
     }
@@ -45,19 +46,21 @@ internal sealed class L00CFixtureBootstrap
         {
             case State.WaitPrimaryMenu:
                 if (!StableMenu(screenManager)) return false;
-                state = State.WaitPrimaryWorld; Create(screenManager, primary); return false;
+                Create(screenManager, primary); state = State.WaitPrimaryWorld; return false;
             case State.WaitPrimaryWorld:
-                if (!StableFinalizedNewWorld(screenManager, primary, out object? main)) return false;
-                L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("primary-created-returned", primary, "return-main-menu"); state = State.WaitPrimaryCell; return false;
+                if (!StableFinalizedWorld(screenManager, primary, true, out L00CFinalizedSessionAttestation? primarySession)) return false;
+                ReturnFinalizedSession(primarySession!, screenManager, primary);
+                Receipt("primary-created-returned", primary, "return-main-menu"); state = State.WaitPrimaryCell; return false;
             case State.WaitPrimaryCell:
                 if (!TryBind(screenManager, primary)) return false;
                 Publish(primary); Receipt("primary-cell-confirmed", primary, "GuiScreenSingleplayer.entries"); state = State.WaitSecondaryMenu; return false;
             case State.WaitSecondaryMenu:
                 if (!StableMenu(screenManager)) return false;
-                state = State.WaitSecondaryWorld; Create(screenManager, secondary); return false;
+                Create(screenManager, secondary); state = State.WaitSecondaryWorld; return false;
             case State.WaitSecondaryWorld:
-                if (!StableFinalizedNewWorld(screenManager, secondary, out main)) return false;
-                L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("secondary-created-returned", secondary, "return-main-menu"); state = State.WaitSecondaryCell; return false;
+                if (!StableFinalizedWorld(screenManager, secondary, true, out L00CFinalizedSessionAttestation? secondarySession)) return false;
+                ReturnFinalizedSession(secondarySession!, screenManager, secondary);
+                Receipt("secondary-created-returned", secondary, "return-main-menu"); state = State.WaitSecondaryCell; return false;
             case State.WaitSecondaryCell:
                 if (!TryBind(screenManager, secondary)) return false;
                 Publish(secondary); Receipt("secondary-cell-confirmed", secondary, "GuiScreenSingleplayer.entries");
@@ -81,7 +84,18 @@ internal sealed class L00CFixtureBootstrap
         try { campaign.RequireVacantNativeCreateTarget(fixture.Role, fixture.SavePath); }
         catch { campaign.RecordNativeCreateRefusal(fixture.Role, fixture.SavePath); throw; }
         fixture.LevelFinalizeObserved = false;
-        L00CMenuActionReceipt receipt = L00CMenuActionDriver.CreateFixtureWorld(screenManager, fixture.Role, fixture.SavePath);
+        L00CNativeOpenReservation opening = L00CProcessCampaignController.BeginNativeOpen(fixture.Sequence);
+        L00CMenuActionReceipt receipt;
+        try
+        {
+            receipt = L00CMenuActionDriver.CreateFixtureWorld(screenManager, fixture.Role, fixture.SavePath);
+            L00CProcessCampaignController.CompleteNativeOpen(opening);
+        }
+        catch
+        {
+            _ = L00CProcessCampaignController.AbortNativeOpen(opening);
+            throw;
+        }
         Receipt(receipt.Action, fixture, receipt.TargetMethod);
     }
     private bool StableMenu(object screenManager)
@@ -89,16 +103,34 @@ internal sealed class L00CFixtureBootstrap
         if (!L00CMenuActionDriver.TryFindMenuLeft(screenManager, out object? menu) || menu is null) { stableTicks = 0; return false; }
         return ++stableTicks >= 3 && ResetStable();
     }
-    private bool StableFinalizedNewWorld(object screenManager, Fixture fixture, out object? main)
+    private bool StableFinalizedWorld(object screenManager, Fixture fixture, bool expectedIsNew, out L00CFinalizedSessionAttestation? attestation)
     {
         // The process controller records IClientEventAPI.LevelFinalize. It is
         // required in addition to the native playable flags and exact local args.
-        if (!L00CMenuActionDriver.TryFindFinalizedNewWorldSession(screenManager, fixture.SavePath, fixture.LevelFinalizeObserved, out main) || main is null)
+        if (!L00CMenuActionDriver.TryFindFinalizedWorldSession(screenManager, fixture.SavePath, expectedIsNew,
+                fixture.LevelFinalizeObserved, out attestation) || attestation is null)
         {
             stableTicks = 0;
             return false;
         }
         return ++stableTicks >= 3 && ResetStable();
+    }
+
+    private static void ReturnFinalizedSession(L00CFinalizedSessionAttestation attestation, object screenManager, Fixture fixture)
+    {
+        L00CLifecycleShutdownIdentity identity = L00CLifecycleShutdownBarrier.RequireCurrentIdentity();
+        L00CLifecycleReturnReservation reservation = L00CLifecycleShutdownBarrier.PrepareReturn(
+            identity, attestation.ClientSavegameGuid, fixture.Role, fixture.SavePath, attestation.StartServerSavePath, fixture.Sequence);
+        try
+        {
+            _ = L00CMenuActionDriver.ReturnToMainMenu(attestation.ClientMain, screenManager,
+                () => L00CLifecycleShutdownBarrier.BeginNativeReturn(reservation));
+        }
+        catch
+        {
+            _ = L00CLifecycleShutdownBarrier.AbortBeforeNativeReturn(reservation);
+            throw;
+        }
     }
     private bool TryBind(object screenManager, Fixture fixture)
     {
@@ -118,10 +150,11 @@ internal sealed class L00CFixtureBootstrap
     }
     private bool ResetStable() { stableTicks = 0; return true; }
     // Called only by the process-wide controller's IClientEventAPI.LevelFinalize callback.
-    internal void SignalLevelFinalize()
+    internal void SignalLevelFinalize(int fixtureSequence)
     {
-        if (state == State.WaitPrimaryWorld) primary.LevelFinalizeObserved = true;
-        else if (state == State.WaitSecondaryWorld) secondary.LevelFinalizeObserved = true;
+        if (state == State.WaitPrimaryWorld && fixtureSequence == primary.Sequence) primary.LevelFinalizeObserved = true;
+        else if (state == State.WaitSecondaryWorld && fixtureSequence == secondary.Sequence) secondary.LevelFinalizeObserved = true;
+        else throw new InvalidOperationException("L00-C bootstrap received LevelFinalize for another open epoch.");
     }
     private static int ReadUniqueSaveCell(object screen, string savePath)
     {
@@ -162,5 +195,5 @@ internal sealed class L00CFixtureBootstrap
     private static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
     private static void RequireDebugLaboratory() { if (!Debugger.IsAttached || !string.Equals(Environment.GetEnvironmentVariable("ISR_L00C_LAB"), "1", StringComparison.Ordinal)) throw new InvalidOperationException("L00-C bootstrap requires Debugger.IsAttached and ISR_L00C_LAB=1."); }
     private enum State { WaitPrimaryMenu, WaitPrimaryWorld, WaitPrimaryCell, WaitSecondaryMenu, WaitSecondaryWorld, WaitSecondaryCell, Completed }
-    private sealed class Fixture { internal Fixture(string role, string savePath) { Role = role; SavePath = Path.GetFullPath(savePath); } internal string Role { get; } internal string SavePath { get; } internal int CellIndex { get; set; } = -1; internal bool LevelFinalizeObserved { get; set; } }
+    private sealed class Fixture { internal Fixture(string role, string savePath, int sequence) { Role = role; SavePath = Path.GetFullPath(savePath); Sequence = sequence; } internal string Role { get; } internal string SavePath { get; } internal int Sequence { get; } internal int CellIndex { get; set; } = -1; internal bool LevelFinalizeObserved { get; set; } }
 }

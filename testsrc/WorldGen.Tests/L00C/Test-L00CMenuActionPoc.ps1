@@ -7,12 +7,15 @@ $hostPath = Join-Path $PSScriptRoot 'L00CMenuActionLaboratoryHost.cs'
 $bootstrapPath = Join-Path $PSScriptRoot 'L00CFixtureBootstrap.cs'
 $storagePath = Join-Path $PSScriptRoot 'L00CCampaignStorage.cs'
 $strictEvidencePath = Join-Path $PSScriptRoot 'L00CStrictEvidenceJson.cs'
+$nativeOpenStubPath = Join-Path $PSScriptRoot 'L00CNativeOpenControllerCompileStub.cs'
+$lifecycleBarrierPath = Join-Path $PSScriptRoot '..\..\..\src\WorldGen.VintageStory\WorldgenProbe\L00CLifecycleShutdownBarrier.cs'
+$levelFinalizeGatePath = Join-Path $PSScriptRoot '..\..\..\src\WorldGen.VintageStory\WorldgenProbe\L00CLevelFinalizeGate.cs'
 $libPath = Join-Path $GamePath 'VintagestoryLib.dll'
 $cscPath = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
 if (-not (Test-Path -LiteralPath $cscPath -PathType Leaf)) { throw "L00-C menu POC compile gate cannot find csc.exe: $cscPath" }
 $compileOutput = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-poc-" + [Guid]::NewGuid().ToString('N') + '.dll')
 try {
-    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$compileOutput" $driverPath $hostPath $bootstrapPath $storagePath $strictEvidencePath
+    & $cscPath /nologo /target:library "/define:DEBUG,L00C_STANDALONE_ORACLE" /nullable:enable /warnaserror /langversion:latest "/out:$compileOutput" $driverPath $hostPath $bootstrapPath $storagePath $strictEvidencePath $nativeOpenStubPath $lifecycleBarrierPath $levelFinalizeGatePath
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $compileOutput -PathType Leaf)) { throw 'L00-C menu POC driver/host compilation failed.' }
 }
 finally {
@@ -48,6 +51,11 @@ Assert-FieldRid 'Vintagestory.Client.NoObf.ClientCoreAPI' 'game' 0x11aa 'Vintage
 Assert-FieldRid 'Vintagestory.Client.NoObf.ClientMain' 'ScreenRunningGame' 0x11f3 'Vintagestory.Client.GuiScreenRunningGame' $true
 Assert-FieldRid 'GuiScreen' 'ScreenManager' 0x0008 'Vintagestory.Client.ScreenManager' $true
 $clientMain = $module.GetType('Vintagestory.Client.NoObf.ClientMain')
+$saveGuidGetter = $clientMain.Methods | Where-Object { $_.Name -eq 'get_SavegameIdentifier' } | Select-Object -First 1
+if ($null -eq $saveGuidGetter -or $saveGuidGetter.MetadataToken.ToInt32() -ne 0x0600247d -or $saveGuidGetter.ReturnType.FullName -ne 'System.String' -or
+    -not ($saveGuidGetter.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.FieldReference] -and $_.Operand.FullName -eq 'System.String Vintagestory.Client.NoObf.ServerInformation::SavegameIdentifier' })) {
+    throw 'L00-C menu POC version lock refused: finalized client SavegameIdentifier getter drifted.'
+}
 $sendLeave = $clientMain.Methods | Where-Object { $_.Name -eq 'SendLeave' } | Select-Object -First 1
 if ($null -eq $sendLeave -or $sendLeave.ReturnType.FullName -ne 'System.Void' -or $sendLeave.Parameters.Count -ne 1 -or $sendLeave.Parameters[0].ParameterType.FullName -ne 'System.Int32' -or $sendLeave.Parameters[0].Name -ne 'reason') {
     throw 'L00-C menu POC version lock refused: ClientMain.SendLeave(System.Int32 reason) drifted.'
@@ -69,16 +77,16 @@ if (Select-String -LiteralPath $bootstrapPath -Pattern 'OnClickCellLeft|ClientSa
 # Regression oracle for the native fixture creation fault: null WorldConfiguration
 # crashes SaveGame.SetNewWorldConfig.  The helper must mirror every audited native
 # field, retain JsonObject.Token and refuse a pre-LevelFinalize client allocation.
-foreach ($required in @('PlayStyleLangCode', 'preset-surviveandbuild', 'CreatedByPlayerName', 'DisabledMods', 'ClientModPaths', 'get_ModPaths', 'get_DisabledMods', 'get_PlayerName', 'JObject.Parse', 'worldWidth', 'worldLength', 'isrworldgenProfileId', 'JsonObject did not retain its Jworldconfig token', 'TryFindFinalizedNewWorldSession', 'clientPlayingFired', 'BlocksReceivedAndLoaded', 'DoneBlockAndItemShapeLoading', 'serverargs', 'expectedSavePath')) {
+foreach ($required in @('PlayStyleLangCode', 'preset-surviveandbuild', 'CreatedByPlayerName', 'DisabledMods', 'ClientModPaths', 'get_ModPaths', 'get_DisabledMods', 'get_PlayerName', 'JObject.Parse', 'worldWidth', 'worldLength', 'isrworldgenProfileId', 'JsonObject did not retain its Jworldconfig token', 'TryFindFinalizedWorldSession', 'clientPlayingFired', 'BlocksReceivedAndLoaded', 'DoneBlockAndItemShapeLoading', 'serverargs', 'expectedSavePath', 'ReadClientSavegameGuid', 'Guid.TryParseExact')) {
     if (-not (Select-String -LiteralPath $driverPath -SimpleMatch $required -Quiet)) { throw "Missing native StartServerArgs/readiness contract: $required" }
 }
-foreach ($required in @('StableFinalizedNewWorld', 'TryFindFinalizedNewWorldSession(screenManager, fixture.SavePath', 'primary-created-returned', 'secondary-created-returned')) {
+foreach ($required in @('StableFinalizedWorld', 'TryFindFinalizedWorldSession(screenManager, fixture.SavePath', 'primary-created-returned', 'secondary-created-returned', 'ReturnFinalizedSession')) {
     if (-not (Select-String -LiteralPath $bootstrapPath -SimpleMatch $required -Quiet)) { throw "Missing finalized fixture bootstrap contract: $required" }
 }
 if (Select-String -LiteralPath $bootstrapPath -SimpleMatch 'StableSession(' -Quiet) { throw 'Bootstrap must not return from a merely allocated client session.' }
 $waitPrimary = $bootstrapText = Get-Content -LiteralPath $bootstrapPath -Raw
-$primaryReturn = $waitPrimary.IndexOf('L00CMenuActionDriver.ReturnToMainMenu(main!, screenManager); Receipt("primary-created-returned"', [StringComparison]::Ordinal)
-$primaryReady = $waitPrimary.IndexOf('if (!StableFinalizedNewWorld(screenManager, primary, out object? main)) return false;', [StringComparison]::Ordinal)
+$primaryReturn = $waitPrimary.IndexOf('ReturnFinalizedSession(primarySession!, screenManager, primary);', [StringComparison]::Ordinal)
+$primaryReady = $waitPrimary.IndexOf('if (!StableFinalizedWorld(screenManager, primary, true, out L00CFinalizedSessionAttestation? primarySession)) return false;', [StringComparison]::Ordinal)
 if ($primaryReady -lt 0 -or $primaryReturn -lt 0 -or $primaryReady -ge $primaryReturn) { throw 'Primary fixture may return before finalized native readiness.' }
 
 ${behaviorAssembly} = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavior-" + [Guid]::NewGuid().ToString('N') + '.dll')
@@ -86,7 +94,7 @@ ${behaviorRoot} = Join-Path ([IO.Path]::GetTempPath()) ("l00c-menu-action-behavi
 try {
     # Filesystem behavior is covered by Test-L00CCampaignStorage.  This POC
     # remains a compile/IL contract and intentionally never fabricates a menu.
-    & $cscPath /nologo /target:library /define:DEBUG /langversion:latest "/out:$behaviorAssembly" $driverPath $hostPath $bootstrapPath $storagePath $strictEvidencePath
+    & $cscPath /nologo /target:library "/define:DEBUG,L00C_STANDALONE_ORACLE" /nullable:enable /warnaserror /langversion:latest "/out:$behaviorAssembly" $driverPath $hostPath $bootstrapPath $storagePath $strictEvidencePath $nativeOpenStubPath $lifecycleBarrierPath $levelFinalizeGatePath
     if ($LASTEXITCODE -ne 0) { throw 'Behavior oracle compilation failed.' }
     <#
     $labRoot = Join-Path $behaviorRoot 'repository\.local\L00C'
