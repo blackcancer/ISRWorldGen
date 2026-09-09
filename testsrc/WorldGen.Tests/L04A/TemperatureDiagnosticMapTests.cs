@@ -84,8 +84,8 @@ public sealed class TemperatureDiagnosticMapTests
                 altitudeLapseCelsiusPerModelLength = Settings.AltitudeLapseCelsiusPerModelLength,
                 inlandReferenceOffsetCelsius = Settings.InlandReferenceOffsetCelsius,
                 modelLengthPerDegree = NorthSouth.ModelLengthPerDegree,
-                fixtureAltitude = "radial hill, 0..1200 L",
-                fixtureContinentality = "west coast 0..east inland 1",
+                analyticAltitude = "radial hill, 0..1200 L",
+                analyticContinentality = "west coast 0..east inland 1",
             },
             palette = new
             {
