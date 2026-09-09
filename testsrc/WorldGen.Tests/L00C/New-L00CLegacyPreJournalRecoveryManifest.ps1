@@ -6,8 +6,12 @@ param(
     [Parameter(Mandatory=$true)][ValidateSet(74920)][int]$RuntimeProcessId,
     [Parameter(Mandatory=$true)][string]$PrimarySavePath,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9A-F]{64}$')][string]$PrimarySaveSha256,
+    [Parameter(Mandatory=$true)][string]$PrimaryWalPath,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[0-9A-F]{64}$')][string]$PrimaryWalSha256,
+    [Parameter(Mandatory=$true)][string]$PrimaryShmPath,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[0-9A-F]{64}$')][string]$PrimaryShmSha256,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9A-F]{64}$')][string]$ProvenanceSha256,
-    [Parameter(Mandatory=$true)][ValidateSet('I-ATTEST-L00C-A7290D12-PRIMARY-RAW-ONLY')][string]$IntegratorAttestation,
+    [Parameter(Mandatory=$true)][ValidateSet('I-ATTEST-L00C-A7290D12-PRIMARY-DB-WAL-SHM-ONLY')][string]$IntegratorAttestation,
     [Parameter(Mandatory=$true)][string]$DebugAssemblyPath
 )
 
@@ -39,6 +43,10 @@ try {
         $RuntimeProcessId,
         $PrimarySavePath,
         $PrimarySaveSha256,
+        $PrimaryWalPath,
+        $PrimaryWalSha256,
+        $PrimaryShmPath,
+        $PrimaryShmSha256,
         $ProvenanceSha256,
         $IntegratorAttestation,
         $stoppedProof))

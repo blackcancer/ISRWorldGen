@@ -1,132 +1,111 @@
 # L00-C — reprise bornée après interruption
 
-Cette recette ne vise que les deux fichiers temporaires nommés exactement par
-une campagne L00-C dans `GamePaths.Saves`. Elle ne recherche jamais des
-sauvegardes par motif et ne supprime ni dossier, ni sauvegarde utilisateur, ni
-bootstrap.
+Cette recette ne vise que les artefacts exacts d'une campagne L00-C sous le
+`GamePaths.Saves` fourni. Elle ne parcourt jamais AppData pour découvrir une
+cible et ne supprime aucun dossier.
 
-## Machine d'états durable
+## Ensemble SQLite natif
 
-Chaque transition est un reçu JSON strict, créé avec `CreateNew` **avant** son
-effet externe. Les reçus sont ordonnés et immuables dans
-`campaigns/<runId>/abort/` :
+Pour chaque rôle, les seuls noms natifs reconnus sont :
 
-| Etat durable | Reçu avant effet | Résidu accepté après interruption | Reprise |
-|---|---|---|---|
-| `prepared` | `00-prepared.json` | aucun fichier | vérifie puis ne supprime rien |
-| `primary-create-intent` | `01-primary-create-intent.json` | primaire absent, ou primaire (+ marqueur) | supprime seulement le primaire attesté présent |
-| `primary-created` | `02-primary-created.json` | primaire + marqueur | supprime cette paire exacte |
-| `secondary-create-intent` | `03-secondary-create-intent.json` | primaire + marqueur, secondaire absent ou (+ marqueur) | supprime les éléments exacts présents |
-| `secondary-created` | `04-secondary-created.json` | deux paires | supprime les deux paires exactes |
-| `cycling` | `05-cycling.json` | deux paires | supprime les deux paires exactes |
-| `sealed` | reçu de nettoyage existant | contrat de nettoyage scellé existant | inchangé |
-| `cleaned` | reçu d'intention puis `abort-cleaned.json` | aucun fichier attendu | idempotence refusée, preuve conservée |
+- base : `<save>.vcdbs` ;
+- WAL : `<save>.vcdbs-wal` ;
+- mémoire partagée : `<save>.vcdbs-shm` ;
+- marqueur L00-C : `<save>.vcdbs.l00c-appdata.json`.
 
-Une interruption à chaque frontière est donc représentée par le dernier reçu
-écrit, jamais déduite de l'absence d'un fichier. Un reçu d'intention de
-nettoyage capture les hashes des fichiers encore présents avant toute
-suppression; une reprise après interruption du nettoyage refuse tout octet qui
-ne correspond plus à cette capture.
+Avant une suppression, seuls `db`, `db+wal` et `db+wal+shm` sont des ensembles
+natifs complets. Un WAL sans base, ou un SHM sans base et WAL, refuse. Un nom
+voisin (`-journal`, `-wal.extra`, autre rôle ou suffixe) reste inconnu et fait
+refuser la reprise sans suppression. La vacance précédant la création native
+contrôle les quatre chemins exacts.
 
-## Refus obligatoires
+L'ordre de suppression est immuable : `shm`, `wal`, marqueur, `db` pour le
+primaire, puis le même ordre pour le secondaire. L'intention durable capture
+le SHA-256 de chacun des huit chemins (chaîne vide seulement si absent). Une
+reprise accepte uniquement un préfixe déjà supprimé dans cet ordre.
 
-La reprise exige : PID de lancement identique à celui de la provenance et
-confirmé arrêté par l'appelant; chaîne canonique sans point de réparation
-(`.local/L00C`, `campaigns`, campagne, reçus); provenance et journal stricts;
-et exactement le sous-ensemble de fichiers autorisé par le dernier état. Une
-extension, un chemin, un rôle, un hash, un reçu, un PID, une entrée additionnelle
-de la campagne ou un point de réparation non conforme provoque un refus et ne
-modifie aucun octet de `GamePaths.Saves`.
+## Machine d'états courante
 
-L'oracle exécutable couvre les six frontières pré-scellage, les deux résidus de
-création pour chacune, l'arrêt pendant le nettoyage, le cas primaire seul
-observé, la paire complète, et chaque classe de falsification/refus. Il utilise
-exclusivement des répertoires temporaires.
+| État durable | Résidu admis avant l'intention de nettoyage |
+|---|---|
+| `prepared` | aucun artefact |
+| `primary-create-intent` | primaire absent, ou ensemble natif primaire valide, marqueur éventuellement publié |
+| `primary-created` | ensemble natif primaire valide + marqueur |
+| `secondary-create-intent` | primaire attesté ; secondaire absent ou ensemble natif valide, marqueur éventuellement publié |
+| `secondary-created` / `cycling` | deux ensembles natifs valides + deux marqueurs |
+| `sealed` | reçu final v2 avec chemins et hashes des deux rôles |
+
+La reprise d'abort écrit durablement `abort-cleanup-intent.json`, puis revalide
+journal, provenance, campagne, noms possédés, identités, hashes et preuve de PID
+arrêté immédiatement avant chaque suppression. Après la dernière frontière,
+elle revalide encore tout avant `abort-cleaned.json`. L'intention doit rester
+octet pour octet dans sa sérialisation canonique : même un espace ou un ordre de
+propriétés différent refuse, y compris après un préfixe déjà supprimé. Tous les
+noms de reçus connus ont un type imposé ; un dossier placé sur un nom de reçu
+final refuse avant toute suppression.
+
+Le nettoyage scellé suit la même discipline avec
+`sealed-cleanup-intent.json` et `sealed-cleaned.json`. Le reçu de scellement v2
+porte les chemins canoniques et hashes finaux de la base, du WAL, du SHM et du
+marqueur de chaque rôle. Un hash modifié, une disparition hors ordre, un point
+de réparation, une entrée de campagne inconnue, un PID vivant/réutilisé ou un
+replay refuse. Le lanceur réinterroge réellement le PID à chaque preuve ; il ne
+met jamais en cache un booléen `true`.
+
+Sans reçu scellé, le nettoyage générique exige toujours le journal `abort/`.
+Il n'existe aucun fallback par nom de fichier ou provenance seule.
 
 ## Compatibilité unique du résidu pré-journal `a7290d12...`
 
-Cette voie ne complète pas et ne relâche pas la machine d'états ci-dessus. Elle
-est compilée uniquement dans le harness Debug, invoquée par deux scripts
-d'intégrateur distincts, et verrouillée dans le code sur :
+Cette voie distincte est verrouillée dans le harness Debug sur :
 
 - `runId=a7290d12e6f54247bae27b71e2e571cf` ;
 - `runtimeProcessId=74920` ;
-- la forme historique exacte `primary-raw-only` : primaire `.vcdbs` présent,
-  sans marqueur, secondaire, marqueur secondaire, journal `abort/`, reçu de
-  nettoyage courant, nom possédé additionnel ou entrée de campagne inconnue.
+- l'attestation littérale
+  `I-ATTEST-L00C-A7290D12-PRIMARY-DB-WAL-SHM-ONLY` ;
+- exactement le primaire `.vcdbs`, `.vcdbs-wal` et `.vcdbs-shm`, sans marqueur,
+  secondaire (ni ses sidecars), journal courant, reçu courant, nom possédé
+  supplémentaire ou entrée de campagne inconnue.
 
-`CleanupAfterRuntimeStopped` ne consulte jamais cette compatibilité. Sans
-journal courant, il refuse toujours. Seul
-`CleanupLegacyPreJournalAfterRuntimeStopped`, inaccessible depuis le lanceur
-générique, peut consommer l'autorité manuelle décrite ci-dessous.
+Le manifeste v2 exige de l'intégrateur les trois chemins canoniques et trois
+SHA-256, plus le SHA-256 de la provenance. Il ne découvre aucun candidat. Son
+seal v2 lie octet pour octet le manifeste, le PID, les trois chemins et hashes.
+Le nettoyage dédié exige les hashes externes du manifeste et du seal, puis crée
+une intention durable. Il supprime uniquement `primary-shm`, `primary-wal`,
+`primary-db`, dans cet ordre. Avant chaque effet, puis avant le reçu final, il
+revalide l'autorité complète, l'intention exacte, l'ensemble de noms, les
+hashes, les ancêtres et la preuve d'arrêt. Seul un préfixe supprimé est
+reprenable. Le reçu `legacy-prejournal-recovery-cleaned.json` rend tout replay
+terminal, même si les trois octets historiques sont recréés.
 
-### Etats durables et frontières d'autorité
+`CleanupAfterRuntimeStopped` ne consulte jamais cette compatibilité. Seul
+`CleanupLegacyPreJournalAfterRuntimeStopped`, appelé par le script dédié, peut
+consommer cette autorité unique.
 
-| Etat | Fichiers durables | Effet autorisé |
-|---|---|---|
-| historique non attesté | provenance + evidence + primaire brut | aucun ; les deux nettoyeurs refusent |
-| manifeste écrit, non scellé | `legacy-prejournal-recovery-manifest.json` seul | aucun ; collision immuable à traiter par l'intégrateur |
-| autorité scellée | manifeste + `legacy-prejournal-recovery-seal.json` | aucun tant que leurs deux SHA-256 ne sont pas fournis au lanceur dédié |
-| intention de nettoyage | + `legacy-prejournal-recovery-intent.json` | suppression du seul primaire canonique portant encore le SHA-256 attesté |
-| primaire supprimé | intention présente, primaire absent | écriture du reçu final seulement ; reprise déterministe autorisée avec les mêmes hashes |
-| terminé | + `legacy-prejournal-recovery-cleaned.json` | aucun ; tout replay refuse, même si un fichier réapparaît au chemin historique |
+## Procédure opérateur
 
-Le manifeste enregistre les chemins canoniques de la racine laboratoire, de
-`GamePaths.Saves`, de la campagne, de la provenance, du primaire et du
-secondaire attendu absent ; les SHA-256 de la provenance et du primaire ; le
-PID ; la forme historique ; et l'attestation littérale de l'intégrateur. Le
-seal, créé avec `CreateNew`, lie le SHA-256 exact du manifeste, le PID, le
-primaire et son SHA-256. L'intention et le reçu final sont également créés avec
-`CreateNew`, `WriteThrough` et `Flush(true)`. Aucun de ces reçus n'est supprimé
-par le mécanisme.
-
-Avant de créer l'autorité, puis avant l'intention et de nouveau au plus près de
-la suppression, l'implémentation revalide les ancêtres et points de réparation,
-les types fichier/répertoire, l'ensemble exact des entrées connues, la
-provenance stricte, les identités croisées, les deux hashes scellés fournis par
-l'opérateur et les octets du primaire. Un marqueur, un secondaire, un nom
-possédé additionnel, une entrée de campagne inattendue, une falsification, un
-PID vivant/réutilisé ou différent, un hash changé ou un replay refuse avant
-suppression et conserve les octets présents.
-
-La preuve d'arrêt est réévaluée à l'entrée puis immédiatement avant chaque
-écriture durable (`manifest`, `seal`, intention, reçu final) et avant la
-suppression. Si le PID est réutilisé entre deux frontières, l'effet suivant ne
-se produit pas : un manifeste non scellé reste inerte, une intention reste
-rejouable sans perte, et une suppression déjà autorisée reste finalisable sans
-nouvelle suppression.
-
-Après la suppression et avant le reçu final, l'autorité scellée, l'intention
-octet-exacte, la forme résiduelle et les chaînes de confiance sont encore
-validées. Une falsification sur cette frontière laisse donc le primaire déjà
-supprimé mais interdit tout faux reçu `cleaned` ; la reprise reste refusée tant
-que l'intention ne correspond pas exactement à celle créée avant suppression.
-
-### Procédure opérateur, après intégration et revue
-
-1. Ne pas lancer Vintage Story. Confirmer manuellement que le PID `74920` est
-   arrêté et n'a pas été réutilisé, puis relever depuis la provenance les
-   chemins canoniques exacts de `.local/L00C`, de `GamePaths.Saves`, de la
-   campagne et du primaire.
-2. Vérifier visuellement la forme `primary-raw-only`, calculer séparément les
-   SHA-256 du primaire et de `campaign-provenance.json`, et conserver ce relevé.
+1. Ne pas lancer Vintage Story. Vérifier que le PID `74920` est arrêté et non
+   réutilisé. Relever les chemins canoniques de `.local/L00C`,
+   `GamePaths.Saves`, de la campagne, de la base primaire, de son WAL et de son
+   SHM.
+2. Confirmer que les tailles observées sont respectivement 4096, 57712 et 32768
+   octets, que les trois noms sont exactement ceux ci-dessus, et qu'aucun autre
+   nom possédé n'existe. Calculer séparément leurs trois SHA-256 et celui de
+   `campaign-provenance.json`.
 3. Exécuter une seule fois
-   `New-L00CLegacyPreJournalRecoveryManifest.ps1` avec ces chemins/hashes,
-   `RunId`, `RuntimeProcessId`, la DLL Debug revue et l'attestation exacte
-   `I-ATTEST-L00C-A7290D12-PRIMARY-RAW-ONLY`. Ce script ne supprime rien. Il
-   retourne les SHA-256 du manifeste et du seal.
-4. Comparer le JSON scellé au relevé avant toute suppression. Puis exécuter
-   explicitement `Invoke-L00CLegacyPreJournalRecovery.ps1` avec les deux hashes
-   retournés et la même DLL Debug. Ce script supprime uniquement le primaire
-   exact ; il ne supprime ni campagne, ni preuve, ni autre sauvegarde.
-5. Conserver manifeste, seal, intention et reçu final. Si l'opération est
-   interrompue après l'intention, relancer seulement la même commande avec les
-   mêmes hashes. Si le manifeste existe sans seal, ne rien écraser ni supprimer
-   automatiquement : remonter l'état à l'intégrateur. Un reçu final existant est
-   terminal et tout replay doit rester refusé.
+   `New-L00CLegacyPreJournalRecoveryManifest.ps1` avec ces quatre chemins/hashes,
+   le runId, le PID, la DLL Debug revue et l'attestation littérale. Ce script ne
+   supprime rien ; conserver les SHA-256 du manifeste et du seal retournés.
+4. Comparer le JSON scellé au relevé. Exécuter explicitement
+   `Invoke-L00CLegacyPreJournalRecovery.ps1` avec les deux hashes et la même DLL.
+   Il ne supprime que les trois artefacts primaires exacts et conserve campagne,
+   preuves et sauvegardes étrangères.
+5. En cas d'interruption après l'intention, relancer uniquement la même commande
+   avec les mêmes hashes. Un manifeste sans seal, un hash différent ou un reçu
+   final existant exige un arrêt et une inspection ; ne rien écraser.
 
-Le gate `Test-L00CCampaignStorage.ps1` simule cette forme dans des répertoires
-temporaires. Il vérifie la préservation octet-à-octet pour les refus, les deux
-frontières d'interruption du nettoyage, le manifeste non scellé, la suppression
-du seul fichier autorisé et le refus de replay. Il ne lit ni ne modifie le vrai
-AppData.
+L'oracle `Test-L00CCampaignStorage.ps1` travaille exclusivement dans des
+répertoires temporaires. Il couvre les formes `db`, `db+wal`, `db+wal+shm`, les
+deux rôles, chaque frontière de suppression abort/scellée/legacy, les collisions
+exactes, noms voisins, chemins échappés, points de réparation, falsifications,
+PID vivant et replay. Il ne lit ni ne modifie le vrai AppData.

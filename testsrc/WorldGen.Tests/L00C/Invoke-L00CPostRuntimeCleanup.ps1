@@ -19,7 +19,9 @@ try {
     $type = $assembly.GetType('ISRWorldGen.L00C.Laboratory.L00CCampaignStorage', $true)
     $method = $type.GetMethod('CleanupAfterRuntimeStopped', [Reflection.BindingFlags]'Static,NonPublic')
     if ($null -eq $method) { throw 'L00-C cleanup entrypoint is absent.' }
-    $proof = [Func[bool]]{ $true }
+    $proof = [Func[bool]]{
+        $null -eq (Get-Process -Id $RuntimeProcessId -ErrorAction SilentlyContinue)
+    }
     $method.Invoke($null, @($LaboratoryRoot, $GamePathsSaves, $RunId, $RuntimeProcessId, $proof))
     [ordered]@{ Schema='l00c-post-runtime-cleanup-v1'; Status='CLEANED'; RunId=$RunId; RuntimeProcessId=$RuntimeProcessId; Utc=[DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
 }
