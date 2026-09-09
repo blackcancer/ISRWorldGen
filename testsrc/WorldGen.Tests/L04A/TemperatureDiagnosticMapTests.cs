@@ -10,7 +10,7 @@ namespace ISRWorldGen.Tests.L04A;
 [TestClass]
 public sealed class TemperatureDiagnosticMapTests
 {
-    private const int FixtureSeed = 40401;
+    private const string AnalyticGridId = "l04a-analytic-grid-v1";
     private const int Side = 96;
     // 95 exact 180-L intervals keep the two poleward witnesses equidistant from the equator.
     private const long MinimumCoordinate = -8_550;
@@ -22,7 +22,7 @@ public sealed class TemperatureDiagnosticMapTests
     [DoNotParallelize]
     public void T04_01_DiagnosticMapsRecordFrozenTemperatureFieldsAndNumericOracle()
     {
-        string output = Path.Combine(FindRepositoryRoot(), ".local", "L04A", "maps", "T04-01", "fixture-40401");
+        string output = Path.Combine(FindRepositoryRoot(), ".local", "L04A", "maps", "T04-01", AnalyticGridId);
         Directory.CreateDirectory(output);
 
         TemperatureSample[,] samples = BuildFixture();
@@ -46,7 +46,7 @@ public sealed class TemperatureDiagnosticMapTests
             schemaVersion = 1,
             testId = "T04-01",
             status = "PASS",
-            fixtureSeed = FixtureSeed,
+            fixture = AnalyticGridId,
             assertions = new
             {
                 latitudeSymmetry = "PASS",
@@ -65,8 +65,8 @@ public sealed class TemperatureDiagnosticMapTests
             status = "PASS",
             commit = Environment.GetEnvironmentVariable("ISR_L04A_EVIDENCE_COMMIT") ?? "WORKING_TREE",
             algorithmVersion = TemperatureField.AlgorithmVersion,
-            seed = FixtureSeed,
-            profile = "l04a-analytic-temperature-v1",
+            seed = "not-applicable: deterministic analytical grid contains no random draw",
+            profile = AnalyticGridId,
             projection = "orthogonal model X/Z; latitude axis +Z; origin at equator",
             dimensions = new { width = Side, height = Side },
             extentModelLength = new
