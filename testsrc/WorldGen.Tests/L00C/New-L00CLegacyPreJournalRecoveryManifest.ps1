@@ -21,18 +21,28 @@ $ErrorActionPreference = 'Stop'
 # Integrator-only authority minting.  This command never deletes, renames or
 # starts anything.  Every identity and hash is supplied explicitly; there is no
 # scan or fallback candidate selection.
-if (Get-Process -Id $RuntimeProcessId -ErrorAction SilentlyContinue) {
-    throw 'L00-C legacy manifest refused: the pinned runtime PID is currently alive or reused.'
-}
-if (-not (Test-Path -LiteralPath $DebugAssemblyPath -PathType Leaf)) {
-    throw 'L00-C legacy manifest assembly is absent.'
-}
-
 try {
+    if (Get-Process -Id $RuntimeProcessId -ErrorAction SilentlyContinue) {
+        throw [InvalidOperationException]::new('L00-C legacy manifest refused: the pinned runtime PID is currently alive or reused.')
+    }
+    if (-not (Test-Path -LiteralPath $DebugAssemblyPath -PathType Leaf)) {
+        throw [InvalidOperationException]::new('L00-C legacy manifest assembly is absent.')
+    }
     $assembly = [Reflection.Assembly]::LoadFrom((Resolve-Path -LiteralPath $DebugAssemblyPath).Path)
     $type = $assembly.GetType('ISRWorldGen.L00C.Laboratory.L00CCampaignStorage', $true)
-    $method = $type.GetMethod('CreateLegacyPreJournalRecoveryManifest', [Reflection.BindingFlags]'Static,NonPublic')
-    if ($null -eq $method) { throw 'L00-C legacy manifest entrypoint is absent.' }
+    $signature = [Type[]]@(
+        [string], [string], [string], [int],
+        [string], [string], [string], [string], [string], [string],
+        [string], [string], [Func[bool]])
+    $method = $type.GetMethod(
+        'CreateLegacyPreJournalRecoveryManifest',
+        [Reflection.BindingFlags]'Static,NonPublic',
+        $null,
+        $signature,
+        $null)
+    if ($null -eq $method -or $method.ReturnType -ne [string]) {
+        throw [InvalidOperationException]::new('L00-C legacy manifest exact sidecar-complete entrypoint is absent.')
+    }
     $stoppedProof = [Func[bool]]{
         $null -eq (Get-Process -Id $RuntimeProcessId -ErrorAction SilentlyContinue)
     }
@@ -64,13 +74,17 @@ try {
         SealSha256 = $sealHash
     } | ConvertTo-Json -Compress
 }
-catch [Reflection.TargetInvocationException] {
+catch {
+    $failure = $_.Exception
+    if ($failure -is [Reflection.TargetInvocationException] -and $null -ne $failure.InnerException) {
+        $failure = $failure.InnerException
+    }
     [ordered]@{
         Schema = 'l00c-legacy-prejournal-manifest-launch-v1'
         Status = 'REFUSED'
         RunId = $RunId
         RuntimeProcessId = $RuntimeProcessId
-        Reason = $_.Exception.InnerException.GetType().Name
+        Reason = $failure.GetType().Name
     } | ConvertTo-Json -Compress
     exit 2
 }

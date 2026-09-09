@@ -95,7 +95,10 @@ consommer cette autorité unique.
 3. Exécuter une seule fois
    `New-L00CLegacyPreJournalRecoveryManifest.ps1` avec ces quatre chemins/hashes,
    le runId, le PID, la DLL Debug revue et l'attestation littérale. Ce script ne
-   supprime rien ; conserver les SHA-256 du manifeste et du seal retournés.
+   supprime rien ; conserver les SHA-256 du manifeste et du seal retournés. Le
+   script lie par réflexion la signature complète à treize paramètres : une DLL
+   Debug périmée ou incomplète retourne `REFUSED` sans invoquer une ancienne
+   surcharge ni omettre silencieusement un chemin/hash de sidecar.
 4. Comparer le JSON scellé au relevé. Exécuter explicitement
    `Invoke-L00CLegacyPreJournalRecovery.ps1` avec les deux hashes et la même DLL.
    Il ne supprime que les trois artefacts primaires exacts et conserve campagne,

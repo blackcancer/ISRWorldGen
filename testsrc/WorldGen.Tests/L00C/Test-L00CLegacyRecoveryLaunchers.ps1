@@ -40,7 +40,7 @@ try {
         processId=$pidValue
     } | ConvertTo-Json -Compress))
 
-    $manifestResult = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'New-L00CLegacyPreJournalRecoveryManifest.ps1') `
+    $manifestOutput = @(& pwsh -NoProfile -File (Join-Path $PSScriptRoot 'New-L00CLegacyPreJournalRecoveryManifest.ps1') `
         -LaboratoryRoot $laboratoryRoot -GamePathsSaves $saves -RunId $runId `
         -RuntimeProcessId $pidValue -PrimarySavePath $primary `
         -PrimarySaveSha256 (Get-FileHash -LiteralPath $primary -Algorithm SHA256).Hash `
@@ -48,14 +48,20 @@ try {
         -PrimaryShmPath $shm -PrimaryShmSha256 (Get-FileHash -LiteralPath $shm -Algorithm SHA256).Hash `
         -ProvenanceSha256 (Get-FileHash -LiteralPath $provenance -Algorithm SHA256).Hash `
         -IntegratorAttestation 'I-ATTEST-L00C-A7290D12-PRIMARY-DB-WAL-SHM-ONLY' `
-        -DebugAssemblyPath $DebugAssemblyPath | ConvertFrom-Json
-    if ($manifestResult.Status -ne 'SEALED') { throw 'L00-C launcher oracle manifest was not sealed.' }
+        -DebugAssemblyPath $DebugAssemblyPath)
+    $manifestExitCode = $LASTEXITCODE
+    if ($manifestOutput.Count -ne 1) { throw 'L00-C launcher oracle manifest returned an invalid result count.' }
+    $manifestResult = $manifestOutput[0] | ConvertFrom-Json
+    if ($manifestExitCode -ne 0 -or $manifestResult.Status -ne 'SEALED') { throw "L00-C launcher oracle manifest was not sealed: $($manifestResult.Reason)." }
 
-    $cleanupResult = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-L00CLegacyPreJournalRecovery.ps1') `
+    $cleanupOutput = @(& pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-L00CLegacyPreJournalRecovery.ps1') `
         -LaboratoryRoot $laboratoryRoot -GamePathsSaves $saves -RunId $runId `
         -RuntimeProcessId $pidValue -ManifestSha256 $manifestResult.ManifestSha256 `
-        -SealSha256 $manifestResult.SealSha256 -DebugAssemblyPath $DebugAssemblyPath | ConvertFrom-Json
-    if ($cleanupResult.Status -ne 'CLEANED' -or
+        -SealSha256 $manifestResult.SealSha256 -DebugAssemblyPath $DebugAssemblyPath)
+    $cleanupExitCode = $LASTEXITCODE
+    if ($cleanupOutput.Count -ne 1) { throw 'L00-C launcher oracle cleanup returned an invalid result count.' }
+    $cleanupResult = $cleanupOutput[0] | ConvertFrom-Json
+    if ($cleanupExitCode -ne 0 -or $cleanupResult.Status -ne 'CLEANED' -or
         (Test-Path -LiteralPath $primary) -or (Test-Path -LiteralPath $wal) -or (Test-Path -LiteralPath $shm) -or
         -not (Test-Path -LiteralPath $sentinel -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $campaign 'legacy-prejournal-recovery-cleaned.json') -PathType Leaf)) {
