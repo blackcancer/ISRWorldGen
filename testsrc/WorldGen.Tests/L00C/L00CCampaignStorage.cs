@@ -18,15 +18,20 @@ internal sealed class L00CCampaignStorage
     private const string Prefix = "ISRWorldGen-L00C-";
     private const string ProvenanceName = "campaign-provenance.json";
     private const string CleanupName = "cleanup-receipt.json";
+    private const string AbortDirectoryName = "abort";
+    private const string AbortCleanupIntentName = "abort-cleanup-intent.json";
+    private const string AbortCleanedName = "abort-cleaned.json";
     private L00CCampaignStorage(string root, string saves, string id, string campaign)
     {
         LaboratoryRoot = root; GameSavesDirectory = saves; RunId = id; CampaignRoot = campaign;
         EvidenceDirectory = Path.Combine(campaign, "evidence"); ProvenancePath = Path.Combine(campaign, ProvenanceName); CleanupReceiptPath = Path.Combine(campaign, CleanupName);
+        AbortDirectory = Path.Combine(campaign, AbortDirectoryName); AbortCleanupIntentPath = Path.Combine(campaign, AbortCleanupIntentName); AbortCleanedPath = Path.Combine(campaign, AbortCleanedName);
         PrimarySavePath = Owned("activated-primary"); SecondarySavePath = Owned("activated-secondary");
     }
     internal string LaboratoryRoot { get; } internal string GameSavesDirectory { get; } internal string RunId { get; }
     internal string CampaignRoot { get; } internal string EvidenceDirectory { get; } internal string ProvenancePath { get; }
     internal string CleanupReceiptPath { get; } internal string PrimarySavePath { get; } internal string SecondarySavePath { get; }
+    internal string AbortDirectory { get; } internal string AbortCleanupIntentPath { get; } internal string AbortCleanedPath { get; }
 
     internal static L00CCampaignStorage Create(string laboratoryRoot, string gamePathsSaves) => CreateForRun(laboratoryRoot, gamePathsSaves, Guid.NewGuid().ToString("N"));
     // Deterministic seam for executable tests only; production never picks a run id.
@@ -39,7 +44,7 @@ internal sealed class L00CCampaignStorage
         if (Directory.Exists(campaign) || File.Exists(campaign)) throw new InvalidOperationException("L00-C campaign collision preserves existing data.");
         var result = new L00CCampaignStorage(root, saves, runId, campaign);
         result.RequireVacant(result.PrimarySavePath); result.RequireVacant(result.SecondarySavePath);
-        Directory.CreateDirectory(campaign); WriteNew(result.ProvenancePath, result.Provenance()); Directory.CreateDirectory(result.EvidenceDirectory);
+        Directory.CreateDirectory(campaign); WriteNew(result.ProvenancePath, result.Provenance()); Directory.CreateDirectory(result.AbortDirectory); result.WriteAbortState(0, "prepared"); Directory.CreateDirectory(result.EvidenceDirectory);
         return result;
     }
 
@@ -48,6 +53,28 @@ internal sealed class L00CCampaignStorage
         RequireRole(role, savePath); if (!File.Exists(savePath)) throw new InvalidOperationException("L00-C cannot attest absent fixture.");
         string marker = MarkerPath(savePath); if (File.Exists(marker)) throw new InvalidOperationException("L00-C refuses marker overwrite.");
         WriteNew(marker, "{\"schema\":\"l00c-appdata-save-marker-v1\",\"runId\":\"" + RunId + "\",\"role\":\"" + role + "\",\"savePath\":\"" + Esc(Path.GetFullPath(savePath)) + "\",\"provenancePath\":\"" + Esc(ProvenancePath) + "\",\"sha256\":\"" + Hash(savePath) + "\"}");
+        WriteAbortState(role == "activated-primary" ? 2 : 4, role == "activated-primary" ? "primary-created" : "secondary-created");
+    }
+
+    // This receipt is deliberately persisted before the native create call.
+    // Thus a client crash between intent and its first filesystem write still
+    // has a bounded, ownership-attested cleanup route.
+    internal void PrepareNativeCreate(string role, string savePath)
+    {
+        RequireRole(role, savePath);
+        WriteAbortState(role == "activated-primary" ? 1 : 3, role == "activated-primary" ? "primary-create-intent" : "secondary-create-intent");
+    }
+
+    internal void BeginCycling() => WriteAbortState(5, "cycling");
+
+    // A vacancy refusal after an intent is not proof that native creation ran.
+    // Preserve its exact target for manual inspection; it is never an abort
+    // cleanup candidate.
+    internal void RecordNativeCreateRefusal(string role, string savePath)
+    {
+        RequireRole(role, savePath);
+        string refusal = Child(CampaignRoot, "abort-create-refused.json");
+        if (!File.Exists(refusal)) WriteNew(refusal, "{\"schema\":\"l00c-appdata-create-refused-v1\",\"runId\":\"" + RunId + "\",\"role\":\"" + role + "\",\"savePath\":\"" + Esc(savePath) + "\",\"runtimeProcessId\":" + Process.GetCurrentProcess().Id + "}");
     }
 
     // Must run immediately before the guarded ConnectToSingleplayer call. A
@@ -62,6 +89,7 @@ internal sealed class L00CCampaignStorage
     internal void SealForExternalCleanup()
     {
         if (File.Exists(CleanupReceiptPath)) throw new InvalidOperationException("L00-C cleanup receipt already exists.");
+        if (ReadAbortState() != 5) throw new InvalidOperationException("L00-C sealing requires the durable cycling state.");
         if (ValidateProvenance() != Process.GetCurrentProcess().Id) throw new InvalidOperationException("L00-C sealing process identity mismatch."); RequireAttested("activated-primary", PrimarySavePath); RequireAttested("activated-secondary", SecondarySavePath);
         WriteNew(CleanupReceiptPath, "{\"schema\":\"l00c-appdata-cleanup-v1\",\"runId\":\"" + RunId + "\",\"runtimeStoppedRequired\":true,\"runtimeProcessId\":" + Process.GetCurrentProcess().Id + ",\"primarySave\":\"" + Esc(PrimarySavePath) + "\",\"primarySha256\":\"" + Hash(PrimarySavePath) + "\",\"secondarySave\":\"" + Esc(SecondarySavePath) + "\",\"secondarySha256\":\"" + Hash(SecondarySavePath) + "\"}");
     }
@@ -74,12 +102,32 @@ internal sealed class L00CCampaignStorage
         string root = CanonicalLab(laboratoryRoot); string saves = CanonicalDirectory(gamePathsSaves, "GamePaths.Saves"); CheckId(runId);
         string campaign = Child(Path.Combine(root, "campaigns"), runId); var item = new L00CCampaignStorage(root, saves, runId, campaign);
         item.EnsureCampaignTrust();
-        int provenancePid=item.ValidateProvenance(); EnsureTrusted(item.CleanupReceiptPath, item.CampaignRoot); if (!File.Exists(item.CleanupReceiptPath)) throw new InvalidOperationException("L00-C cleanup evidence absent.");
-        string receipt = File.ReadAllText(item.CleanupReceiptPath); item.ValidateCleanupReceipt(receipt, runtimeProcessId, provenancePid);
-        item.RequireAttested("activated-primary", item.PrimarySavePath); item.RequireAttested("activated-secondary", item.SecondarySavePath);
-        var parsed = L00CStrictEvidenceJson.Parse(receipt); if (!string.Equals(Hash(item.PrimarySavePath), parsed.StringValue("primarySha256"), StringComparison.Ordinal) || !string.Equals(Hash(item.SecondarySavePath), parsed.StringValue("secondarySha256"), StringComparison.Ordinal)) throw new InvalidOperationException("L00-C cleanup preserves changed fixture.");
-        // Validate all first; then exact owned marker/file pairs only.
-        File.Delete(MarkerPath(item.PrimarySavePath)); File.Delete(item.PrimarySavePath); File.Delete(MarkerPath(item.SecondarySavePath)); File.Delete(item.SecondarySavePath);
+        int provenancePid=item.ValidateProvenance();
+        if (File.Exists(item.CleanupReceiptPath)) { item.CleanupSealed(runtimeProcessId, provenancePid); return; }
+        item.CleanupAborted(runtimeProcessId, provenancePid);
+    }
+
+    // Existing sealed contract, kept deliberately separate from abort recovery.
+    private void CleanupSealed(int runtimeProcessId, int provenancePid)
+    {
+        EnsureTrusted(CleanupReceiptPath, CampaignRoot); string receipt = File.ReadAllText(CleanupReceiptPath); ValidateCleanupReceipt(receipt, runtimeProcessId, provenancePid);
+        RequireAttested("activated-primary", PrimarySavePath); RequireAttested("activated-secondary", SecondarySavePath);
+        var parsed = L00CStrictEvidenceJson.Parse(receipt); if (!string.Equals(Hash(PrimarySavePath), parsed.StringValue("primarySha256"), StringComparison.Ordinal) || !string.Equals(Hash(SecondarySavePath), parsed.StringValue("secondarySha256"), StringComparison.Ordinal)) throw new InvalidOperationException("L00-C cleanup preserves changed fixture.");
+        File.Delete(MarkerPath(PrimarySavePath)); File.Delete(PrimarySavePath); File.Delete(MarkerPath(SecondarySavePath)); File.Delete(SecondarySavePath);
+    }
+
+    private void CleanupAborted(int runtimeProcessId, int provenancePid)
+    {
+        if (runtimeProcessId <= 0 || runtimeProcessId != provenancePid) throw new InvalidOperationException("L00-C abort cleanup process identity mismatch.");
+        if(File.Exists(Child(CampaignRoot,"abort-create-refused.json"))) throw new InvalidOperationException("L00-C abort cleanup preserves a refused native-create target.");
+        ValidateCampaignEntries(); int state = ReadAbortState(); bool resumingDeletion = File.Exists(AbortCleanupIntentPath);
+        ValidateAbortResidue(state, resumingDeletion);
+        if (File.Exists(AbortCleanedPath)) throw new InvalidOperationException("L00-C abort cleanup was already completed.");
+        if (!resumingDeletion)
+            WriteNew(AbortCleanupIntentPath, AbortCleanupIntent(state, runtimeProcessId));
+        ValidateAbortCleanupIntent(state, runtimeProcessId, resumingDeletion);
+        DeleteIfPresent(MarkerPath(PrimarySavePath)); DeleteIfPresent(PrimarySavePath); DeleteIfPresent(MarkerPath(SecondarySavePath)); DeleteIfPresent(SecondarySavePath);
+        WriteNew(AbortCleanedPath, "{\"schema\":\"l00c-appdata-abort-cleaned-v1\",\"runId\":\"" + RunId + "\",\"runtimeProcessId\":" + runtimeProcessId + ",\"state\":\"" + AbortStateName(state) + "\"}");
     }
 
     internal static bool IsCampaignSavePath(string laboratoryRoot, string gamePathsSaves, string savePath)
@@ -89,7 +137,7 @@ internal sealed class L00CCampaignStorage
 
     private string Owned(string role) => Child(GameSavesDirectory, Prefix + RunId + "-" + role + ".vcdbs");
     private void RequireVacant(string save) { if (!DirectChild(save, GameSavesDirectory) || File.Exists(save) || Directory.Exists(save) || File.Exists(MarkerPath(save)) || Directory.Exists(MarkerPath(save))) throw new InvalidOperationException("L00-C refuses existing AppData fixture or marker."); }
-    private void EnsureCampaignTrust() { EnsureAllAncestors(LaboratoryRoot); string campaigns=Path.Combine(LaboratoryRoot,"campaigns"); EnsureTrusted(campaigns,LaboratoryRoot); EnsureTrusted(CampaignRoot,campaigns); EnsureTrusted(ProvenancePath,CampaignRoot); if(File.Exists(CleanupReceiptPath))EnsureTrusted(CleanupReceiptPath,CampaignRoot); }
+    private void EnsureCampaignTrust() { EnsureAllAncestors(LaboratoryRoot); string campaigns=Path.Combine(LaboratoryRoot,"campaigns"); EnsureTrusted(campaigns,LaboratoryRoot); EnsureTrusted(CampaignRoot,campaigns); EnsureTrusted(ProvenancePath,CampaignRoot); if(Directory.Exists(AbortDirectory))EnsureTrusted(AbortDirectory,CampaignRoot); if(File.Exists(CleanupReceiptPath))EnsureTrusted(CleanupReceiptPath,CampaignRoot); if(File.Exists(AbortCleanupIntentPath))EnsureTrusted(AbortCleanupIntentPath,CampaignRoot); if(File.Exists(AbortCleanedPath))EnsureTrusted(AbortCleanedPath,CampaignRoot); }
     private void RequireRole(string role, string save)
     {
         string expected = role == "activated-primary" ? PrimarySavePath : role == "activated-secondary" ? SecondarySavePath : throw new InvalidOperationException("L00-C fixture role invalid.");
@@ -126,6 +174,74 @@ internal sealed class L00CCampaignStorage
         EnsureTrusted(ProvenancePath, CampaignRoot); if (!File.Exists(ProvenancePath)) throw new InvalidOperationException("L00-C provenance absent.");
         var j=L00CStrictEvidenceJson.Parse(File.ReadAllText(ProvenancePath)); j.Exactly("schema","runId","laboratoryRoot","gamePathsSaves","primarySave","secondarySave","processId");
         int pid=j.Int("processId"); if(pid<=0||j.StringValue("schema")!="l00c-appdata-campaign-v1"||j.StringValue("runId")!=RunId||!string.Equals(j.StringValue("laboratoryRoot"),LaboratoryRoot,StringComparison.OrdinalIgnoreCase)||!string.Equals(j.StringValue("gamePathsSaves"),GameSavesDirectory,StringComparison.OrdinalIgnoreCase)||!string.Equals(j.StringValue("primarySave"),PrimarySavePath,StringComparison.OrdinalIgnoreCase)||!string.Equals(j.StringValue("secondarySave"),SecondarySavePath,StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("L00-C provenance cross-identity mismatch."); return pid;
+    }
+    private void WriteAbortState(int sequence, string state)
+    {
+        EnsureCampaignTrust();
+        if (sequence < 0 || sequence > 5 || state != AbortStateName(sequence)) throw new InvalidOperationException("L00-C abort state invalid.");
+        for (int prior = 0; prior < sequence; prior++) ValidateAbortState(prior);
+        string path = AbortStatePath(sequence);
+        if (File.Exists(path)) { ValidateAbortState(sequence); return; }
+        if (sequence > 0 && !File.Exists(AbortStatePath(sequence - 1))) throw new InvalidOperationException("L00-C abort state transition is not contiguous.");
+        WriteNew(path, "{\"schema\":\"l00c-appdata-abort-state-v1\",\"runId\":\"" + RunId + "\",\"state\":\"" + state + "\",\"sequence\":" + sequence + ",\"runtimeProcessId\":" + Process.GetCurrentProcess().Id + ",\"primarySave\":\"" + Esc(PrimarySavePath) + "\",\"secondarySave\":\"" + Esc(SecondarySavePath) + "\"}");
+    }
+    private int ReadAbortState()
+    {
+        EnsureTrusted(AbortDirectory, CampaignRoot); if (!Directory.Exists(AbortDirectory)) throw new InvalidOperationException("L00-C abort journal absent.");
+        int highest = -1; bool gap = false;
+        for (int n = 0; n <= 5; n++) { string path = AbortStatePath(n); if (File.Exists(path)) { if(gap) throw new InvalidOperationException("L00-C abort journal has a gap."); ValidateAbortState(n); highest = n; } else if(highest >= 0) gap = true; }
+        if (highest < 0) throw new InvalidOperationException("L00-C abort journal contains no prepared state.");
+        foreach (string entry in Directory.EnumerateFileSystemEntries(AbortDirectory))
+        {
+            string name = Path.GetFileName(entry); bool known = false;
+            for (int n=0;n<=highest;n++) if (string.Equals(name, Path.GetFileName(AbortStatePath(n)), StringComparison.Ordinal)) known=true;
+            if (!known) throw new InvalidOperationException("L00-C abort journal contains an unexpected entry.");
+        }
+        return highest;
+    }
+    private void ValidateAbortState(int sequence)
+    {
+        string path=AbortStatePath(sequence); EnsureTrusted(path, AbortDirectory); if(!File.Exists(path)) throw new InvalidOperationException("L00-C abort state absent.");
+        var j=L00CStrictEvidenceJson.Parse(File.ReadAllText(path)); j.Exactly("schema","runId","state","sequence","runtimeProcessId","primarySave","secondarySave");
+        if(j.StringValue("schema")!="l00c-appdata-abort-state-v1"||j.StringValue("runId")!=RunId||j.StringValue("state")!=AbortStateName(sequence)||j.Int("sequence")!=sequence||j.Int("runtimeProcessId")!=ValidateProvenance()||!string.Equals(j.StringValue("primarySave"),PrimarySavePath,StringComparison.OrdinalIgnoreCase)||!string.Equals(j.StringValue("secondarySave"),SecondarySavePath,StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("L00-C abort state cross-identity mismatch.");
+    }
+    private string AbortStatePath(int sequence) => Child(AbortDirectory, sequence.ToString("D2") + "-" + AbortStateName(sequence) + ".json");
+    private static string AbortStateName(int sequence) => sequence switch { 0 => "prepared", 1 => "primary-create-intent", 2 => "primary-created", 3 => "secondary-create-intent", 4 => "secondary-created", 5 => "cycling", _ => throw new InvalidOperationException("L00-C abort state sequence invalid.") };
+    private void ValidateAbortResidue(int state, bool allowAlreadyDeleted)
+    {
+        EnsureTrusted(GameSavesDirectory, GameSavesDirectory);
+        bool primaryRequired=state>=2, secondaryRequired=state>=4;
+        ValidateAbortPair("activated-primary",PrimarySavePath,primaryRequired,state==1,allowAlreadyDeleted);
+        ValidateAbortPair("activated-secondary",SecondarySavePath,secondaryRequired,state==3,allowAlreadyDeleted);
+        foreach(string entry in Directory.EnumerateFileSystemEntries(GameSavesDirectory))
+        { string n=Path.GetFileName(entry); if(!n.StartsWith(Prefix+RunId+"-",StringComparison.OrdinalIgnoreCase))continue; string full=Path.GetFullPath(entry); if(!string.Equals(full,PrimarySavePath,StringComparison.OrdinalIgnoreCase)&&!string.Equals(full,SecondarySavePath,StringComparison.OrdinalIgnoreCase)&&!string.Equals(full,MarkerPath(PrimarySavePath),StringComparison.OrdinalIgnoreCase)&&!string.Equals(full,MarkerPath(SecondarySavePath),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("L00-C abort cleanup refuses unexpected owned-name residue."); }
+    }
+    private void ValidateAbortPair(string role,string save,bool required,bool optional,bool allowAlreadyDeleted)
+    {
+        string marker=MarkerPath(save); bool saveExists=File.Exists(save), markerExists=File.Exists(marker);
+        if(IsReparse(save)||IsReparse(marker)||Directory.Exists(save)||Directory.Exists(marker)||(!optional&&!required&&(saveExists||markerExists))||(markerExists&&!saveExists)||(required&&!allowAlreadyDeleted&&saveExists!=markerExists)||(required&&!allowAlreadyDeleted&&(!saveExists||!markerExists))) throw new InvalidOperationException("L00-C abort residue does not match durable state: role="+role+", required="+required+", optional="+optional+", resuming="+allowAlreadyDeleted+", save="+saveExists+", marker="+markerExists+".");
+        if(saveExists) { RequireRole(role,save); EnsureTrusted(save,GameSavesDirectory); }
+        if(markerExists) RequireAttested(role,save);
+    }
+    private string AbortCleanupIntent(int state,int pid) => "{\"schema\":\"l00c-appdata-abort-cleanup-intent-v1\",\"runId\":\""+RunId+"\",\"runtimeProcessId\":"+pid+",\"state\":\""+AbortStateName(state)+"\",\"primarySaveSha256\":\""+HashIfPresent(PrimarySavePath)+"\",\"primaryMarkerSha256\":\""+HashIfPresent(MarkerPath(PrimarySavePath))+"\",\"secondarySaveSha256\":\""+HashIfPresent(SecondarySavePath)+"\",\"secondaryMarkerSha256\":\""+HashIfPresent(MarkerPath(SecondarySavePath))+"\"}";
+    private void ValidateAbortCleanupIntent(int state,int pid,bool resumingDeletion)
+    {
+        EnsureTrusted(AbortCleanupIntentPath,CampaignRoot); var j=L00CStrictEvidenceJson.Parse(File.ReadAllText(AbortCleanupIntentPath)); j.Exactly("schema","runId","runtimeProcessId","state","primarySaveSha256","primaryMarkerSha256","secondarySaveSha256","secondaryMarkerSha256");
+        if(j.StringValue("schema")!="l00c-appdata-abort-cleanup-intent-v1"||j.StringValue("runId")!=RunId||j.Int("runtimeProcessId")!=pid||j.StringValue("state")!=AbortStateName(state))throw new InvalidOperationException("L00-C abort cleanup intent mismatch.");
+        ValidateCapturedHashes(new[]{MarkerPath(PrimarySavePath),PrimarySavePath,MarkerPath(SecondarySavePath),SecondarySavePath},new[]{j.StringValue("primaryMarkerSha256"),j.StringValue("primarySaveSha256"),j.StringValue("secondaryMarkerSha256"),j.StringValue("secondarySaveSha256")},resumingDeletion);
+    }
+    private static string HashIfPresent(string path) => File.Exists(path) ? Hash(path) : string.Empty;
+    private static void ValidateCapturedHashes(string[] paths,string[] captured,bool resumingDeletion)
+    { bool seenExisting=false; for(int n=0;n<paths.Length;n++) { if(captured[n].Length!=0&&!ValidHash(captured[n]))throw new InvalidOperationException("L00-C abort cleanup hash invalid."); bool exists=File.Exists(paths[n]); if(exists) { seenExisting=true; if(captured[n].Length==0||!string.Equals(Hash(paths[n]),captured[n],StringComparison.Ordinal))throw new InvalidOperationException("L00-C abort cleanup preserves changed residue."); } else if(captured[n].Length!=0&&(!resumingDeletion||seenExisting)) throw new InvalidOperationException("L00-C abort cleanup residue disappeared out of order."); } }
+    private static void DeleteIfPresent(string path) { if(File.Exists(path)) File.Delete(path); }
+    private void ValidateCampaignEntries()
+    {
+        foreach(string entry in Directory.EnumerateFileSystemEntries(CampaignRoot))
+        {
+            string name=Path.GetFileName(entry);
+            bool known=string.Equals(name,ProvenanceName,StringComparison.Ordinal)||string.Equals(name,"evidence",StringComparison.Ordinal)||string.Equals(name,AbortDirectoryName,StringComparison.Ordinal)||string.Equals(name,CleanupName,StringComparison.Ordinal)||string.Equals(name,AbortCleanupIntentName,StringComparison.Ordinal)||string.Equals(name,AbortCleanedName,StringComparison.Ordinal)||string.Equals(name,"abort-create-refused.json",StringComparison.Ordinal);
+            if(!known||IsReparse(entry)) throw new InvalidOperationException("L00-C campaign root contains an unexpected or reparse entry.");
+        }
     }
     private void ValidateCleanupReceipt(string text, int runtimeProcessId, int provenancePid)
     {

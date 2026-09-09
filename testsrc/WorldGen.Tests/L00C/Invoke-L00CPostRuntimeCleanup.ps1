@@ -9,7 +9,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 # This is deliberately a post-runtime launcher: it never starts, signals, or
-# attaches to Vintage Story. A live PID is an immediate refusal.
+# attaches to Vintage Story. A live PID is an immediate refusal. The invoked
+# entrypoint selects only a strictly validated sealed receipt, or the separate
+# immutable pre-seal abort journal; it never falls back to save discovery.
 if (Get-Process -Id $RuntimeProcessId -ErrorAction SilentlyContinue) { throw 'L00-C cleanup refused: target runtime process is still alive.' }
 if (-not (Test-Path -LiteralPath $DebugAssemblyPath -PathType Leaf)) { throw 'L00-C cleanup assembly is absent.' }
 try {

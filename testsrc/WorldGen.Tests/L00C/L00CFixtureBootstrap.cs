@@ -61,6 +61,7 @@ internal sealed class L00CFixtureBootstrap
             case State.WaitSecondaryCell:
                 if (!TryBind(screenManager, secondary)) return false;
                 Publish(secondary); Receipt("secondary-cell-confirmed", secondary, "GuiScreenSingleplayer.entries");
+                campaign.BeginCycling();
         completedHost = L00CMenuActionLaboratoryHost.Open(campaign, Path.Combine(evidence, "menu-actions"), primary.SavePath, secondary.SavePath);
                 state = State.Completed; Receipt("bootstrap-complete", null, "host-open"); return true;
             case State.Completed: return true;
@@ -73,6 +74,12 @@ internal sealed class L00CFixtureBootstrap
         // A post-prepare collision is a hard refusal immediately before native
         // StartServerArgs/ConnectToSingleplayer; no existing save is ever used.
         campaign.RequireVacantNativeCreateTarget(fixture.Role, fixture.SavePath);
+        // Reject a pre-existing collision before it can acquire an abort
+        // journal. The intent is then written immediately before the native
+        // effect, followed by a second race-closing vacancy check.
+        campaign.PrepareNativeCreate(fixture.Role, fixture.SavePath);
+        try { campaign.RequireVacantNativeCreateTarget(fixture.Role, fixture.SavePath); }
+        catch { campaign.RecordNativeCreateRefusal(fixture.Role, fixture.SavePath); throw; }
         fixture.LevelFinalizeObserved = false;
         L00CMenuActionReceipt receipt = L00CMenuActionDriver.CreateFixtureWorld(screenManager, fixture.Role, fixture.SavePath);
         Receipt(receipt.Action, fixture, receipt.TargetMethod);
