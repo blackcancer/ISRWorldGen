@@ -764,6 +764,8 @@ try {
         if ($null -eq $first.Value.PSObject.Properties['environmentVariables']) { $first.Value | Add-Member -NotePropertyName environmentVariables -NotePropertyValue ([pscustomobject]@{}) }
         $environment = $first.Value.environmentVariables
         $environment | Add-Member -NotePropertyName ISR_L00C_LAB -NotePropertyValue '1' -Force
+        $environment | Add-Member -NotePropertyName ISR_L00C_AUTOSHUTDOWN -NotePropertyValue '1' -Force
+        $environment | Add-Member -NotePropertyName ISR_L00C_AUTOSHUTDOWN_DELAY_MS -NotePropertyValue '15000' -Force
         $environment | Add-Member -NotePropertyName ISR_L00C_LAB_ROOT -NotePropertyValue $laboratory -Force
         $environment | Add-Member -NotePropertyName ISR_L00C_F5_TRANSACTION_ID -NotePropertyValue $transactionId -Force
         $environment | Add-Member -NotePropertyName ISR_L00C_F5_LAUNCH_NONCE -NotePropertyValue $nonce -Force

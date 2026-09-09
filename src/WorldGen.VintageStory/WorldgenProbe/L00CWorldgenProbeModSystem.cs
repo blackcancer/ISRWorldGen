@@ -15,6 +15,12 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 {
     private const string WorldType = "standard";
     private const string ConfigFileName = "isrworldgen-l00c.json";
+    // The F5 transaction owns these values in the evaluated launch profile.
+    // Do not fall back to a persisted mod-config value here: an old lab config
+    // may have been written before active shutdown acquired its 10 s minimum.
+    private const string LaboratorySwitchEnvironmentVariable = "ISR_L00C_LAB";
+    private const string LaboratoryAutoShutdownEnvironmentVariable = "ISR_L00C_AUTOSHUTDOWN";
+    private const string LaboratoryAutoShutdownDelayEnvironmentVariable = "ISR_L00C_AUTOSHUTDOWN_DELAY_MS";
     private const string MarkerKey = "isrworldgen:l00c:marker:v1";
     private const string MarkerVersion = ProbeMarkerEnvelopeReader.CurrentMarkerVersion;
     private const int StableTickTarget = 40;
@@ -52,6 +58,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private ICoreServerAPI? api;
     private HandlerOwnershipState? ownershipState;
     private L00CProbeConfig config = new();
+    private Exception? laboratoryConfigurationFailure;
     private ProbeMarker? marker;
     private FixtureSnapshot? preLightingSnapshot;
     private FixtureSnapshot? initialSnapshot;
@@ -82,7 +89,20 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     public override void StartServerSide(ICoreServerAPI serverApi)
     {
         api = serverApi;
-        config = serverApi.LoadModConfig<L00CProbeConfig>(ConfigFileName) ?? new L00CProbeConfig();
+        try
+        {
+            config = L00CProbeConfig.BindLaboratoryShutdownConfiguration(
+                serverApi.LoadModConfig<L00CProbeConfig>(ConfigFileName) ?? new L00CProbeConfig(),
+                Environment.GetEnvironmentVariable(LaboratorySwitchEnvironmentVariable),
+                Environment.GetEnvironmentVariable(LaboratoryAutoShutdownEnvironmentVariable),
+                Environment.GetEnvironmentVariable(LaboratoryAutoShutdownDelayEnvironmentVariable));
+        }
+        catch (Exception exception)
+        {
+            // StartServerSide has no guarded handler ownership yet. Preserve the
+            // failure and take the normal initialization fail-closed path instead.
+            laboratoryConfigurationFailure = exception;
+        }
         serverApi.Event.InitWorldGenerator(InitializeWorld, WorldType);
         serverApi.Event.GameWorldSave += OnGameWorldSave;
         tickListenerId = serverApi.Event.RegisterGameTickListener(OnServerTick, 50);
@@ -188,6 +208,10 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private void InitializeWorldCore()
     {
         ICoreServerAPI serverApi = RequireApi();
+        if (laboratoryConfigurationFailure is not null)
+        {
+            throw new InvalidOperationException("L00-C laboratory shutdown configuration was refused before world initialization.", laboratoryConfigurationFailure);
+        }
         long runId = Interlocked.Increment(ref worldRunId);
         BeginWorldTransition();
         DelayedShutdownGate.ValidateDelayMilliseconds(config.AutoShutdownDelayMilliseconds);
@@ -2096,6 +2120,34 @@ internal sealed class L00CProbeConfig
     public bool AutoRun { get; set; }
     public bool AutoShutdown { get; set; }
     public int AutoShutdownDelayMilliseconds { get; set; } = 15_000;
+
+    internal static L00CProbeConfig BindLaboratoryShutdownConfiguration(
+        L00CProbeConfig loaded,
+        string? laboratorySwitch,
+        string? autoShutdown,
+        string? delayMilliseconds)
+    {
+        ArgumentNullException.ThrowIfNull(loaded);
+        if (!string.Equals(laboratorySwitch, "1", StringComparison.Ordinal))
+        {
+            return loaded;
+        }
+
+        if (!string.Equals(autoShutdown, "1", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("L00-C laboratory active shutdown requires ISR_L00C_AUTOSHUTDOWN=1 in the evaluated launch profile.");
+        }
+        if (string.IsNullOrEmpty(delayMilliseconds) ||
+            !int.TryParse(delayMilliseconds, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int parsedDelay) ||
+            !string.Equals(delayMilliseconds, parsedDelay.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("L00-C laboratory active shutdown requires a canonical ISR_L00C_AUTOSHUTDOWN_DELAY_MS value in the evaluated launch profile.");
+        }
+
+        loaded.AutoShutdown = true;
+        loaded.AutoShutdownDelayMilliseconds = DelayedShutdownGate.ValidateActiveDelayMilliseconds(parsedDelay);
+        return loaded;
+    }
     public int FixtureChunkX { get; set; } = 31990;
     public int FixtureChunkZ { get; set; } = 31990;
     public string? ExpectedMissingHandlerTarget { get; set; }

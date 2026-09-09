@@ -10,16 +10,22 @@ $ErrorActionPreference = 'Stop'
 $assemblyPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\bin\Debug\Mods\isrworldgen\ISRWorldGen.dll'
 $sourcePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
 $profilePath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L00C\Set-L00CLabProfile.ps1'
+$f5ProfilePath = Join-Path $RepositoryRoot 'testsrc\WorldGen.Tests\L00C\Set-L00CF5AuthenticatedProfile.ps1'
 foreach ($dependency in @('VintagestoryAPI.dll', 'VintagestoryLib.dll')) {
     [void][Reflection.Assembly]::LoadFrom((Join-Path $GamePath $dependency))
 }
 $assembly = [Reflection.Assembly]::LoadFrom($assemblyPath)
 $source = Get-Content -LiteralPath $sourcePath -Raw
 $profileSource = Get-Content -LiteralPath $profilePath -Raw
+$f5ProfileSource = Get-Content -LiteralPath $f5ProfilePath -Raw
 $gateType = $assembly.GetType('ISRWorldGen.WorldgenProbe.DelayedShutdownGate', $false)
 if ($null -eq $gateType) { throw 'The Debug assembly does not expose the production delayed-shutdown gate.' }
 $reservationType = $assembly.GetType('ISRWorldGen.WorldgenProbe.DelayedShutdownReservation', $false)
 if ($null -eq $reservationType) { throw 'The Debug assembly does not expose the production delayed-shutdown reservation.' }
+$configType = $assembly.GetType('ISRWorldGen.WorldgenProbe.L00CProbeConfig', $false)
+if ($null -eq $configType) { throw 'The Debug assembly does not expose the production L00-C probe configuration.' }
+$bindLaboratoryConfig = $configType.GetMethod('BindLaboratoryShutdownConfiguration', [Reflection.BindingFlags]'Static,NonPublic')
+if ($null -eq $bindLaboratoryConfig) { throw 'The Debug assembly does not expose the profile-to-probe shutdown binding.' }
 
 $open = $gateType.GetMethod('Open')
 $begin = $gateType.GetMethod('Begin')
@@ -36,6 +42,15 @@ foreach ($method in @($open, $begin, $attach, $complete, $reject, $cancel, $vali
 function New-Gate { return [Activator]::CreateInstance($gateType) }
 function Open-Gate($Gate) { [void]$open.Invoke($Gate, @()) }
 function Begin-Reservation($Gate, [Action]$Callback) { return $begin.Invoke($Gate, @($Callback)) }
+function Assert-Refused([scriptblock]$Operation, [string]$Label) {
+    try { & $Operation } catch { return }
+    throw "Expected refusal: $Label"
+}
+function Bind-LaboratoryConfig([string]$Lab, [string]$AutoShutdown, [string]$Delay) {
+    $candidate = [Activator]::CreateInstance($configType)
+    $configType.GetProperty('AutoShutdownDelayMilliseconds').SetValue($candidate, 0)
+    return $bindLaboratoryConfig.Invoke($null, @($candidate, $Lab, $AutoShutdown, $Delay))
+}
 
 $syncGate = New-Gate
 Open-Gate $syncGate
@@ -99,8 +114,32 @@ foreach ($invalid in @(0, 50, 9999, 60001)) {
     throw "Invalid active delay $invalid was accepted."
 }
 
+# A persisted lab config written by an older run may contain delay=0. The
+# one-shot F5 profile is authoritative for this transient safety setting, and
+# must provide a canonical in-range value. No default or persisted zero can
+# silently arm an active shutdown.
+$bound = Bind-LaboratoryConfig '1' '1' '15000'
+if (-not [bool]$configType.GetProperty('AutoShutdown').GetValue($bound) -or [int]$configType.GetProperty('AutoShutdownDelayMilliseconds').GetValue($bound) -ne 15000) {
+    throw 'The evaluated F5 profile did not bind the effective active shutdown configuration.'
+}
+foreach ($case in @(
+    @('1', '', '15000', 'missing enabled value'),
+    @('1', '0', '15000', 'wrong enabled value'),
+    @('1', '1', '', 'missing delay'),
+    @('1', '1', '0', 'zero delay'),
+    @('1', '1', '9999', 'below-minimum delay'),
+    @('1', '1', '60001', 'above-maximum delay'),
+    @('1', '1', '015000', 'noncanonical delay'),
+    @('1', '1', '15000ms', 'non-numeric delay')
+)) {
+    Assert-Refused { [void](Bind-LaboratoryConfig $case[0] $case[1] $case[2]) } $case[3]
+}
+
 foreach ($fragment in @(
     'AutoShutdownDelayMilliseconds',
+    'BindLaboratoryShutdownConfiguration',
+    'ISR_L00C_AUTOSHUTDOWN',
+    'ISR_L00C_AUTOSHUTDOWN_DELAY_MS',
     'RequestInactiveWitnessShutdown(runId)',
     'RequestActiveShutdown(runId, "persisted-reopen-stable")',
     'RequestActiveShutdown(runId, "fixture-stable")',
@@ -130,6 +169,12 @@ if ($disposeDelayed -lt 0 -or $disposeDelayedCatch -le $disposeDelayed -or
 if (-not $profileSource.Contains('AutoShutdownDelayMilliseconds = $AutoShutdownDelayMilliseconds') -or
     -not $profileSource.Contains('[int]$AutoShutdownDelayMilliseconds = 15000')) {
     throw 'The isolated lab profile cannot select the bounded delayed shutdown.'
+}
+foreach ($profileEnvironment in @(
+    "-NotePropertyName ISR_L00C_AUTOSHUTDOWN -NotePropertyValue '1'",
+    "-NotePropertyName ISR_L00C_AUTOSHUTDOWN_DELAY_MS -NotePropertyValue '15000'"
+)) {
+    if (-not $f5ProfileSource.Contains($profileEnvironment)) { throw "The F5 profile does not bind $profileEnvironment exactly." }
 }
 $witnessStart = $source.IndexOf('private void CompleteInactiveWitness(', [StringComparison]::Ordinal)
 $witnessEnd = $source.IndexOf('private void RequestInactiveWitnessShutdown(', $witnessStart, [StringComparison]::Ordinal)
@@ -197,6 +242,8 @@ if ($failureDelayedClose -lt 0 -or $failureTransientClose -le $failureDelayedClo
     InvalidBounds = '1|49|60001'
     ValidActiveBounds = '10000|15000|60000'
     InvalidActiveBounds = '0|50|9999|60001'
+    ProfileToProbeContract = 'ISR_L00C_AUTOSHUTDOWN=1;ISR_L00C_AUTOSHUTDOWN_DELAY_MS=15000'
+    ProfileRefusals = 'missing|wrong|zero|out-of-range|noncanonical'
     SecondArmRejected = $script:secondArmRejected
     ProductionWiringInspected = $true
 } | ConvertTo-Json -Depth 4

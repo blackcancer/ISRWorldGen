@@ -47,6 +47,8 @@ function New-Fixture([string]$Name) {
     $nonce = 'A' * 64
     $environment = [ordered]@{
         ISR_L00C_LAB = '1'
+        ISR_L00C_AUTOSHUTDOWN = '1'
+        ISR_L00C_AUTOSHUTDOWN_DELAY_MS = '15000'
         ISR_L00C_LAB_ROOT = $laboratory
         ISR_L00C_F5_TRANSACTION_ID = $transactionId
         ISR_L00C_F5_LAUNCH_NONCE = $nonce
@@ -112,7 +114,7 @@ try {
     $goodResult = Invoke-Helper $good 'ReloadAndAttest' | ConvertFrom-Json
     if ($goodResult.Status -cne 'VISUAL_STUDIO_PROFILE_CONSUMED' -or $good.State.ReloadCount -ne 1) { throw 'Bounded ReloadProject happy path failed.' }
     $receipt = Get-Content -LiteralPath $goodResult.VisualStudioAttestationPath -Raw | ConvertFrom-Json
-    if (@($receipt.EvaluatedEnvironment.PSObject.Properties).Count -ne 7 -or @($receipt.EvaluatedArguments).Count -ne 7 -or $receipt.ProjectGuid -cne $projectGuid -or $receipt.AttestationMethod -cne 'ROT_DTE_IVS_QUERY_DEBUG_TARGETS' -or
+    if (@($receipt.EvaluatedEnvironment.PSObject.Properties).Count -ne 9 -or @($receipt.EvaluatedArguments).Count -ne 7 -or $receipt.ProjectGuid -cne $projectGuid -or $receipt.AttestationMethod -cne 'ROT_DTE_IVS_QUERY_DEBUG_TARGETS' -or
         $receipt.DebuggerMode -cne 'Design' -or [int]$receipt.UnsavedDocumentCount -ne 0 -or [bool]$receipt.SolutionIsDirty -or [bool]$receipt.ProjectIsDirty -or -not [bool]$receipt.ProjectSaved) { throw 'Consumption receipt omitted exact evaluated or safety fields.' }
 
     foreach ($case in @('debugger-run','unsaved-document','dirty-solution','dirty-project','unsaved-project','wrong-guid','wrong-startup','wrong-mcp-parent')) {

@@ -124,6 +124,8 @@ function Get-ExpectedEnvironment([object]$Metadata, [string]$IntendedLaunchSetti
     }
     $required = [ordered]@{
         ISR_L00C_LAB = '1'
+        ISR_L00C_AUTOSHUTDOWN = '1'
+        ISR_L00C_AUTOSHUTDOWN_DELAY_MS = '15000'
         ISR_L00C_LAB_ROOT = [string]$Metadata.LaboratoryRoot
         ISR_L00C_F5_TRANSACTION_ID = [string]$Metadata.TransactionId
         ISR_L00C_F5_LAUNCH_NONCE = [string]$Metadata.Nonce
