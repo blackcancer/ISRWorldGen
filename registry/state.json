@@ -203,14 +203,16 @@
     "L04-A": {
       "status": "IN_PROGRESS",
       "owner": "integrator:l04-a",
-      "branch": "agent/l04-a",
-      "base_commit": "08295d8d48c35724d5b44a098351ac10760665cf",
+      "branch": "agent/l04-a-enrichment",
+      "base_commit": "0486095",
       "evidence": [
         "worklogs/L04-A.md",
         "commit:3637030d1efcb5b9791ef814560120fc3ec8483f",
         "commit:0c6a21d090c68aed089987977e1f51f93565ea9f",
         "commit:f9ef7372d2a8e2ca488193ee5dbcdbccba339cc4",
         "commit:2ebf817cac52872cf22696b260e3df9d236a4d3a",
+        "commit:d56c7df",
+        "review:ACCEPT agent:l04a_reviewer",
         "local:.local/L04A-integrated/tests/debug/L04A-integrated-debug.trx",
         "local:.local/L04A-integrated/tests/release/L04A-integrated-release.trx",
         "local:.local/L04A-enriched/tests/debug/L04A-enriched-integrated-debug.trx",
