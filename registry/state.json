@@ -39,6 +39,9 @@
         "commit:e3e3fc5c81cad11fd0d98c17568e4bd88370aa8c",
         "commit:44afa0f96df4581a34a5e568014868f8c967335c",
         "commit:d0dad19192435816c24afc938ff52503145d8d8b",
+        "commit:c69b9d6",
+        "review:ACCEPT agent:l00c_cmdline_review",
+        "local:.local/L00C/cmdline-semantic-f5-transaction-pwsh.json",
         "local:.local/L00C/55bd4bdeb0d049009610a12aa80fdf66/evidence-final/T00-04-05-06.json",
         "local:.local/L00C/55bd4bdeb0d049009610a12aa80fdf66/evidence-final/oracle-final.json",
         "local:.local/L00C/client-529d14bca8b044d08a4ba37b014fe87f/result.json"
