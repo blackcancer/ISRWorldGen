@@ -19,9 +19,10 @@ $markerReaderPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\Worldge
 $initializationGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\InitializationFailClosedGate.cs'
 $delayedShutdownGatePath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\DelayedShutdownGate.cs'
 $reopenTransactionPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\PersistedReopenPublicationTransaction.cs'
+$fixtureCoordinatePolicyPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CFixtureCoordinatePolicy.cs'
 $projectPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldGen.VintageStory.csproj'
 
-foreach ($path in @($sourcePath, $callbackGatePath, $mapSnapshotPath, $markerReaderPath, $initializationGatePath, $delayedShutdownGatePath, $reopenTransactionPath)) {
+foreach ($path in @($sourcePath, $callbackGatePath, $mapSnapshotPath, $markerReaderPath, $initializationGatePath, $delayedShutdownGatePath, $reopenTransactionPath, $fixtureCoordinatePolicyPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "L00-C source is missing: $path"
     }
@@ -36,6 +37,7 @@ $allProbeSource = @(
     Get-Content -LiteralPath $initializationGatePath -Raw
     Get-Content -LiteralPath $delayedShutdownGatePath -Raw
     Get-Content -LiteralPath $reopenTransactionPath -Raw
+    Get-Content -LiteralPath $fixtureCoordinatePolicyPath -Raw
 ) -join "`n"
 $forbidden = @(
     'WipeAllHandlers',
@@ -204,6 +206,8 @@ $markerReaderType = 'ISRWorldGen.WorldgenProbe.ProbeMarkerEnvelopeReader'
 $initializationGateType = 'ISRWorldGen.WorldgenProbe.InitializationFailClosedGate'
 $delayedShutdownGateType = 'ISRWorldGen.WorldgenProbe.DelayedShutdownGate'
 $reopenTransactionType = 'ISRWorldGen.WorldgenProbe.PersistedReopenPublicationTransaction'
+$fixtureCoordinatePolicyType = 'ISRWorldGen.WorldgenProbe.L00CFixtureCoordinatePolicy'
+$lifecycleMarkerType = 'ISRWorldGen.WorldgenProbe.L00CLifecycleMarker'
 $probePresent = @($typeNames | Where-Object { $_ -eq $probeType }).Count -eq 1
 $markerGatePresent = @($typeNames | Where-Object { $_ -eq $markerGateType }).Count -eq 1
 $callbackGatePresent = @($typeNames | Where-Object { $_ -eq $callbackGateType }).Count -eq 1
@@ -212,10 +216,12 @@ $markerReaderPresent = @($typeNames | Where-Object { $_ -eq $markerReaderType })
 $initializationGatePresent = @($typeNames | Where-Object { $_ -eq $initializationGateType }).Count -eq 1
 $delayedShutdownGatePresent = @($typeNames | Where-Object { $_ -eq $delayedShutdownGateType }).Count -eq 1
 $reopenTransactionPresent = @($typeNames | Where-Object { $_ -eq $reopenTransactionType }).Count -eq 1
-if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent -or -not $mapSnapshotPresent -or -not $markerReaderPresent -or -not $initializationGatePresent -or -not $delayedShutdownGatePresent -or -not $reopenTransactionPresent)) {
+$fixtureCoordinatePolicyPresent = @($typeNames | Where-Object { $_ -eq $fixtureCoordinatePolicyType }).Count -eq 1
+$lifecycleMarkerPresent = @($typeNames | Where-Object { $_ -eq $lifecycleMarkerType }).Count -eq 1
+if ($Configuration -eq 'Debug' -and (-not $probePresent -or -not $markerGatePresent -or -not $callbackGatePresent -or -not $mapSnapshotPresent -or -not $markerReaderPresent -or -not $initializationGatePresent -or -not $delayedShutdownGatePresent -or -not $reopenTransactionPresent -or -not $fixtureCoordinatePolicyPresent -or -not $lifecycleMarkerPresent)) {
     throw 'Debug assembly does not contain every L00-C probe, marker, and transient callback type.'
 }
-if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent -or $mapSnapshotPresent -or $markerReaderPresent -or $initializationGatePresent -or $delayedShutdownGatePresent -or $reopenTransactionPresent)) {
+if ($Configuration -eq 'Release' -and ($probePresent -or $markerGatePresent -or $callbackGatePresent -or $mapSnapshotPresent -or $markerReaderPresent -or $initializationGatePresent -or $delayedShutdownGatePresent -or $reopenTransactionPresent -or $fixtureCoordinatePolicyPresent -or $lifecycleMarkerPresent)) {
     throw 'Release assembly must not contain any L00-C probe, marker, or transient callback type.'
 }
 
@@ -233,7 +239,21 @@ $reopenTransactionOracleStatus = 'NOT_APPLICABLE'
 $campaignStorageOracleStatus = 'NOT_APPLICABLE'
 $f5TransactionOracleStatus = 'NOT_APPLICABLE'
 $visualStudioConsumptionOracleStatus = 'NOT_APPLICABLE'
+$fixtureCoordinatePolicyOracleStatus = 'NOT_APPLICABLE'
+$lifecycleSpatialIsolationOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
+    $lifecycleSpatialIsolationOraclePath = Join-Path $PSScriptRoot 'Test-L00CLifecycleSpatialIsolation.ps1'
+    $lifecycleSpatialIsolationOracle = (& $lifecycleSpatialIsolationOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($lifecycleSpatialIsolationOracle.Status -ne 'PASS' -or $lifecycleSpatialIsolationOracle.LifecycleSpatialCalls -ne 0 -or $lifecycleSpatialIsolationOracle.LifecycleTeleportCalls -ne 0 -or $lifecycleSpatialIsolationOracle.LifecycleProfileSpatialDefault) {
+        throw 'The lifecycle/spatial separation oracle did not pass.'
+    }
+    $lifecycleSpatialIsolationOracleStatus = $lifecycleSpatialIsolationOracle.Status
+    $fixtureCoordinatePolicyOraclePath = Join-Path $PSScriptRoot 'Test-L00CFixtureCoordinatePolicy.ps1'
+    $fixtureCoordinatePolicyOracle = (& $fixtureCoordinatePolicyOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
+    if ($fixtureCoordinatePolicyOracle.Status -ne 'PASS' -or -not $fixtureCoordinatePolicyOracle.ProfileConfigObserved -or $fixtureCoordinatePolicyOracle.InvalidBoundaryCases -lt 5) {
+        throw 'The L00-C fixture coordinate policy oracle did not pass.'
+    }
+    $fixtureCoordinatePolicyOracleStatus = $fixtureCoordinatePolicyOracle.Status
     $f5TransactionOraclePath = Join-Path $PSScriptRoot 'Test-L00CF5AuthenticatedProfile.ps1'
     $f5TransactionOracle = (& $f5TransactionOraclePath | Out-String | ConvertFrom-Json)
     if ($f5TransactionOracle.Status -ne 'PASS' -or $f5TransactionOracle.Cases -lt 47) {
@@ -351,6 +371,8 @@ $result = [ordered]@{
     InitializationFailClosedGateTypePresent = $initializationGatePresent
     DelayedShutdownGateTypePresent = $delayedShutdownGatePresent
     PersistedReopenTransactionTypePresent = $reopenTransactionPresent
+    FixtureCoordinatePolicyTypePresent = $fixtureCoordinatePolicyPresent
+    LifecycleMarkerTypePresent = $lifecycleMarkerPresent
     MarkerPublicationOracle = $markerOracleStatus
     PersistedMapSnapshotOracle = $mapSnapshotOracleStatus
     TransientCallbackOracle = $callbackOracleStatus
@@ -365,6 +387,8 @@ $result = [ordered]@{
     CampaignStorageRecoveryOracle = $campaignStorageOracleStatus
     F5TransactionOracle = $f5TransactionOracleStatus
     VisualStudioConsumptionOracle = $visualStudioConsumptionOracleStatus
+    FixtureCoordinatePolicyOracle = $fixtureCoordinatePolicyOracleStatus
+    LifecycleSpatialIsolationOracle = $lifecycleSpatialIsolationOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }

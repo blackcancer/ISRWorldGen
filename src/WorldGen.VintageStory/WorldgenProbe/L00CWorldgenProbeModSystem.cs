@@ -22,6 +22,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private const string LaboratoryAutoShutdownEnvironmentVariable = "ISR_L00C_AUTOSHUTDOWN";
     private const string LaboratoryAutoShutdownDelayEnvironmentVariable = "ISR_L00C_AUTOSHUTDOWN_DELAY_MS";
     private const string MarkerKey = "isrworldgen:l00c:marker:v1";
+    private const string LifecycleMarkerKey = "isrworldgen:l00c:lifecycle-marker:v1";
     private const string MarkerVersion = ProbeMarkerEnvelopeReader.CurrentMarkerVersion;
     private const int StableTickTarget = 40;
     private const int FixtureProtectionRadius = 1;
@@ -60,6 +61,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private L00CProbeConfig config = new();
     private Exception? laboratoryConfigurationFailure;
     private ProbeMarker? marker;
+    private L00CLifecycleMarker? lifecycleMarker;
     private FixtureSnapshot? preLightingSnapshot;
     private FixtureSnapshot? initialSnapshot;
     private HaloSnapshot? initialHaloSnapshot;
@@ -166,6 +168,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         Interlocked.Increment(ref worldRunId);
         active = false;
         marker = null;
+        lifecycleMarker = null;
         preLightingSnapshot = null;
         initialSnapshot = null;
         initialHaloSnapshot = null;
@@ -242,6 +245,11 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         haloPreparedCount = 0;
 
         ISaveGame saveGame = serverApi.WorldManager.SaveGame;
+        if (!config.SpatialFixtureEnabled)
+        {
+            InitializeLifecycleOnly(runId, handlers, saveGame, priorRestore, sameHandlerSet);
+            return;
+        }
         ProbeMarker? persistedMarker = ReadMarker(saveGame, serverApi.WorldManager);
         bool activationRequested = config.Enabled;
 
@@ -319,11 +327,109 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         ScheduleProbeColumn(runId);
     }
 
+    // T00-06 is a lifecycle contract, not a spatial probe.  It deliberately
+    // creates and persists an independent marker without requesting a column,
+    // installing handlers, reading map dimensions, or assuming a player/TP
+    // position.  The T00-04/T00-05 fixture remains opt-in above.
+    private void InitializeLifecycleOnly(
+        long runId,
+        IWorldGenHandler handlers,
+        ISaveGame saveGame,
+        RestoreResult priorRestore,
+        bool sameHandlerSet)
+    {
+        L00CLifecycleMarker? persisted = ReadLifecycleMarker(saveGame);
+        if (saveGame.IsNew)
+        {
+            if (!config.Enabled)
+            {
+                active = false;
+                lifecycleMarker = null;
+                Log($"L00C_INACTIVE instance={instanceId} reason=lifecycle-new-world-not-enabled save={saveGame.SavegameIdentifier}");
+                LogInventory("inactive", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
+                ScheduleInactiveWitness(runId);
+                return;
+            }
+            lifecycleMarker = L00CLifecycleMarker.Create(saveGame.SavegameIdentifier, 1);
+        }
+        else
+        {
+            if (persisted is null)
+            {
+                active = false;
+                lifecycleMarker = null;
+                if (config.Enabled)
+                {
+                    Fail("lifecycle-activation-rejected-existing-world", "L00-C lifecycle activation is restricted to a new world or a world carrying its persistent lifecycle marker.");
+                }
+                Log($"L00C_INACTIVE instance={instanceId} reason=lifecycle-existing-world-without-marker save={saveGame.SavegameIdentifier}");
+                LogInventory("inactive", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
+                ScheduleInactiveWitness(runId);
+                return;
+            }
+            lifecycleMarker = persisted.IncrementFor(saveGame.SavegameIdentifier);
+        }
+
+        active = true;
+        saveGame.StoreData(LifecycleMarkerKey, lifecycleMarker.Serialize());
+        LogInventory("lifecycle", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
+        Log($"L00C_LIFECYCLE_ACTIVATED instance={instanceId} marker={lifecycleMarker.MarkerId} run={runId} open={lifecycleMarker.OpenCount} isnew={saveGame.IsNew} save={saveGame.SavegameIdentifier} spatial=False requests=0 handlersowned=False");
+        ScheduleLifecycleShutdown(runId);
+    }
+
+    private static L00CLifecycleMarker? ReadLifecycleMarker(ISaveGame saveGame)
+    {
+        byte[]? payload = saveGame.GetData(LifecycleMarkerKey);
+        return payload is null || payload.Length == 0
+            ? null
+            : L00CLifecycleMarker.ReadAndValidate(payload, saveGame.SavegameIdentifier);
+    }
+
+    private void ScheduleLifecycleShutdown(long runId)
+    {
+        if (!config.AutoRun)
+        {
+            Log($"L00C_AUTORUN_SKIPPED instance={instanceId} active=True scenario=lifecycle");
+            return;
+        }
+        RequireApi().Event.ServerRunPhase(EnumServerRunPhase.RunGame, () => CompleteLifecycleOnly(runId));
+    }
+
+    private void CompleteLifecycleOnly(long runId)
+    {
+        lock (runGate)
+        {
+            try
+            {
+                if (!IsCurrentRun(runId))
+                {
+                    return;
+                }
+                if (!active || lifecycleMarker is null || marker is not null || ownershipState is not null || requestIssued != 0 ||
+                    fixtureCallbackCount != 0 || fixtureWriteCount != 0 || transientLoadCallbacks.PendingCount != 0)
+                {
+                    throw new InvalidOperationException("L00-C lifecycle scenario acquired spatial state or lost its persistent marker.");
+                }
+                Log($"L00C_LIFECYCLE_STABLE instance={instanceId} marker={lifecycleMarker.MarkerId} run={runId} open={lifecycleMarker.OpenCount} requests=0 callbacks=0 writes=0 handlersowned=False");
+                RequestActiveShutdown(runId, "lifecycle-stable");
+            }
+            catch (Exception exception)
+            {
+                if (!IsCurrentRun(runId))
+                {
+                    return;
+                }
+                throw HandleAsynchronousFailure(runId, "lifecycle-stable-error", exception);
+            }
+        }
+    }
+
     private void BeginWorldTransition()
     {
         markerPublication.BeginWorldTransition();
         CancelDelayedShutdown("world-initialize");
         marker = null;
+        lifecycleMarker = null;
         active = false;
         preLightingSnapshot = null;
         initialSnapshot = null;
@@ -929,15 +1035,13 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
     private void ValidateFixtureCoordinate(ICoreServerAPI serverApi)
     {
-        int maxChunkX = serverApi.WorldManager.MapSizeX / serverApi.WorldManager.ChunkSize;
-        int maxChunkZ = serverApi.WorldManager.MapSizeZ / serverApi.WorldManager.ChunkSize;
-        if (config.FixtureChunkX < FixtureProtectionRadius ||
-            config.FixtureChunkX >= maxChunkX - FixtureProtectionRadius ||
-            config.FixtureChunkZ < FixtureProtectionRadius ||
-            config.FixtureChunkZ >= maxChunkZ - FixtureProtectionRadius)
-        {
-            throw new InvalidOperationException($"L00-C fixture chunk ({config.FixtureChunkX},{config.FixtureChunkZ}) is outside the bounded interior map area ({maxChunkX},{maxChunkZ}).");
-        }
+        _ = L00CFixtureCoordinatePolicy.Validate(
+            serverApi.WorldManager.MapSizeX,
+            serverApi.WorldManager.MapSizeZ,
+            serverApi.WorldManager.ChunkSize,
+            config.FixtureChunkX,
+            config.FixtureChunkZ,
+            FixtureProtectionRadius);
     }
 
     private void InvokeOwnedHandler(OwnedHandler owned, IChunkColumnGenerateRequest request)
@@ -1753,6 +1857,11 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         {
             Log($"L00C_MARKER_SAVED instance={instanceId} marker={marker.MarkerId} open={marker.OpenCount}");
         }
+        else if (Volatile.Read(ref disposalStarted) == 0 && lifecycleMarker is not null)
+        {
+            RequireApi().WorldManager.SaveGame.StoreData(LifecycleMarkerKey, lifecycleMarker.Serialize());
+            Log($"L00C_LIFECYCLE_MARKER_SAVED instance={instanceId} marker={lifecycleMarker.MarkerId} open={lifecycleMarker.OpenCount}");
+        }
     }
 
     private ProbeMarker? ReadMarker(ISaveGame saveGame, IWorldManagerAPI worldManager)
@@ -1950,6 +2059,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         }
 
         marker = null;
+        lifecycleMarker = null;
         markerPublication.Reset();
         preLightingSnapshot = null;
         initialSnapshot = null;
@@ -2114,12 +2224,87 @@ internal sealed class ProbeMarker
     public PersistedMapFootprintSnapshot? MapFootprint { get; set; }
 }
 
+internal sealed class L00CLifecycleMarker
+{
+    private const string Version = "l00c-lifecycle-v1";
+
+    public string MarkerId { get; set; } = string.Empty;
+    public string SavegameIdentifier { get; set; } = string.Empty;
+    public string MarkerVersion { get; set; } = Version;
+    public int OpenCount { get; set; }
+
+    public static L00CLifecycleMarker Create(string savegameIdentifier, int openCount)
+    {
+        ValidateIdentity(savegameIdentifier, openCount);
+        return new L00CLifecycleMarker
+        {
+            MarkerId = Guid.NewGuid().ToString("N"),
+            SavegameIdentifier = savegameIdentifier,
+            MarkerVersion = Version,
+            OpenCount = openCount
+        };
+    }
+
+    public static L00CLifecycleMarker ReadAndValidate(byte[] payload, string expectedSavegameIdentifier)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (payload.Length == 0 || payload.Length > 1024)
+        {
+            throw new InvalidOperationException("L00-C lifecycle marker payload is outside the bounded range.");
+        }
+        L00CLifecycleMarker marker;
+        try
+        {
+            marker = JsonSerializer.Deserialize<L00CLifecycleMarker>(payload)
+                ?? throw new InvalidOperationException("L00-C lifecycle marker payload deserialized to null.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidOperationException("L00-C lifecycle marker payload is corrupt or truncated.", exception);
+        }
+        if (marker.MarkerVersion != Version || marker.SavegameIdentifier != expectedSavegameIdentifier ||
+            marker.MarkerId.Length != 32 || !marker.MarkerId.All(char.IsAsciiHexDigit))
+        {
+            throw new InvalidOperationException("L00-C lifecycle marker identity is incompatible with this save.");
+        }
+        ValidateIdentity(marker.SavegameIdentifier, marker.OpenCount);
+        return marker;
+    }
+
+    public L00CLifecycleMarker IncrementFor(string expectedSavegameIdentifier)
+    {
+        if (SavegameIdentifier != expectedSavegameIdentifier || MarkerVersion != Version)
+        {
+            throw new InvalidOperationException("L00-C lifecycle marker cannot be incremented for another save or version.");
+        }
+        ValidateIdentity(SavegameIdentifier, OpenCount);
+        return new L00CLifecycleMarker
+        {
+            MarkerId = MarkerId,
+            SavegameIdentifier = SavegameIdentifier,
+            MarkerVersion = Version,
+            OpenCount = checked(OpenCount + 1)
+        };
+    }
+
+    public byte[] Serialize() => JsonSerializer.SerializeToUtf8Bytes(this);
+
+    private static void ValidateIdentity(string savegameIdentifier, int openCount)
+    {
+        if (string.IsNullOrWhiteSpace(savegameIdentifier) || savegameIdentifier.Length > 128 || openCount <= 0 || openCount >= 1_000_000)
+        {
+            throw new InvalidOperationException("L00-C lifecycle marker identity is outside the bounded contract.");
+        }
+    }
+}
+
 internal sealed class L00CProbeConfig
 {
     public bool Enabled { get; set; }
     public bool AutoRun { get; set; }
     public bool AutoShutdown { get; set; }
     public int AutoShutdownDelayMilliseconds { get; set; } = 15_000;
+    public bool SpatialFixtureEnabled { get; set; }
 
     internal static L00CProbeConfig BindLaboratoryShutdownConfiguration(
         L00CProbeConfig loaded,
@@ -2148,8 +2333,8 @@ internal sealed class L00CProbeConfig
         loaded.AutoShutdownDelayMilliseconds = DelayedShutdownGate.ValidateActiveDelayMilliseconds(parsedDelay);
         return loaded;
     }
-    public int FixtureChunkX { get; set; } = 31990;
-    public int FixtureChunkZ { get; set; } = 31990;
+    public int FixtureChunkX { get; set; } = L00CFixtureCoordinatePolicy.DefaultLaboratoryFixtureChunk;
+    public int FixtureChunkZ { get; set; } = L00CFixtureCoordinatePolicy.DefaultLaboratoryFixtureChunk;
     public string? ExpectedMissingHandlerTarget { get; set; }
 
     [System.Text.Json.Serialization.JsonIgnore]

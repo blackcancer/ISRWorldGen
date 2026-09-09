@@ -10,12 +10,21 @@ param(
     [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
     [string]$SeedSavePath,
     [switch]$AllowExisting,
+    [switch]$EnableSpatialFixture,
+    [ValidateRange(0, 2147483647)]
+    [int]$FixtureChunkX = 31990,
+    [ValidateRange(0, 2147483647)]
+    [int]$FixtureChunkZ = 31990,
     [ValidateScript({ $_ -eq 0 -or ($_ -ge 50 -and $_ -le 60000) })]
     [int]$AutoShutdownDelayMilliseconds = 15000
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Lifecycle T00-06 never requests a generated column, teleports, or assumes a
+# map extent.  The bounded T00-04/T00-05 spatial fixture is opt-in so its
+# coordinate contract cannot block create/save/reopen/menu cycles.
 
 if (-not (Test-Path -LiteralPath $TemplateConfigPath -PathType Leaf)) {
     throw "Template server config is missing: $TemplateConfigPath"
@@ -81,8 +90,9 @@ $probeConfig = [ordered]@{
     AutoRun = ($WorldRole -ne 'missing-handler')
     AutoShutdown = $true
     AutoShutdownDelayMilliseconds = $AutoShutdownDelayMilliseconds
-    FixtureChunkX = 31990
-    FixtureChunkZ = 31990
+    SpatialFixtureEnabled = [bool]$EnableSpatialFixture
+    FixtureChunkX = $FixtureChunkX
+    FixtureChunkZ = $FixtureChunkZ
     ExpectedMissingHandlerTarget = if ($WorldRole -eq 'missing-handler') { 'Vintagestory.ServerMods.IntentionallyAbsentL00C' } else { $null }
 }
 $probeConfigPath = Join-Path $modConfigDirectory 'isrworldgen-l00c.json'
