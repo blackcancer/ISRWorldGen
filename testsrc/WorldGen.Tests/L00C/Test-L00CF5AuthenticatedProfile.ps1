@@ -168,14 +168,49 @@ function Arm(
     return (& $helper -Action Arm -SyntheticFixtureRoot $Fixture.Root -BackupDirectory $Prepared.BackupDirectory -VisualStudioAttestationPath $path -TestProcessQuery $Fixture.Query -TestHook $Hook | ConvertFrom-Json)
 }
 
-function New-ChildAcquisition([object]$Fixture, [object]$Prepared, [int]$ParentProcessId = $vsPid, [switch]$WrongTransaction, [switch]$WrongArguments) {
+function New-CommandLine([string]$Executable, [string[]]$Arguments, [switch]$QuoteEveryToken, [switch]$ExtraWhitespace) {
+    $tokens = @($Executable) + @($Arguments)
+    $serialized = @($tokens | ForEach-Object {
+        $value = [string]$_
+        if ($QuoteEveryToken -or $value -match '[\s\"]') { '"' + $value.Replace('"', '\\"') + '"' } else { $value }
+    })
+    return ($serialized -join $(if ($ExtraWhitespace) { '  ' } else { ' ' }))
+}
+
+function New-ChildAcquisition(
+    [object]$Fixture,
+    [object]$Prepared,
+    [int]$ParentProcessId = $vsPid,
+    [switch]$WrongTransaction,
+    [switch]$WrongArguments,
+    [switch]$LexicallyEquivalentCommandLine,
+    [switch]$ProcessArgumentMismatch,
+    [switch]$ProcessExecutableMismatch,
+    [switch]$ReceiptExecutableMismatch,
+    [switch]$ProcessExtraArgument
+) {
     $metadata = Get-Content -LiteralPath (Join-Path $Prepared.BackupDirectory 'metadata.json') -Raw | ConvertFrom-Json -DateKind String
     $armed = Get-Content -LiteralPath (Join-Path $Prepared.BackupDirectory 'armed.json') -Raw | ConvertFrom-Json -DateKind String
     $started = ([DateTimeOffset]$armed.ArmedUtc).AddSeconds(1)
     $arguments = @($metadata.ExpectedArguments)
     if ($WrongArguments) { $arguments[-1] = $arguments[-1] + '-wrong' }
-    $commandLine = '"' + $Fixture.Game + '" synthetic-validated-arguments'
-    $Fixture.Processes[$childPid] = [pscustomobject]@{ ProcessId=$childPid; ParentProcessId=$ParentProcessId; Name='Vintagestory.exe'; ExecutablePath=$Fixture.Game; CommandLine=$commandLine; StartTimeUtc=$started.ToString('o'); IsRunning=$true }
+    $receiptExecutable = $Fixture.Game
+    if ($ReceiptExecutableMismatch) {
+        $receiptExecutable = Join-Path $Fixture.Root 'OtherGame\Vintagestory.exe'
+        [void](New-Item -ItemType Directory -Path (Split-Path $receiptExecutable -Parent) -Force)
+        [IO.File]::WriteAllText($receiptExecutable, 'other synthetic executable', [Text.UTF8Encoding]::new($false))
+    }
+    $commandLine = New-CommandLine $receiptExecutable $arguments -QuoteEveryToken
+    $processArguments = @($arguments)
+    if ($ProcessArgumentMismatch) { $processArguments[-1] = $processArguments[-1] + '-wrong' }
+    if ($ProcessExtraArgument) { $processArguments += '--unexpected' }
+    $processExecutable = if ($ProcessExecutableMismatch) { Join-Path $Fixture.Root 'OtherProcessGame\Vintagestory.exe' } else { $Fixture.Game }
+    if ($ProcessExecutableMismatch) {
+        [void](New-Item -ItemType Directory -Path (Split-Path $processExecutable -Parent) -Force)
+        [IO.File]::WriteAllText($processExecutable, 'other process executable', [Text.UTF8Encoding]::new($false))
+    }
+    $processCommandLine = New-CommandLine $processExecutable $processArguments -ExtraWhitespace:$LexicallyEquivalentCommandLine
+    $Fixture.Processes[$childPid] = [pscustomobject]@{ ProcessId=$childPid; ParentProcessId=$ParentProcessId; Name='Vintagestory.exe'; ExecutablePath=$Fixture.Game; CommandLine=$processCommandLine; StartTimeUtc=$started.ToString('o'); IsRunning=$true }
     $transactionId = if ($WrongTransaction) { [Guid]::NewGuid().ToString('N') } else { [string]$metadata.TransactionId }
     $child = [ordered]@{
         schemaVersion=2; protocol='l00c-f5-debug-transaction-v2'; status='CHILD_ACQUIRED'; transactionId=$transactionId; nonce=[string]$metadata.Nonce
@@ -318,6 +353,30 @@ try {
         Assert-Bytes (Bytes (Join-Path $arm.BackupDirectory 'launchSettings.intended.bin')) $fixture.Launch "$case launchSettings"
         Assert-Bytes (Bytes (Join-Path $arm.BackupDirectory 'project.user.intended.bin')) $fixture.User "$case user settings"
         $fixture.Processes[$vsPid].IsRunning = $false
+        & $helper -Action Recover -SyntheticFixtureRoot $fixture.Root -BackupDirectory $arm.BackupDirectory -TestProcessQuery $fixture.Query | Out-Null
+        Assert-Bytes $beforeLaunch $fixture.Launch "$case recovered launchSettings"; Assert-Bytes $beforeUser $fixture.User "$case recovered user settings"
+    }
+
+    # Command-line provenance is semantic: Win32_Process and Environment may
+    # serialize equivalent argv vectors with different quoting. Both sources
+    # must still decode to the exact armed executable and arguments.
+    $quoted = New-Fixture 'commandline-lexical-equivalent'; $quotedLaunch=Bytes $quoted.Launch; $quotedUser=Bytes $quoted.User; $quotedArm=Arm $quoted (Prepare $quoted)
+    New-ChildAcquisition $quoted $quotedArm -LexicallyEquivalentCommandLine
+    [void](Acquire $quoted $quotedArm)
+    & $helper -Action Restore -SyntheticFixtureRoot $quoted.Root -BackupDirectory $quotedArm.BackupDirectory -TestProcessQuery $quoted.Query | Out-Null
+    Assert-Bytes $quotedLaunch $quoted.Launch 'Lexically equivalent command line launchSettings'; Assert-Bytes $quotedUser $quoted.User 'Lexically equivalent command line user settings'
+
+    foreach ($case in @('commandline-process-argument-mismatch','commandline-process-executable-mismatch','commandline-receipt-executable-mismatch','commandline-extra-argument')) {
+        $fixture=New-Fixture $case; $beforeLaunch=Bytes $fixture.Launch; $beforeUser=Bytes $fixture.User; $arm=Arm $fixture (Prepare $fixture)
+        if ($case -eq 'commandline-process-argument-mismatch') { New-ChildAcquisition $fixture $arm -ProcessArgumentMismatch }
+        elseif ($case -eq 'commandline-process-executable-mismatch') { New-ChildAcquisition $fixture $arm -ProcessExecutableMismatch }
+        elseif ($case -eq 'commandline-receipt-executable-mismatch') { New-ChildAcquisition $fixture $arm -ReceiptExecutableMismatch }
+        else { New-ChildAcquisition $fixture $arm -ProcessExtraArgument }
+        $pattern = if ($case -match 'argument') { 'argument vector' } else { 'executable' }
+        Assert-Refused { Acquire $fixture $arm } $pattern $case
+        Assert-Bytes (Bytes (Join-Path $arm.BackupDirectory 'launchSettings.intended.bin')) $fixture.Launch "$case launchSettings"
+        Assert-Bytes (Bytes (Join-Path $arm.BackupDirectory 'project.user.intended.bin')) $fixture.User "$case user settings"
+        $fixture.Processes[$vsPid].IsRunning=$false
         & $helper -Action Recover -SyntheticFixtureRoot $fixture.Root -BackupDirectory $arm.BackupDirectory -TestProcessQuery $fixture.Query | Out-Null
         Assert-Bytes $beforeLaunch $fixture.Launch "$case recovered launchSettings"; Assert-Bytes $beforeUser $fixture.User "$case recovered user settings"
     }
@@ -477,7 +536,7 @@ try {
     Assert-Bytes $acquireRaceLaunch $acquireRace.Launch 'Acquire race launchSettings'; Assert-Bytes $acquireRaceUser $acquireRace.User 'Acquire race user settings'
 
     [ordered]@{
-        TestId='L00-C-F5-DEBUG-TRANSACTION-V2'; Status='PASS'; Cases=47
+        TestId='L00-C-F5-DEBUG-TRANSACTION-V2'; Status='PASS'; Cases=52
         StateModel='DIRECTORY_RESERVED -> PREPARE_INTENT -> SETTINGS_PREPARED_FOR_VS -> VISUAL_STUDIO_PROFILE_CONSUMED -> ARMED_FOR_F5 -> CHILD_ACQUIRED -> LAUNCH_ACQUIRED -> RESTORED_AFTER_ACQUISITION; recovery requires bound VS stopped'
         Proof='atomic durable receipts, exact VS PID/start/MCP parent/solution/startup/GUID/config/profile/hash/executable/arguments/working-directory/environment and saved-state attestation, then child nonce/arguments/debugger/ancestry/start proof before restore'
         Scope='Synthetic temporary fixtures and process records only; no Visual Studio, F5, AppData, credentials, or game process used.'

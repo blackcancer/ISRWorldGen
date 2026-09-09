@@ -222,6 +222,55 @@ function Assert-ArrayEqual([object[]]$Actual, [object[]]$Expected, [string]$Labe
     }
 }
 
+# Win32_Process.CommandLine and Environment.CommandLine describe the same
+# CreateProcess argument vector, but do not promise identical quoting.  Compare
+# their decoded argv vectors rather than their lexical serializations.
+function ConvertFrom-WindowsCommandLine([string]$CommandLine, [string]$Label) {
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { throw "$Label is absent or empty." }
+    if ($null -eq ('ISRWorldGen.L00C.NativeCommandLine' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace ISRWorldGen.L00C {
+    public static class NativeCommandLine {
+        [DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern IntPtr CommandLineToArgvW(string commandLine, out int argc);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr LocalFree(IntPtr hMem);
+    }
+}
+'@ -ErrorAction Stop
+    }
+    $argc = 0
+    $buffer = [ISRWorldGen.L00C.NativeCommandLine]::CommandLineToArgvW($CommandLine, [ref]$argc)
+    if ($buffer -eq [IntPtr]::Zero -or $argc -le 0) { throw "$Label cannot be parsed by CommandLineToArgvW." }
+    try {
+        $arguments = New-Object 'System.Collections.Generic.List[string]'
+        for ($index = 0; $index -lt $argc; $index++) {
+            $pointer = [Runtime.InteropServices.Marshal]::ReadIntPtr($buffer, $index * [IntPtr]::Size)
+            if ($pointer -eq [IntPtr]::Zero) { throw "$Label contains a null argv element." }
+            $value = [Runtime.InteropServices.Marshal]::PtrToStringUni($pointer)
+            if ($null -eq $value) { throw "$Label contains an unreadable argv element." }
+            [void]$arguments.Add($value)
+        }
+        return @($arguments)
+    }
+    finally {
+        [void][ISRWorldGen.L00C.NativeCommandLine]::LocalFree($buffer)
+    }
+}
+
+function Assert-CommandLineProvenance([string]$CommandLine, [object]$Metadata, [string]$Label) {
+    $actual = @(ConvertFrom-WindowsCommandLine $CommandLine $Label)
+    $expectedArguments = @($Metadata.ExpectedArguments | ForEach-Object { [string]$_ })
+    if ($actual.Count -ne ($expectedArguments.Count + 1)) { throw "$Label argument vector count differs from the armed profile." }
+    $actualExecutable = Get-CanonicalPath ([string]$actual[0])
+    if ($actualExecutable -cne [string]$Metadata.ExpectedGameExecutablePath) { throw "$Label executable differs from the armed profile." }
+    for ($index = 0; $index -lt $expectedArguments.Count; $index++) {
+        if ([string]$actual[$index + 1] -cne $expectedArguments[$index]) { throw "$Label argument vector differs at index $index from the armed profile." }
+    }
+}
+
 function Read-RequiredJson([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Label is absent." }
     Assert-PhysicalFile $Path $Label
@@ -812,7 +861,8 @@ try {
         if ($null -eq $childProcess -or -not [bool]$childProcess.IsRunning -or [int]$childProcess.ProcessId -ne [int]$child.ProcessId) { throw 'Acquired child process is not running.' }
         if ((Get-CanonicalPath ([string]$child.ExecutablePath)) -cne [string]$metadata.ExpectedGameExecutablePath -or (Get-CanonicalPath ([string]$childProcess.ExecutablePath)) -cne [string]$metadata.ExpectedGameExecutablePath) { throw 'Acquired child executable is not the expected Vintagestory.exe.' }
         if ([DateTimeOffset]$childProcess.StartTimeUtc -ne [DateTimeOffset]$child.ProcessStartUtc -or [DateTimeOffset]$child.ProcessStartUtc -lt [DateTimeOffset]$armed.ArmedUtc -or [DateTimeOffset]$child.RecordedUtc -lt [DateTimeOffset]$child.ProcessStartUtc) { throw 'Child process time does not belong to this armed interval.' }
-        if (-not [string]::IsNullOrWhiteSpace([string]$childProcess.CommandLine) -and [string]$childProcess.CommandLine -cne [string]$child.CommandLine) { throw 'Child command line differs from its in-process receipt.' }
+        Assert-CommandLineProvenance ([string]$child.CommandLine) $metadata 'Child in-process command line'
+        Assert-CommandLineProvenance ([string]$childProcess.CommandLine) $metadata 'Live process command line'
         Assert-ChildOfVisualStudio $childProcess $metadata
         if ((Get-FileSha256 $launchSettings) -cne [string]$metadata.IntendedSha256 -or (Get-FileSha256 $projectUserSettings) -cne [string]$metadata.ProjectUserIntendedSha256) { throw 'F5 settings changed before durable launch acquisition.' }
         $acquired = [ordered]@{ SchemaVersion = 2; Protocol = $Protocol; Status = 'LAUNCH_ACQUIRED'; TransactionId = [string]$metadata.TransactionId; MetadataSha256 = Get-FileSha256 $currentTransaction.MetadataPath; ArmedReceiptSha256 = Get-FileSha256 (Join-Path $currentTransaction.Directory 'armed.json'); ChildReceiptSha256 = Get-FileSha256 $childPath; ChildProcessId = [int]$child.ProcessId; ChildProcessStartUtc = [string]$child.ProcessStartUtc; VisualStudioProcessId = [int]$metadata.VisualStudio.ProcessId; AcquiredUtc = [DateTimeOffset]::UtcNow.ToString('o') }
