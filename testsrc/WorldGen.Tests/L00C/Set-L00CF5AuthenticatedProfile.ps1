@@ -222,9 +222,11 @@ function Assert-ArrayEqual([object[]]$Actual, [object[]]$Expected, [string]$Labe
     }
 }
 
-# Win32_Process.CommandLine and Environment.CommandLine describe the same
-# CreateProcess argument vector, but do not promise identical quoting.  Compare
-# their decoded argv vectors rather than their lexical serializations.
+# The raw Win32_Process command line is the process-creation provenance.  The
+# managed host reports Environment.CommandLine independently: with the Vintage
+# Story .NET host its argv[0] is the managed Vintagestory.dll entry point even
+# though ProcessPath/MainModule and Win32_Process identify Vintagestory.exe.
+# Both sources use Windows argv parsing, but they have distinct authorities.
 function ConvertFrom-WindowsCommandLine([string]$CommandLine, [string]$Label) {
     if ([string]::IsNullOrWhiteSpace($CommandLine)) { throw "$Label is absent or empty." }
     if ($null -eq ('ISRWorldGen.L00C.NativeCommandLine' -as [type])) {
@@ -260,14 +262,38 @@ namespace ISRWorldGen.L00C {
     }
 }
 
-function Assert-CommandLineProvenance([string]$CommandLine, [object]$Metadata, [string]$Label) {
-    $actual = @(ConvertFrom-WindowsCommandLine $CommandLine $Label)
+function Assert-ArgumentTail([object[]]$Actual, [object[]]$Expected, [string]$Label) {
+    if ($Actual.Count -ne ($Expected.Count + 1)) { throw "$Label argument vector count differs from the armed profile." }
+    for ($index = 0; $index -lt $Expected.Count; $index++) {
+        if ([string]$Actual[$index + 1] -cne [string]$Expected[$index]) { throw "$Label argument vector differs at index $index from the armed profile." }
+    }
+}
+
+function Assert-RawProcessCommandLineProvenance([string]$CommandLine, [object]$Metadata) {
+    $label = 'Live process command line'
+    $actual = @(ConvertFrom-WindowsCommandLine $CommandLine $label)
     $expectedArguments = @($Metadata.ExpectedArguments | ForEach-Object { [string]$_ })
-    if ($actual.Count -ne ($expectedArguments.Count + 1)) { throw "$Label argument vector count differs from the armed profile." }
+    Assert-ArgumentTail $actual $expectedArguments $label
     $actualExecutable = Get-CanonicalPath ([string]$actual[0])
-    if ($actualExecutable -cne [string]$Metadata.ExpectedGameExecutablePath) { throw "$Label executable differs from the armed profile." }
-    for ($index = 0; $index -lt $expectedArguments.Count; $index++) {
-        if ([string]$actual[$index + 1] -cne $expectedArguments[$index]) { throw "$Label argument vector differs at index $index from the armed profile." }
+    if ($actualExecutable -cne [string]$Metadata.ExpectedGameExecutablePath) { throw "$label executable differs from the armed profile." }
+}
+
+function Assert-InProcessCommandLineProvenance([string]$CommandLine, [object]$Metadata) {
+    $label = 'Child in-process command line'
+    $actual = @(ConvertFrom-WindowsCommandLine $CommandLine $label)
+    $expectedArguments = @($Metadata.ExpectedArguments | ForEach-Object { [string]$_ })
+    Assert-ArgumentTail $actual $expectedArguments $label
+
+    # Environment.CommandLine may lead with the executable or with the exact
+    # managed entry point selected by the known Vintage Story host.  Do not
+    # treat that token as an executable identity; that identity is separately
+    # bound to ProcessPath/MainModule and the raw CreateProcess command line.
+    # The closed two-token set nevertheless catches spoofed/wrong hosts.
+    $expectedExecutable = [string]$Metadata.ExpectedGameExecutablePath
+    $expectedManagedEntrypoint = Join-Path (Split-Path $expectedExecutable -Parent) (([IO.Path]::GetFileNameWithoutExtension($expectedExecutable)) + '.dll')
+    $actualHost = Get-CanonicalPath ([string]$actual[0])
+    if ($actualHost -cne $expectedExecutable -and $actualHost -cne (Get-CanonicalPath $expectedManagedEntrypoint)) {
+        throw "$label host token is neither the expected executable nor its expected managed entry point."
     }
 }
 
@@ -861,8 +887,8 @@ try {
         if ($null -eq $childProcess -or -not [bool]$childProcess.IsRunning -or [int]$childProcess.ProcessId -ne [int]$child.ProcessId) { throw 'Acquired child process is not running.' }
         if ((Get-CanonicalPath ([string]$child.ExecutablePath)) -cne [string]$metadata.ExpectedGameExecutablePath -or (Get-CanonicalPath ([string]$childProcess.ExecutablePath)) -cne [string]$metadata.ExpectedGameExecutablePath) { throw 'Acquired child executable is not the expected Vintagestory.exe.' }
         if ([DateTimeOffset]$childProcess.StartTimeUtc -ne [DateTimeOffset]$child.ProcessStartUtc -or [DateTimeOffset]$child.ProcessStartUtc -lt [DateTimeOffset]$armed.ArmedUtc -or [DateTimeOffset]$child.RecordedUtc -lt [DateTimeOffset]$child.ProcessStartUtc) { throw 'Child process time does not belong to this armed interval.' }
-        Assert-CommandLineProvenance ([string]$child.CommandLine) $metadata 'Child in-process command line'
-        Assert-CommandLineProvenance ([string]$childProcess.CommandLine) $metadata 'Live process command line'
+        Assert-InProcessCommandLineProvenance ([string]$child.CommandLine) $metadata
+        Assert-RawProcessCommandLineProvenance ([string]$childProcess.CommandLine) $metadata
         Assert-ChildOfVisualStudio $childProcess $metadata
         if ((Get-FileSha256 $launchSettings) -cne [string]$metadata.IntendedSha256 -or (Get-FileSha256 $projectUserSettings) -cne [string]$metadata.ProjectUserIntendedSha256) { throw 'F5 settings changed before durable launch acquisition.' }
         $acquired = [ordered]@{ SchemaVersion = 2; Protocol = $Protocol; Status = 'LAUNCH_ACQUIRED'; TransactionId = [string]$metadata.TransactionId; MetadataSha256 = Get-FileSha256 $currentTransaction.MetadataPath; ArmedReceiptSha256 = Get-FileSha256 (Join-Path $currentTransaction.Directory 'armed.json'); ChildReceiptSha256 = Get-FileSha256 $childPath; ChildProcessId = [int]$child.ProcessId; ChildProcessStartUtc = [string]$child.ProcessStartUtc; VisualStudioProcessId = [int]$metadata.VisualStudio.ProcessId; AcquiredUtc = [DateTimeOffset]::UtcNow.ToString('o') }

@@ -42,6 +42,7 @@ function New-Fixture([string]$Name) {
     [IO.File]::WriteAllText($projectFile, '<Project Sdk="Microsoft.NET.Sdk" />', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $laboratory '.isrworldgen-lab'), 'fixture', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($game, 'synthetic executable identity', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText(([IO.Path]::ChangeExtension($game, '.dll')), 'synthetic managed entry point identity', [Text.UTF8Encoding]::new($false))
     $launch = Join-Path $properties 'launchSettings.json'
     $profileJson = @'
 {
@@ -187,7 +188,11 @@ function New-ChildAcquisition(
     [switch]$ProcessArgumentMismatch,
     [switch]$ProcessExecutableMismatch,
     [switch]$ReceiptExecutableMismatch,
-    [switch]$ProcessExtraArgument
+    [switch]$ProcessExtraArgument,
+    [switch]$InProcessManagedEntrypoint,
+    [switch]$InProcessArgumentMismatch,
+    [switch]$InProcessExecutableMismatch,
+    [switch]$InProcessExtraArgument
 ) {
     $metadata = Get-Content -LiteralPath (Join-Path $Prepared.BackupDirectory 'metadata.json') -Raw | ConvertFrom-Json -DateKind String
     $armed = Get-Content -LiteralPath (Join-Path $Prepared.BackupDirectory 'armed.json') -Raw | ConvertFrom-Json -DateKind String
@@ -200,7 +205,18 @@ function New-ChildAcquisition(
         [void](New-Item -ItemType Directory -Path (Split-Path $receiptExecutable -Parent) -Force)
         [IO.File]::WriteAllText($receiptExecutable, 'other synthetic executable', [Text.UTF8Encoding]::new($false))
     }
-    $commandLine = New-CommandLine $receiptExecutable $arguments -QuoteEveryToken
+    if ($InProcessManagedEntrypoint) {
+        $receiptExecutable = Join-Path (Split-Path $Fixture.Game -Parent) (([IO.Path]::GetFileNameWithoutExtension($Fixture.Game)) + '.dll')
+    }
+    if ($InProcessExecutableMismatch) {
+        $receiptExecutable = Join-Path $Fixture.Root 'SpoofedHost\Vintagestory.dll'
+        [void](New-Item -ItemType Directory -Path (Split-Path $receiptExecutable -Parent) -Force)
+        [IO.File]::WriteAllText($receiptExecutable, 'spoofed managed host', [Text.UTF8Encoding]::new($false))
+    }
+    $inProcessArguments = @($arguments)
+    if ($InProcessArgumentMismatch) { $inProcessArguments[-1] = $inProcessArguments[-1] + '-wrong' }
+    if ($InProcessExtraArgument) { $inProcessArguments += '--unexpected-inprocess' }
+    $commandLine = New-CommandLine $receiptExecutable $inProcessArguments -QuoteEveryToken
     $processArguments = @($arguments)
     if ($ProcessArgumentMismatch) { $processArguments[-1] = $processArguments[-1] + '-wrong' }
     if ($ProcessExtraArgument) { $processArguments += '--unexpected' }
@@ -357,22 +373,27 @@ try {
         Assert-Bytes $beforeLaunch $fixture.Launch "$case recovered launchSettings"; Assert-Bytes $beforeUser $fixture.User "$case recovered user settings"
     }
 
-    # Command-line provenance is semantic: Win32_Process and Environment may
-    # serialize equivalent argv vectors with different quoting. Both sources
-    # must still decode to the exact armed executable and arguments.
+    # Command-line provenance has two source-specific shapes. The raw Win32
+    # process vector must begin with the executable. The real Vintage Story
+    # managed host reports Vintagestory.dll as Environment.CommandLine argv[0],
+    # while ProcessPath and the raw process command line remain Vintagestory.exe.
+    # Both tails must exactly match the armed arguments.
     $quoted = New-Fixture 'commandline-lexical-equivalent'; $quotedLaunch=Bytes $quoted.Launch; $quotedUser=Bytes $quoted.User; $quotedArm=Arm $quoted (Prepare $quoted)
-    New-ChildAcquisition $quoted $quotedArm -LexicallyEquivalentCommandLine
+    New-ChildAcquisition $quoted $quotedArm -LexicallyEquivalentCommandLine -InProcessManagedEntrypoint
     [void](Acquire $quoted $quotedArm)
     & $helper -Action Restore -SyntheticFixtureRoot $quoted.Root -BackupDirectory $quotedArm.BackupDirectory -TestProcessQuery $quoted.Query | Out-Null
-    Assert-Bytes $quotedLaunch $quoted.Launch 'Lexically equivalent command line launchSettings'; Assert-Bytes $quotedUser $quoted.User 'Lexically equivalent command line user settings'
+    Assert-Bytes $quotedLaunch $quoted.Launch 'Managed-entry-point command line launchSettings'; Assert-Bytes $quotedUser $quoted.User 'Managed-entry-point command line user settings'
 
-    foreach ($case in @('commandline-process-argument-mismatch','commandline-process-executable-mismatch','commandline-receipt-executable-mismatch','commandline-extra-argument')) {
+    foreach ($case in @('commandline-process-argument-mismatch','commandline-process-executable-mismatch','commandline-receipt-executable-mismatch','commandline-extra-argument','commandline-inprocess-argument-mismatch','commandline-inprocess-executable-mismatch','commandline-inprocess-extra-argument')) {
         $fixture=New-Fixture $case; $beforeLaunch=Bytes $fixture.Launch; $beforeUser=Bytes $fixture.User; $arm=Arm $fixture (Prepare $fixture)
         if ($case -eq 'commandline-process-argument-mismatch') { New-ChildAcquisition $fixture $arm -ProcessArgumentMismatch }
         elseif ($case -eq 'commandline-process-executable-mismatch') { New-ChildAcquisition $fixture $arm -ProcessExecutableMismatch }
         elseif ($case -eq 'commandline-receipt-executable-mismatch') { New-ChildAcquisition $fixture $arm -ReceiptExecutableMismatch }
-        else { New-ChildAcquisition $fixture $arm -ProcessExtraArgument }
-        $pattern = if ($case -match 'argument') { 'argument vector' } else { 'executable' }
+        elseif ($case -eq 'commandline-extra-argument') { New-ChildAcquisition $fixture $arm -ProcessExtraArgument }
+        elseif ($case -eq 'commandline-inprocess-argument-mismatch') { New-ChildAcquisition $fixture $arm -InProcessManagedEntrypoint -InProcessArgumentMismatch }
+        elseif ($case -eq 'commandline-inprocess-executable-mismatch') { New-ChildAcquisition $fixture $arm -InProcessExecutableMismatch }
+        else { New-ChildAcquisition $fixture $arm -InProcessManagedEntrypoint -InProcessExtraArgument }
+        $pattern = if ($case -match 'argument|extra') { 'argument vector' } elseif ($case -match 'receipt|inprocess') { 'host token' } else { 'executable' }
         Assert-Refused { Acquire $fixture $arm } $pattern $case
         Assert-Bytes (Bytes (Join-Path $arm.BackupDirectory 'launchSettings.intended.bin')) $fixture.Launch "$case launchSettings"
         Assert-Bytes (Bytes (Join-Path $arm.BackupDirectory 'project.user.intended.bin')) $fixture.User "$case user settings"
