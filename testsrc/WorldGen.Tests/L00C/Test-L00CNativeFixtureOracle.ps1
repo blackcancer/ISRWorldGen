@@ -3,7 +3,7 @@ param([string]$GamePath = 'D:\Jeux\Vintagestory')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$sources = @('L00CMenuActionDriver.cs','L00CMenuActionLaboratoryHost.cs','L00CFixtureBootstrap.cs','L00CStrictEvidenceJson.cs','L00CCampaignStorage.cs','L00CNativeFixtureOracle.cs','L00CNativeOpenControllerCompileStub.cs', (Join-Path $root '..\..\..\src\WorldGen.VintageStory\WorldgenProbe\L00CLifecycleShutdownBarrier.cs'), (Join-Path $root '..\..\..\src\WorldGen.VintageStory\WorldgenProbe\L00CLevelFinalizeGate.cs')) | ForEach-Object { if ([IO.Path]::IsPathRooted($_)) { $_ } else { Join-Path $root $_ } }
+$sources = @('L00CMenuActionDriver.cs','L00CMenuActionLaboratoryHost.cs','L00CFixtureBootstrap.cs','L00CStrictEvidenceJson.cs','L00CCampaignStorage.cs','L00CNativeFixtureOracle.cs','L00CNativeOpenControllerCompileStub.cs', (Join-Path $root '..\..\..\src\WorldGen.VintageStory\L00CScenarioModel.cs'), (Join-Path $root '..\..\..\src\WorldGen.VintageStory\WorldgenProbe\L00CLifecycleShutdownBarrier.cs'), (Join-Path $root '..\..\..\src\WorldGen.VintageStory\WorldgenProbe\L00CLevelFinalizeGate.cs')) | ForEach-Object { if ([IO.Path]::IsPathRooted($_)) { $_ } else { Join-Path $root $_ } }
 $csc = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
 foreach ($path in @($sources + $csc, (Join-Path $GamePath 'VintagestoryLib.dll'), (Join-Path $GamePath 'VintagestoryAPI.dll'), (Join-Path $GamePath 'Lib\Newtonsoft.Json.dll'))) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "L00-C native fixture oracle is missing $path" } }
 $out = Join-Path ([IO.Path]::GetTempPath()) ('l00c-native-fixture-oracle-' + [Guid]::NewGuid().ToString('N') + '.dll')
@@ -14,6 +14,6 @@ try {
     $assembly = [Reflection.Assembly]::LoadFrom($out)
     $oracle = $assembly.GetType('ISRWorldGen.L00C.Laboratory.L00CNativeFixtureOracle', $true).GetMethod('Run', [Reflection.BindingFlags]'Static,NonPublic')
     if ($null -eq $oracle -or $oracle.Invoke($null, @()) -ne 0) { throw 'L00-C native fixture executable oracle failed.' }
-    [ordered]@{ TestId='L00-C-NATIVE-FIXTURE-EXECUTABLE-ORACLE'; Status='PASS'; Mapping='StartServerArgs exact 1.22.7 fields and non-null JsonObject/JToken'; Readiness='all eleven predicates required, including canonical client save GUID; each individual false refused'; LibrarySha256=(Get-FileHash (Join-Path $GamePath 'VintagestoryLib.dll') -Algorithm SHA256).Hash } | ConvertTo-Json
+    [ordered]@{ TestId='L00-C-S2-NATIVE-ADAPTER-EXECUTABLE-ORACLE'; Status='PASS'; Mapping='Create and reopen StartServerArgs exact 1.22.7 fields; reopen has no menu cell/index'; Refusals='noncanonical path, wrong exact path and wrong IsNew preserve dedicated codes'; LibrarySha256=(Get-FileHash (Join-Path $GamePath 'VintagestoryLib.dll') -Algorithm SHA256).Hash } | ConvertTo-Json
 }
 finally { if (Test-Path -LiteralPath $out) { try { Remove-Item -LiteralPath $out -Force } catch { } } }

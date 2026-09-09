@@ -20,32 +20,44 @@ internal static class L00CNativeFixtureOracle
         var disabled = new List<string> { "example-disabled" };
         var paths = new List<string> { @"E:\laboratory-mod-path" };
         string save = Path.Combine(Path.GetTempPath(), "l00c-native-fixture-oracle.vcdbs");
-        object args = L00CMenuActionDriver.CreateStartServerArgsForOracle(argsType, "activated-primary", save,
+        object args = L00CMenuActionDriver.CreateStartServerArgsForOracle(argsType, "iteration-01-a", save, true,
             "oracle-player", disabled, paths, "en");
         Require("Seed", "24681357", args); Require("SaveFileLocation", Path.GetFullPath(save), args);
-        Require("WorldName", "ISRWorldGen L00-C activated-primary", args); Require("PlayStyle", "surviveandbuild", args);
+        Require("WorldName", "ISRWorldGen L00-C iteration-01-a", args); Require("PlayStyle", "surviveandbuild", args);
         Require("PlayStyleLangCode", "preset-surviveandbuild", args); Require("WorldType", "standard", args);
         Require("CreatedByPlayerName", "oracle-player", args); Require("Language", "en", args);
-        if (Read(args, "AllowCreativeMode") is not false || Read(args, "IsNew") is not true || Read(args, "MapSizeY") is not int y || y != 256)
-            throw new InvalidOperationException("Native boolean/height mapping mismatch.");
+        if (Read(args, "AllowCreativeMode") is not false || Read(args, "IsNew") is not true)
+            throw new InvalidOperationException("Native boolean mapping mismatch.");
         RequireListCopy(args, "DisabledMods", disabled); RequireListCopy(args, "ClientModPaths", paths);
         object config = Read(args, "WorldConfiguration") ?? throw new InvalidOperationException("WorldConfiguration is null.");
         object token = config.GetType().GetProperty("Token")?.GetValue(config) ?? throw new InvalidOperationException("Jworldconfig token is null.");
         PropertyInfo indexer = token.GetType().GetProperty("Item", new[] { typeof(string) }) ?? throw new InvalidOperationException("JObject indexer absent.");
         RequireToken(indexer, token, "worldWidth", "4096"); RequireToken(indexer, token, "worldLength", "4096"); RequireToken(indexer, token, "isrworldgenProfileId", "laboratory");
-        if (!L00CMenuActionDriver.IsWorldReadinessSatisfied(true, true, true, true, true, true, true, true, true, true, true))
-            throw new InvalidOperationException("Fully proven readiness was refused.");
-        for (int i = 0; i < 11; i++)
-        {
-            bool[] values = { true, true, true, true, true, true, true, true, true, true, true };
-            values[i] = false;
-            if (L00CMenuActionDriver.IsWorldReadinessSatisfied(values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9], values[10]))
-                throw new InvalidOperationException("False readiness permitted return at predicate index " + i + ".");
-        }
+        L00CMenuActionDriver.ValidateStartServerArgsForOracle(args, Path.GetFullPath(save), true);
+
+        object reopen = L00CMenuActionDriver.CreateStartServerArgsForOracle(argsType, "iteration-01-a", save, false,
+            "ignored-for-reopen", disabled, paths, "en");
+        Require("SaveFileLocation", Path.GetFullPath(save), reopen); Require("Language", "en", reopen);
+        if (Read(reopen, "IsNew") is not false || Read(reopen, "Seed") is not null ||
+            Read(reopen, "WorldName") is not null || Read(reopen, "WorldConfiguration") is not null ||
+            Read(reopen, "CreatedByPlayerName") is not null)
+            throw new InvalidOperationException("Native reopen StartServerArgs does not match the exact OnClickCellLeft mapping.");
+        RequireListCopy(reopen, "DisabledMods", disabled); RequireListCopy(reopen, "ClientModPaths", paths);
+        L00CMenuActionDriver.ValidateStartServerArgsForOracle(reopen, Path.GetFullPath(save), false);
+
+        Set(reopen, "SaveFileLocation", Path.Combine(Path.GetTempPath(), "another-save.vcdbs"));
+        RequireCode(() => L00CMenuActionDriver.ValidateStartServerArgsForOracle(reopen, Path.GetFullPath(save), false),
+            "L00C_S2_STARTSERVERARGS_PATH_MISMATCH");
+        Set(reopen, "SaveFileLocation", Path.GetFullPath(save)); Set(reopen, "IsNew", true);
+        RequireCode(() => L00CMenuActionDriver.ValidateStartServerArgsForOracle(reopen, Path.GetFullPath(save), false),
+            "L00C_S2_STARTSERVERARGS_ISNEW_MISMATCH");
+        RequireCode(() => L00CMenuActionDriver.CreateStartServerArgsForOracle(argsType, "iteration-01-a",
+            @"relative\save.vcdbs", false, null, disabled, paths, "en"), "L00C_S2_ORACLE_SAVE_PATH_NOT_CANONICAL");
         return 0;
     }
 
     private static object? Read(object target, string name) => target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(target);
+    private static void Set(object target, string name, object? value) => (target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) ?? throw new InvalidOperationException("Native field absent: " + name)).SetValue(target, value);
     private static void Require(string name, string expected, object target) { if (!string.Equals(Read(target, name) as string, expected, StringComparison.Ordinal)) throw new InvalidOperationException("Native argument mapping mismatch: " + name); }
     private static void RequireListCopy(object args, string name, List<string> expected)
     {
@@ -56,5 +68,11 @@ internal static class L00CNativeFixtureOracle
     {
         if (!string.Equals(indexer.GetValue(token, new object[] { name })?.ToString(), expected, StringComparison.Ordinal))
             throw new InvalidOperationException("WorldConfiguration token mismatch: " + name);
+    }
+    private static void RequireCode(Action action, string code)
+    {
+        try { action(); }
+        catch (L00CScenarioException exception) when (exception.Code == code) { return; }
+        throw new InvalidOperationException("Expected exact diagnostic code " + code + ".");
     }
 }
