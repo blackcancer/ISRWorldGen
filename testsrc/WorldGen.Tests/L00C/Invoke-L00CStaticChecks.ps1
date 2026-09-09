@@ -231,7 +231,21 @@ $delayedShutdownOracleStatus = 'NOT_APPLICABLE'
 $activeShutdownEvidenceOracleStatus = 'NOT_APPLICABLE'
 $reopenTransactionOracleStatus = 'NOT_APPLICABLE'
 $campaignStorageOracleStatus = 'NOT_APPLICABLE'
+$f5TransactionOracleStatus = 'NOT_APPLICABLE'
+$visualStudioConsumptionOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
+    $f5TransactionOraclePath = Join-Path $PSScriptRoot 'Test-L00CF5AuthenticatedProfile.ps1'
+    $f5TransactionOracle = (& $f5TransactionOraclePath | Out-String | ConvertFrom-Json)
+    if ($f5TransactionOracle.Status -ne 'PASS' -or $f5TransactionOracle.Cases -lt 47) {
+        throw 'The authenticated F5 transaction v2 oracle did not pass.'
+    }
+    $f5TransactionOracleStatus = $f5TransactionOracle.Status
+    $visualStudioConsumptionOraclePath = Join-Path $PSScriptRoot 'Test-L00CVisualStudioProfileConsumption.ps1'
+    $visualStudioConsumptionOracle = (& $visualStudioConsumptionOraclePath | Out-String | ConvertFrom-Json)
+    if ($visualStudioConsumptionOracle.Status -ne 'PASS' -or $visualStudioConsumptionOracle.Cases -lt 16) {
+        throw 'The bounded Visual Studio profile-consumption oracle did not pass.'
+    }
+    $visualStudioConsumptionOracleStatus = $visualStudioConsumptionOracle.Status
     $campaignStorageOraclePath = Join-Path $PSScriptRoot 'Test-L00CCampaignStorage.ps1'
     $campaignStorageOracle = (& $campaignStorageOraclePath | Out-String | ConvertFrom-Json)
     if ($campaignStorageOracle.Status -ne 'PASS' -or
@@ -349,6 +363,8 @@ $result = [ordered]@{
     ActiveShutdownEvidenceOracle = $activeShutdownEvidenceOracleStatus
     PersistedReopenTransactionOracle = $reopenTransactionOracleStatus
     CampaignStorageRecoveryOracle = $campaignStorageOracleStatus
+    F5TransactionOracle = $f5TransactionOracleStatus
+    VisualStudioConsumptionOracle = $visualStudioConsumptionOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }

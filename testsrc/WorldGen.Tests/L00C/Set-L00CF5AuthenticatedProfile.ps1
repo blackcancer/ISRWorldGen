@@ -320,6 +320,49 @@ function Read-ValidatedTransaction([string]$Path) {
     return [pscustomobject]@{ Directory = $backup; EnvelopePath=$envelopeTransaction.EnvelopePath; MetadataPath = $metadataPath; Metadata = $metadata }
 }
 
+function Get-AttestationProjectGuid([string]$SolutionPath, [string]$ProjectPath) {
+    $solutionDirectory = [IO.Path]::GetDirectoryName($SolutionPath).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $prefix = $solutionDirectory + [IO.Path]::DirectorySeparatorChar
+    if (-not $ProjectPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Visual Studio attestation project escaped the solution directory.' }
+    $relative = $ProjectPath.Substring($prefix.Length).Replace('/', '\')
+    $matches = [regex]::Matches([IO.File]::ReadAllText($SolutionPath), '(?im)^Project\("\{[^}]+\}"\)\s*=\s*"[^"]+",\s*"' + [regex]::Escape($relative) + '",\s*"\{(?<guid>[0-9a-f-]{36})\}"\s*$')
+    if ($matches.Count -ne 1) { throw 'Visual Studio attestation project GUID is not uniquely bound by the solution.' }
+    return ([Guid]$matches[0].Groups['guid'].Value).ToString('D').ToUpperInvariant()
+}
+
+function Get-ExpectedAttestedEnvironment([object]$Transaction) {
+    $intendedPath = Join-Path $Transaction.Directory 'launchSettings.intended.bin'
+    try { $document = Get-Utf8Text (Read-PathBytes $intendedPath) | ConvertFrom-Json }
+    catch { throw 'Intended launch settings backup is not valid JSON.' }
+    $profile = $document.profiles.PSObject.Properties[[string]$Transaction.Metadata.ProfileName]
+    if ($null -eq $profile -or $null -eq $profile.Value.environmentVariables) { throw 'Intended launch profile has no environment to attest.' }
+    $result = [ordered]@{}
+    foreach ($entry in @($profile.Value.environmentVariables.PSObject.Properties)) {
+        if ($result.Contains([string]$entry.Name)) { throw 'Intended launch environment contains a duplicate key.' }
+        $result[[string]$entry.Name] = [string]$entry.Value
+    }
+    return $result
+}
+
+function Test-AttestedStringArray([object]$Expected, [object]$Actual) {
+    $left = @($Expected | ForEach-Object { [string]$_ })
+    $right = @($Actual | ForEach-Object { [string]$_ })
+    if ($left.Count -ne $right.Count) { return $false }
+    for ($index = 0; $index -lt $left.Count; $index++) { if ($left[$index] -cne $right[$index]) { return $false } }
+    return $true
+}
+
+function Test-AttestedEnvironment([Collections.IDictionary]$Expected, [object]$Actual) {
+    if ($null -eq $Actual) { return $false }
+    $properties = @($Actual.PSObject.Properties)
+    if ($properties.Count -ne $Expected.Count) { return $false }
+    foreach ($name in $Expected.Keys) {
+        $property = $Actual.PSObject.Properties[[string]$name]
+        if ($null -eq $property -or [string]$property.Value -cne [string]$Expected[$name]) { return $false }
+    }
+    return $true
+}
+
 function Assert-VisualStudioAttestation([object]$Transaction, [string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Arm requires a Visual Studio DTE/MCP attestation path.' }
     $expectedPath = Join-Path $Transaction.Directory 'visual-studio-consumed.json'
@@ -328,15 +371,52 @@ function Assert-VisualStudioAttestation([object]$Transaction, [string]$Path) {
     if ($actualPath -cne $expectedPath) { throw 'Visual Studio attestation must use the fixed transaction receipt path.' }
     $receipt = Read-RequiredJson $actualPath 'Visual Studio DTE/MCP attestation'
     $metadata = $Transaction.Metadata
+    $expectedProjectGuid = Get-AttestationProjectGuid $solution ([string]$metadata.ProjectPath)
+    foreach ($property in @('DebuggerMode','UnsavedDocumentCount','SolutionIsDirty','ProjectIsDirty','ProjectSaved')) {
+        if ($null -eq $receipt.PSObject.Properties[$property]) { throw 'Visual Studio DTE/MCP attestation omitted a reload safety precondition.' }
+    }
+    if ([string]$receipt.DebuggerMode -cne 'Design' -or [int]$receipt.UnsavedDocumentCount -ne 0 -or [bool]$receipt.SolutionIsDirty -or [bool]$receipt.ProjectIsDirty -or -not [bool]$receipt.ProjectSaved) {
+        throw 'Visual Studio DTE/MCP attestation failed a reload safety precondition.'
+    }
     if ([int]$receipt.SchemaVersion -ne 2 -or [string]$receipt.Protocol -cne $Protocol -or [string]$receipt.Status -cne 'VISUAL_STUDIO_PROFILE_CONSUMED' -or
-        [string]$receipt.Source -cne 'VISUAL_STUDIO_DTE_MCP' -or [string]$receipt.TransactionId -cne [string]$metadata.TransactionId -or [string]$receipt.Nonce -cne [string]$metadata.Nonce -or
+        [string]$receipt.Source -cne 'VISUAL_STUDIO_DTE_MCP' -or [string]$receipt.AttestationMethod -cne 'ROT_DTE_IVS_QUERY_DEBUG_TARGETS' -or
+        [string]$receipt.TransactionId -cne [string]$metadata.TransactionId -or [string]$receipt.Nonce -cne [string]$metadata.Nonce -or
         [int]$receipt.ProcessId -ne [int]$metadata.VisualStudio.ProcessId -or ([DateTimeOffset]$receipt.ProcessStartUtc).UtcTicks -ne ([DateTimeOffset]$metadata.VisualStudio.StartTimeUtc).UtcTicks -or
         [string]$receipt.SolutionPath -cne $solution -or [string]$receipt.ProjectPath -cne [string]$metadata.ProjectPath -or
+        [string]$receipt.StartupProjectPath -cne [string]$metadata.ProjectPath -or [string]$receipt.ProjectGuid -cne $expectedProjectGuid -or
+        [string]$receipt.ActiveConfiguration -cne 'Debug' -or [string]$receipt.ActivePlatform -cne 'Any CPU' -or
         [string]$receipt.ActiveDebugProfile -cne [string]$metadata.ProfileName -or [string]$receipt.EvaluatedExecutablePath -cne [string]$metadata.ExpectedGameExecutablePath -or
+        [string]$receipt.EvaluatedWorkingDirectory -cne [IO.Path]::GetDirectoryName([string]$metadata.ExpectedGameExecutablePath) -or
         [string]$receipt.ConsumedLaunchSettingsSha256 -cne [string]$metadata.IntendedSha256 -or [string]$receipt.ConsumedProjectUserSettingsSha256 -cne [string]$metadata.ProjectUserIntendedSha256) {
-        throw 'Visual Studio DTE/MCP attestation is stale, cached, or belongs to another process, solution, profile, executable, or settings revision.'
+        throw 'Visual Studio DTE/MCP attestation is stale, cached, or belongs to another process, solution, startup project, GUID, configuration, profile, executable, working directory, or settings revision.'
     }
-    if ([DateTimeOffset]$receipt.ObservedUtc -lt [DateTimeOffset]$metadata.PreparedUtc -or [DateTimeOffset]$receipt.ObservedUtc -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) {
+    if (-not (Test-AttestedStringArray $metadata.ExpectedArguments $receipt.EvaluatedArguments)) {
+        throw 'Visual Studio DTE/MCP attestation did not consume the exact argument vector.'
+    }
+    $expectedEnvironment = Get-ExpectedAttestedEnvironment $Transaction
+    if (-not (Test-AttestedEnvironment $expectedEnvironment $receipt.EvaluatedEnvironment)) {
+        throw 'Visual Studio DTE/MCP attestation did not consume the exact launch environment.'
+    }
+    $intentPath = Join-Path $Transaction.Directory 'visual-studio-reload-intent.json'
+    $intent = Read-RequiredJson $intentPath 'Visual Studio reload intent'
+    foreach ($property in @('DebuggerMode','UnsavedDocumentCount','SolutionIsDirty','ProjectIsDirty','ProjectSaved')) {
+        if ($null -eq $intent.PSObject.Properties[$property]) { throw 'Visual Studio reload intent omitted a safety precondition.' }
+    }
+    if ([string]$intent.DebuggerMode -cne 'Design' -or [int]$intent.UnsavedDocumentCount -ne 0 -or [bool]$intent.SolutionIsDirty -or [bool]$intent.ProjectIsDirty -or -not [bool]$intent.ProjectSaved) {
+        throw 'Visual Studio reload intent failed a safety precondition.'
+    }
+    if ([int]$intent.SchemaVersion -ne 2 -or [string]$intent.Protocol -cne $Protocol -or [string]$intent.Status -cne 'VISUAL_STUDIO_RELOAD_INTENT' -or
+        [string]$intent.TransactionId -cne [string]$metadata.TransactionId -or [int]$intent.ProcessId -ne [int]$metadata.VisualStudio.ProcessId -or
+        [string]$intent.ProjectGuid -cne $expectedProjectGuid -or [string]$intent.MetadataSha256 -cne (Get-FileSha256 $Transaction.MetadataPath) -or
+        [string]$receipt.ReloadIntentSha256 -cne (Get-FileSha256 $intentPath)) {
+        throw 'Visual Studio DTE/MCP attestation is detached from its durable reload intent.'
+    }
+    $mcp = Get-ProcessRecord ([int]$receipt.McpProcessId)
+    if ([int]$receipt.McpParentProcessId -ne [int]$metadata.VisualStudio.ProcessId -or $null -eq $mcp -or -not $mcp.IsRunning -or
+        [string]$mcp.Name -cne 'CodingWithCalvin.MCPServer.Server.exe' -or [int]$mcp.ParentProcessId -ne [int]$metadata.VisualStudio.ProcessId) {
+        throw 'Visual Studio DTE/MCP attestation is not bound to the live MCP child of the exact devenv process.'
+    }
+    if ([DateTimeOffset]$receipt.ObservedUtc -lt [DateTimeOffset]$metadata.PreparedUtc -or [DateTimeOffset]$receipt.ObservedUtc -lt [DateTimeOffset]$intent.PreparedUtc -or [DateTimeOffset]$receipt.ObservedUtc -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) {
         throw 'Visual Studio DTE/MCP attestation time is outside this prepare interval.'
     }
     return $receipt
@@ -376,7 +456,7 @@ function Assert-TerminalTransaction([string]$Directory) {
     $receipt = Read-RequiredJson $found[0] 'Prior F5 transaction terminal receipt'
     $isPreIntent = [IO.Path]::GetFileName($found[0]) -ceq 'pre-intent-recovered.json'
     if ($isPreIntent) {
-        foreach ($name in @('metadata.json','settings-prepared.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
+        foreach ($name in @('metadata.json','settings-prepared.json','visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
             if (Test-Path -LiteralPath (Join-Path $envelopeTransaction.Directory $name)) { throw 'Pre-intent terminal cannot coexist with a later transaction state.' }
         }
         if ([int]$receipt.SchemaVersion -ne 2 -or [string]$receipt.Protocol -cne $Protocol -or [string]$receipt.Status -cne 'PRE_INTENT_RECOVERED' -or
@@ -403,7 +483,7 @@ function Assert-TerminalTransaction([string]$Directory) {
         if (Test-Path -LiteralPath (Join-Path $transaction.Directory 'acquired.json')) { throw 'Recovered terminal cannot coexist with launch acquisition.' }
     }
     else {
-        foreach ($name in @('visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
+        foreach ($name in @('visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
             if (Test-Path -LiteralPath (Join-Path $transaction.Directory $name)) { throw 'Prepare-failure terminal cannot coexist with a later transaction state.' }
         }
     }
@@ -746,7 +826,7 @@ try {
 
     if ($Action -eq 'Restore') {
         [void](Assert-Acquired $currentTransaction)
-        foreach ($name in @('visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
+        foreach ($name in @('visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
             Clear-PublishingResidue (Join-Path $currentTransaction.Directory $name)
         }
         Restore-TransactionBytes $currentTransaction 'RestoreUserAfterTruncate' 'RestoreLaunchAfterTruncate'
@@ -763,7 +843,7 @@ try {
         if ($null -ne $boundVisualStudio -and [bool]$boundVisualStudio.IsRunning -and [DateTimeOffset]$boundVisualStudio.StartTimeUtc -eq [DateTimeOffset]$metadata.VisualStudio.StartTimeUtc) {
             throw 'Unacquired transaction cannot be recovered while its bound Visual Studio instance is running.'
         }
-        foreach ($name in @('settings-prepared.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json','prepare-failed-recovered.json')) {
+        foreach ($name in @('settings-prepared.json','visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json','prepare-failed-recovered.json')) {
             Clear-PublishingResidue (Join-Path $currentTransaction.Directory $name)
         }
         Restore-TransactionBytes $currentTransaction 'RecoverUserAfterTruncate' 'RecoverLaunchAfterTruncate'

@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $helper = Join-Path $PSScriptRoot 'Set-L00CF5AuthenticatedProfile.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('isr-l00c-f5-transaction-' + [Guid]::NewGuid().ToString('N'))
 $vsPid = 47260
+$mcpPid = 72116
 $childPid = 75040
 
 function Bytes([string]$Path) { return [IO.File]::ReadAllBytes($Path) }
@@ -35,8 +36,9 @@ function New-Fixture([string]$Name) {
     $saves = Join-Path $repository 'AppData\VintagestoryData\Saves'
     $game = Join-Path $repository 'Game\Vintagestory.exe'
     [void](New-Item -ItemType Directory -Path $properties,$laboratory,$saves,(Split-Path $game -Parent) -Force)
-    [IO.File]::WriteAllText((Join-Path $repository 'ISRWorldGen.sln'), 'synthetic solution', [Text.UTF8Encoding]::new($false))
     $projectFile=Join-Path $project 'WorldGen.VintageStory.csproj'
+    $solutionText = "Microsoft Visual Studio Solution File, Format Version 12.00`r`nProject(`"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}`") = `"WorldGen.VintageStory`", `"src\WorldGen.VintageStory\WorldGen.VintageStory.csproj`", `"{FC327668-ABD2-4C3E-9867-81D745F8F3E5}`"`r`nEndProject`r`nGlobal`r`nEndGlobal`r`n"
+    [IO.File]::WriteAllText((Join-Path $repository 'ISRWorldGen.sln'), $solutionText, [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($projectFile, '<Project Sdk="Microsoft.NET.Sdk" />', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $laboratory '.isrworldgen-lab'), 'fixture', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($game, 'synthetic executable identity', [Text.UTF8Encoding]::new($false))
@@ -62,6 +64,7 @@ function New-Fixture([string]$Name) {
     $vsStart = [DateTimeOffset]::UtcNow.AddMinutes(-5)
     $processes = @{}
     $processes[$vsPid] = [pscustomobject]@{ ProcessId=$vsPid; ParentProcessId=100; Name='devenv.exe'; ExecutablePath='C:\Program Files\Microsoft Visual Studio\devenv.exe'; CommandLine='devenv.exe'; StartTimeUtc=$vsStart.ToString('o'); IsRunning=$true }
+    $processes[$mcpPid] = [pscustomobject]@{ ProcessId=$mcpPid; ParentProcessId=$vsPid; Name='CodingWithCalvin.MCPServer.Server.exe'; ExecutablePath='C:\Program Files\Microsoft Visual Studio\MCPServer.exe'; CommandLine='MCPServer.exe'; StartTimeUtc=$vsStart.AddMinutes(1).ToString('o'); IsRunning=$true }
     $query = { param($id) return $processes[[int]$id] }.GetNewClosure()
     return [pscustomobject]@{ Root=$repository; Solution=$solution; Project=$projectFile; Launch=$launch; User=$user; Game=$game; Laboratory=$laboratory; Processes=$processes; Query=$query; VsStart=$vsStart }
 }
@@ -70,19 +73,72 @@ function Prepare([object]$Fixture, [scriptblock]$Hook = $null) {
     return (& $helper -Action Prepare -SyntheticFixtureRoot $Fixture.Root -VisualStudioProcessId $vsPid -ExpectedSolutionPath $Fixture.Solution -ExpectedGameExecutablePath $Fixture.Game -TestProcessQuery $Fixture.Query -TestHook $Hook | ConvertFrom-Json)
 }
 
-function New-VisualStudioAttestation([object]$Fixture, [object]$Prepared, [switch]$WrongSolution, [switch]$WrongProfile, [switch]$WrongExecutable, [switch]$WrongUserHash) {
+function New-VisualStudioAttestation(
+    [object]$Fixture,
+    [object]$Prepared,
+    [switch]$WrongSolution,
+    [switch]$WrongProfile,
+    [switch]$WrongExecutable,
+    [switch]$WrongUserHash,
+    [switch]$WrongStartup,
+    [switch]$WrongConfiguration,
+    [switch]$WrongArguments,
+    [switch]$MissingEnvironment,
+    [switch]$WrongWorkingDirectory,
+    [switch]$WrongProjectGuid,
+    [switch]$WrongMcpParent,
+    [string]$SafetyMutation,
+    [switch]$UnsafeIntent
+) {
     $metadata = Get-Content -LiteralPath (Join-Path $Prepared.BackupDirectory 'metadata.json') -Raw | ConvertFrom-Json -DateKind String
     $path = Join-Path $Prepared.BackupDirectory 'visual-studio-consumed.json'
+    $intentPath = Join-Path $Prepared.BackupDirectory 'visual-studio-reload-intent.json'
+    $intended = Get-Content -LiteralPath (Join-Path $Prepared.BackupDirectory 'launchSettings.intended.bin') -Raw | ConvertFrom-Json
+    $environment = [ordered]@{}
+    foreach ($entry in @($intended.profiles.'ISRWorldGen Client (authenticated user data)'.environmentVariables.PSObject.Properties)) { $environment[$entry.Name] = [string]$entry.Value }
+    if ($MissingEnvironment) { $environment.Remove('ISR_L00C_F5_TRANSACTION_ID') }
+    $arguments = @($metadata.ExpectedArguments)
+    if ($WrongArguments) { $arguments[-1] = $arguments[-1] + '-wrong' }
+    $projectGuid = if ($WrongProjectGuid) { [Guid]::NewGuid().ToString('D').ToUpperInvariant() } else { 'FC327668-ABD2-4C3E-9867-81D745F8F3E5' }
+    $intent = [ordered]@{
+        SchemaVersion=2; Protocol='l00c-f5-debug-transaction-v2'; Status='VISUAL_STUDIO_RELOAD_INTENT'; TransactionId=[string]$metadata.TransactionId
+        ProcessId=$vsPid; ProcessStartUtc=$Fixture.VsStart.ToString('o'); McpProcessId=$mcpPid; ProjectPath=$Fixture.Project; ProjectGuid=$projectGuid
+        MetadataSha256=(Get-FileHash -LiteralPath (Join-Path $Prepared.BackupDirectory 'metadata.json') -Algorithm SHA256).Hash
+        LaunchSettingsSha256=[string]$metadata.IntendedSha256; ProjectUserSettingsSha256=[string]$metadata.ProjectUserIntendedSha256
+        DebuggerMode='Design'; UnsavedDocumentCount=0; SolutionIsDirty=[bool]$UnsafeIntent; ProjectIsDirty=$false; ProjectSaved=$true
+        PreparedUtc=([DateTimeOffset]$metadata.PreparedUtc).AddMilliseconds(500).ToString('o')
+    }
+    [IO.File]::WriteAllText($intentPath, ($intent | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
     $receipt = [ordered]@{
-        SchemaVersion=2; Protocol='l00c-f5-debug-transaction-v2'; Status='VISUAL_STUDIO_PROFILE_CONSUMED'; Source='VISUAL_STUDIO_DTE_MCP'
+        SchemaVersion=2; Protocol='l00c-f5-debug-transaction-v2'; Status='VISUAL_STUDIO_PROFILE_CONSUMED'; Source='VISUAL_STUDIO_DTE_MCP'; AttestationMethod='ROT_DTE_IVS_QUERY_DEBUG_TARGETS'
         TransactionId=[string]$metadata.TransactionId; Nonce=[string]$metadata.Nonce; ProcessId=$vsPid; ProcessStartUtc=$Fixture.VsStart.ToString('o')
+        McpProcessId=$mcpPid; McpParentProcessId=if($WrongMcpParent){99999}else{$vsPid}
         SolutionPath=if($WrongSolution){Join-Path $Fixture.Root 'Other.sln'}else{$Fixture.Solution}
         ProjectPath=$Fixture.Project
+        StartupProjectPath=if($WrongStartup){Join-Path $Fixture.Root 'Other.csproj'}else{$Fixture.Project}
+        ProjectGuid=$projectGuid
+        ActiveConfiguration=if($WrongConfiguration){'Release'}else{'Debug'}
+        ActivePlatform='Any CPU'
+        DebuggerMode='Design'; UnsavedDocumentCount=0; SolutionIsDirty=$false; ProjectIsDirty=$false; ProjectSaved=$true
         ActiveDebugProfile=if($WrongProfile){'Unchanged'}else{[string]$metadata.ProfileName}
         EvaluatedExecutablePath=if($WrongExecutable){Join-Path $Fixture.Root 'OtherGame\Vintagestory.exe'}else{$Fixture.Game}
+        EvaluatedArguments=$arguments
+        EvaluatedWorkingDirectory=if($WrongWorkingDirectory){Join-Path $Fixture.Root 'OtherGame'}else{Split-Path $Fixture.Game -Parent}
+        EvaluatedEnvironment=[pscustomobject]$environment
         ConsumedLaunchSettingsSha256=[string]$metadata.IntendedSha256
         ConsumedProjectUserSettingsSha256=if($WrongUserHash){'0' * 64}else{[string]$metadata.ProjectUserIntendedSha256}
+        ReloadIntentSha256=(Get-FileHash -LiteralPath $intentPath -Algorithm SHA256).Hash
         ObservedUtc=([DateTimeOffset]$metadata.PreparedUtc).AddSeconds(1).ToString('o')
+    }
+    switch -CaseSensitive ($SafetyMutation) {
+        'WrongDebuggerMode' { $receipt.DebuggerMode='Run' }
+        'UnsavedDocument' { $receipt.UnsavedDocumentCount=1 }
+        'DirtySolution' { $receipt.SolutionIsDirty=$true }
+        'DirtyProject' { $receipt.ProjectIsDirty=$true }
+        'UnsavedProject' { $receipt.ProjectSaved=$false }
+        'MissingField' { [void]$receipt.Remove('SolutionIsDirty') }
+        '' { }
+        default { throw "Unknown safety mutation: $SafetyMutation" }
     }
     $publishing = $path + '.publishing'
     [IO.File]::WriteAllText($publishing, ($receipt | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
@@ -90,8 +146,25 @@ function New-VisualStudioAttestation([object]$Fixture, [object]$Prepared, [switc
     return $path
 }
 
-function Arm([object]$Fixture, [object]$Prepared, [switch]$WrongSolution, [switch]$WrongProfile, [switch]$WrongExecutable, [switch]$WrongUserHash, [scriptblock]$Hook = $null) {
-    $path = New-VisualStudioAttestation $Fixture $Prepared -WrongSolution:$WrongSolution -WrongProfile:$WrongProfile -WrongExecutable:$WrongExecutable -WrongUserHash:$WrongUserHash
+function Arm(
+    [object]$Fixture,
+    [object]$Prepared,
+    [switch]$WrongSolution,
+    [switch]$WrongProfile,
+    [switch]$WrongExecutable,
+    [switch]$WrongUserHash,
+    [switch]$WrongStartup,
+    [switch]$WrongConfiguration,
+    [switch]$WrongArguments,
+    [switch]$MissingEnvironment,
+    [switch]$WrongWorkingDirectory,
+    [switch]$WrongProjectGuid,
+    [switch]$WrongMcpParent,
+    [string]$SafetyMutation,
+    [switch]$UnsafeIntent,
+    [scriptblock]$Hook = $null
+) {
+    $path = New-VisualStudioAttestation $Fixture $Prepared -WrongSolution:$WrongSolution -WrongProfile:$WrongProfile -WrongExecutable:$WrongExecutable -WrongUserHash:$WrongUserHash -WrongStartup:$WrongStartup -WrongConfiguration:$WrongConfiguration -WrongArguments:$WrongArguments -MissingEnvironment:$MissingEnvironment -WrongWorkingDirectory:$WrongWorkingDirectory -WrongProjectGuid:$WrongProjectGuid -WrongMcpParent:$WrongMcpParent -SafetyMutation $SafetyMutation -UnsafeIntent:$UnsafeIntent
     return (& $helper -Action Arm -SyntheticFixtureRoot $Fixture.Root -BackupDirectory $Prepared.BackupDirectory -VisualStudioAttestationPath $path -TestProcessQuery $Fixture.Query -TestHook $Hook | ConvertFrom-Json)
 }
 
@@ -171,12 +244,26 @@ try {
 
     # The exact VS process is insufficient: DTE/MCP must attest the open
     # solution, consumed user profile/hash, and evaluated launch target.
-    foreach ($case in @('vs-other-solution','vs-cached-profile','vs-cached-user-hash','vs-wrong-executable')) {
+    foreach ($case in @('vs-other-solution','vs-cached-profile','vs-cached-user-hash','vs-wrong-executable','vs-wrong-startup','vs-wrong-configuration','vs-wrong-arguments','vs-partial-environment','vs-wrong-working-directory','vs-wrong-project-guid','vs-wrong-mcp-parent','vs-wrong-debugger-mode','vs-unsaved-document','vs-dirty-solution','vs-dirty-project','vs-unsaved-project','vs-missing-safety-field','vs-unsafe-intent')) {
         $fixture = New-Fixture $case; $beforeLaunch=Bytes $fixture.Launch; $beforeUser=Bytes $fixture.User; $preparedForVs=Prepare $fixture
         if ($case -eq 'vs-other-solution') { Assert-Refused { Arm $fixture $preparedForVs -WrongSolution } 'another process, solution' $case }
         elseif ($case -eq 'vs-cached-profile') { Assert-Refused { Arm $fixture $preparedForVs -WrongProfile } 'stale, cached' $case }
         elseif ($case -eq 'vs-cached-user-hash') { Assert-Refused { Arm $fixture $preparedForVs -WrongUserHash } 'stale, cached' $case }
-        else { Assert-Refused { Arm $fixture $preparedForVs -WrongExecutable } 'executable' $case }
+        elseif ($case -eq 'vs-wrong-executable') { Assert-Refused { Arm $fixture $preparedForVs -WrongExecutable } 'executable' $case }
+        elseif ($case -eq 'vs-wrong-startup') { Assert-Refused { Arm $fixture $preparedForVs -WrongStartup } 'startup project' $case }
+        elseif ($case -eq 'vs-wrong-configuration') { Assert-Refused { Arm $fixture $preparedForVs -WrongConfiguration } 'configuration' $case }
+        elseif ($case -eq 'vs-wrong-arguments') { Assert-Refused { Arm $fixture $preparedForVs -WrongArguments } 'argument vector' $case }
+        elseif ($case -eq 'vs-partial-environment') { Assert-Refused { Arm $fixture $preparedForVs -MissingEnvironment } 'exact launch environment' $case }
+        elseif ($case -eq 'vs-wrong-working-directory') { Assert-Refused { Arm $fixture $preparedForVs -WrongWorkingDirectory } 'working directory' $case }
+        elseif ($case -eq 'vs-wrong-project-guid') { Assert-Refused { Arm $fixture $preparedForVs -WrongProjectGuid } 'GUID' $case }
+        elseif ($case -eq 'vs-wrong-mcp-parent') { Assert-Refused { Arm $fixture $preparedForVs -WrongMcpParent } 'live MCP child' $case }
+        elseif ($case -eq 'vs-wrong-debugger-mode') { Assert-Refused { Arm $fixture $preparedForVs -SafetyMutation 'WrongDebuggerMode' } 'reload safety precondition' $case }
+        elseif ($case -eq 'vs-unsaved-document') { Assert-Refused { Arm $fixture $preparedForVs -SafetyMutation 'UnsavedDocument' } 'reload safety precondition' $case }
+        elseif ($case -eq 'vs-dirty-solution') { Assert-Refused { Arm $fixture $preparedForVs -SafetyMutation 'DirtySolution' } 'reload safety precondition' $case }
+        elseif ($case -eq 'vs-dirty-project') { Assert-Refused { Arm $fixture $preparedForVs -SafetyMutation 'DirtyProject' } 'reload safety precondition' $case }
+        elseif ($case -eq 'vs-unsaved-project') { Assert-Refused { Arm $fixture $preparedForVs -SafetyMutation 'UnsavedProject' } 'reload safety precondition' $case }
+        elseif ($case -eq 'vs-missing-safety-field') { Assert-Refused { Arm $fixture $preparedForVs -SafetyMutation 'MissingField' } 'omitted a reload safety precondition' $case }
+        else { Assert-Refused { Arm $fixture $preparedForVs -UnsafeIntent } 'safety precondition' $case }
         Assert-Bytes (Bytes (Join-Path $preparedForVs.BackupDirectory 'launchSettings.intended.bin')) $fixture.Launch "$case intended launchSettings"
         Assert-Bytes (Bytes (Join-Path $preparedForVs.BackupDirectory 'project.user.intended.bin')) $fixture.User "$case intended user settings"
         $fixture.Processes[$vsPid].IsRunning=$false
@@ -193,11 +280,14 @@ try {
 
     $attestationCut=New-Fixture 'cut-vs-attestation'; $attestationCutLaunch=Bytes $attestationCut.Launch; $attestationCutUser=Bytes $attestationCut.User; $attestationPrepared=Prepare $attestationCut
     $attestationPath=Join-Path $attestationPrepared.BackupDirectory 'visual-studio-consumed.json'
+    $reloadIntentPath=Join-Path $attestationPrepared.BackupDirectory 'visual-studio-reload-intent.json'
     [IO.File]::WriteAllText(($attestationPath+'.publishing'),'{',[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText(($reloadIntentPath+'.publishing'),'{',[Text.UTF8Encoding]::new($false))
     Assert-Refused { & $helper -Action Arm -SyntheticFixtureRoot $attestationCut.Root -BackupDirectory $attestationPrepared.BackupDirectory -VisualStudioAttestationPath $attestationPath -TestProcessQuery $attestationCut.Query } 'not authoritative' 'Visual Studio attestation publication cutoff'
     $attestationCut.Processes[$vsPid].IsRunning=$false
     & $helper -Action Recover -SyntheticFixtureRoot $attestationCut.Root -BackupDirectory $attestationPrepared.BackupDirectory -TestProcessQuery $attestationCut.Query | Out-Null
     if(Test-Path -LiteralPath ($attestationPath+'.publishing')){throw 'Recovery retained Visual Studio attestation publishing residue.'}
+    if(Test-Path -LiteralPath ($reloadIntentPath+'.publishing')){throw 'Recovery retained Visual Studio reload-intent publishing residue.'}
     Assert-Bytes $attestationCutLaunch $attestationCut.Launch 'Attestation cutoff launchSettings'; Assert-Bytes $attestationCutUser $attestationCut.User 'Attestation cutoff user settings'
 
     # Early restore and recovery race are fail-closed while the bound VS process
@@ -387,9 +477,9 @@ try {
     Assert-Bytes $acquireRaceLaunch $acquireRace.Launch 'Acquire race launchSettings'; Assert-Bytes $acquireRaceUser $acquireRace.User 'Acquire race user settings'
 
     [ordered]@{
-        TestId='L00-C-F5-DEBUG-TRANSACTION-V2'; Status='PASS'; Cases=33
+        TestId='L00-C-F5-DEBUG-TRANSACTION-V2'; Status='PASS'; Cases=47
         StateModel='DIRECTORY_RESERVED -> PREPARE_INTENT -> SETTINGS_PREPARED_FOR_VS -> VISUAL_STUDIO_PROFILE_CONSUMED -> ARMED_FOR_F5 -> CHILD_ACQUIRED -> LAUNCH_ACQUIRED -> RESTORED_AFTER_ACQUISITION; recovery requires bound VS stopped'
-        Proof='atomic durable receipts, exact VS PID/start/solution/profile/user-hash/evaluated-target attestation, then child nonce/arguments/debugger/ancestry/start proof before restore'
+        Proof='atomic durable receipts, exact VS PID/start/MCP parent/solution/startup/GUID/config/profile/hash/executable/arguments/working-directory/environment and saved-state attestation, then child nonce/arguments/debugger/ancestry/start proof before restore'
         Scope='Synthetic temporary fixtures and process records only; no Visual Studio, F5, AppData, credentials, or game process used.'
     } | ConvertTo-Json -Compress
 }
