@@ -10,8 +10,15 @@ internal sealed class InMemoryWorldSnapshotStore : IWorldSnapshotStore
     private readonly Dictionary<string, byte[]> values = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> reportedLengths = new(StringComparer.Ordinal);
     private readonly Action<string>? beforeWrite;
+    private readonly Func<string, byte[], byte[]>? transformWrittenContent;
 
-    internal InMemoryWorldSnapshotStore(Action<string>? beforeWrite = null) => this.beforeWrite = beforeWrite;
+    internal InMemoryWorldSnapshotStore(
+        Action<string>? beforeWrite = null,
+        Func<string, byte[], byte[]>? transformWrittenContent = null)
+    {
+        this.beforeWrite = beforeWrite;
+        this.transformWrittenContent = transformWrittenContent;
+    }
 
     internal int WriteCount { get; private set; }
 
@@ -43,7 +50,8 @@ internal sealed class InMemoryWorldSnapshotStore : IWorldSnapshotStore
     public void Write(string key, ReadOnlySpan<byte> content)
     {
         beforeWrite?.Invoke(key);
-        values[key] = content.ToArray();
+        byte[] ownedContent = content.ToArray();
+        values[key] = transformWrittenContent?.Invoke(key, ownedContent) ?? ownedContent;
         reportedLengths.Remove(key);
         WriteCount++;
     }

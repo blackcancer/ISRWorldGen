@@ -52,7 +52,12 @@ public sealed class WorldPersistenceService
             return PersistenceResult<SnapshotReference>.Failure(failure.Error);
         }
 
-        return WriteValue(reference.StorageKey, ((PersistenceSuccess<byte[]>)encoded).Value, reference);
+        return WriteValue(
+            reference.StorageKey,
+            ((PersistenceSuccess<byte[]>)encoded).Value,
+            ownedPayload,
+            limits.MaxSnapshotDecodedBytes,
+            reference);
     }
 
     public PersistenceResult<WorldManifest> WriteManifest(WorldManifest manifest)
@@ -83,7 +88,12 @@ public sealed class WorldPersistenceService
             return PersistenceResult<WorldManifest>.Failure(envelopeFailure.Error);
         }
 
-        return WriteValue(PersistenceKeys.Manifest, ((PersistenceSuccess<byte[]>)encoded).Value, manifest);
+        return WriteValue(
+            PersistenceKeys.Manifest,
+            ((PersistenceSuccess<byte[]>)encoded).Value,
+            manifestPayload,
+            limits.MaxManifestDecodedBytes,
+            manifest);
     }
 
     public PersistenceResult<RestoredWorld> Restore(WorldCompatibilityProfile expected)
@@ -321,12 +331,16 @@ public sealed class WorldPersistenceService
         }
     }
 
-    private PersistenceResult<T> WriteValue<T>(string storageKey, byte[] content, T value)
+    private PersistenceResult<T> WriteValue<T>(
+        string storageKey,
+        byte[] content,
+        byte[] expectedPayload,
+        long maximumDecodedBytes,
+        T value)
     {
         try
         {
             store.Write(storageKey, content);
-            return PersistenceResult<T>.Success(value);
         }
         catch (IOException exception)
         {
@@ -336,6 +350,29 @@ public sealed class WorldPersistenceService
         {
             return StorageFailure<T>(storageKey, exception);
         }
+
+        // A successful Write call alone is not evidence that a save provider made
+        // the framed canonical value durable. Read back through the same bounded
+        // validation path before reporting publication of this individual key.
+        PersistenceResult<byte[]> readBack = PersistenceEnvelope.Read(
+            store,
+            storageKey,
+            maximumDecodedBytes,
+            limits.MaxEnvelopeBytes);
+        if (readBack is PersistenceFailure<byte[]> readBackFailure)
+        {
+            return PersistenceResult<T>.Failure(readBackFailure.Error);
+        }
+
+        if (!((PersistenceSuccess<byte[]>)readBack).Value.AsSpan().SequenceEqual(expectedPayload))
+        {
+            return Failure<T>(
+                PersistenceErrorCode.CorruptData,
+                storageKey,
+                "The value read back after writing does not match the canonical payload.");
+        }
+
+        return PersistenceResult<T>.Success(value);
     }
 
     private static PersistenceError CompatibilityFailure(PersistenceErrorCode code, string member) =>

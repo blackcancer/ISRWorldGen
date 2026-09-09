@@ -125,6 +125,25 @@ public sealed class PersistenceFailureTests
     }
 
     [TestMethod]
+    public void PersistedValues_AreReadBackAndRejectedWhenTheStoreDoesNotRetainThem()
+    {
+        PersistenceFixture source = PersistenceTestData.Create();
+        var store = new InMemoryWorldSnapshotStore(
+            transformWrittenContent: static (_, content) => content[..^1]);
+        var service = new WorldPersistenceService(store, PersistenceTestData.Limits);
+
+        PersistenceTestData.AssertFailure(
+            service.WriteSnapshot(source.Parent, source.ParentPayload),
+            PersistenceErrorCode.TruncatedData);
+        PersistenceTestData.AssertFailure(
+            service.WriteManifest(source.Manifest),
+            PersistenceErrorCode.TruncatedData);
+
+        Assert.AreEqual(2, store.WriteCount);
+        Assert.AreEqual(2, store.OpenReadCount);
+    }
+
+    [TestMethod]
     public void MissingParentPayload_IsDistinguishedFromMissingLeafSnapshot()
     {
         PersistenceFixture missingParent = PersistenceTestData.Create(writeParentPayload: false);
