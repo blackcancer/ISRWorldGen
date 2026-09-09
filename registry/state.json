@@ -398,12 +398,15 @@
     },
     "L10-A": {
       "status": "IN_PROGRESS",
-      "owner": "agent:l10_a",
-      "branch": "agent/l10-a",
-      "base_commit": "c5abaa8ad80e592302f74aba35f581af68f0b071",
+      "owner": "integrator:l10-a",
+      "branch": "agent/l10-a-rebased",
+      "base_commit": "0486095",
       "evidence": [
         "worklogs/L10-A.md",
-        "commit:09d71314aecbdeec62fb9e532aa5ea905e66ed03",
+        "commit:3a164aa",
+        "review:ACCEPT agent:l10a_review",
+        "local:.local/L10A-rebased/tests/L10A-targeted-release.trx",
+        "local:.local/L10A-rebased/tests/L10A-regression-release.trx",
         "local:.local/L10A-integrated/tests/L10A-targeted-release.trx",
         "local:.local/L10A-integrated/tests/L10A-integrated-release.trx"
       ],
