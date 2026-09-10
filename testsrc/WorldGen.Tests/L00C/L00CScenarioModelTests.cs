@@ -57,7 +57,7 @@ public sealed class L00CScenarioModelTests
         Assert.AreEqual(L00CScenarioStage.RunCompleted, state.Stage);
         Assert.AreEqual("L00C_S2_RUN_COMPLETED_NOT_T00_06_PASS", state.Trace[state.Trace.Count - 1].Code);
         Assert.IsNull(state.TerminalCode, "RUN_COMPLETED is evidence production, not a T00-06 PASS verdict.");
-        Assert.AreEqual(10, state.ObservedSavegameGuids.Count);
+        Assert.HasCount(10, state.ObservedSavegameGuids);
         Assert.AreEqual(15, state.Trace.Count(entry => entry.Code == "L00C_S2_SESSION_READY_EXACT"));
         Assert.AreEqual(5, state.Trace.Count(entry => entry.Code == "L00C_S2_ITERATION_VERIFIED"));
         Assert.AreEqual(10, fixture.Definition.Iterations.SelectMany(value => new[] { value.A.CanonicalSavePath, value.B.CanonicalSavePath }).Distinct(StringComparer.OrdinalIgnoreCase).Count());
