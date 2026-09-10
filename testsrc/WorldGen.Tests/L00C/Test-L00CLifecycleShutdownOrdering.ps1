@@ -6,23 +6,15 @@ $ErrorActionPreference = 'Stop'
 $barrier = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CLifecycleShutdownBarrier.cs'
 $oracle = Join-Path $PSScriptRoot 'L00CLifecycleShutdownOrderingOracle.cs'
 $probe = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\WorldgenProbe\L00CWorldgenProbeModSystem.cs'
-$bootstrap = Join-Path $PSScriptRoot 'L00CFixtureBootstrap.cs'
-$hostPath = Join-Path $PSScriptRoot 'L00CMenuActionLaboratoryHost.cs'
-$driver = Join-Path $PSScriptRoot 'L00CMenuActionDriver.cs'
-$controller = Join-Path $PSScriptRoot 'L00CProcessCampaignController.cs'
 $csc = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
-foreach ($path in @($barrier, $oracle, $probe, $bootstrap, $hostPath, $driver, $controller, $csc)) {
+foreach ($path in @($barrier, $oracle, $probe, $csc)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "L00-C lifecycle ordering oracle is missing $path" }
 }
 
 $probeText = Get-Content -LiteralPath $probe -Raw
-$bootstrapText = Get-Content -LiteralPath $bootstrap -Raw
-$hostText = Get-Content -LiteralPath $hostPath -Raw
-$driverText = Get-Content -LiteralPath $driver -Raw
-$controllerText = Get-Content -LiteralPath $controller -Raw
 $barrierText = Get-Content -LiteralPath $barrier -Raw
 foreach ($required in @(
-    'L00CLifecycleShutdownIdentity.Create(runId, instanceId, saveGame.SavegameIdentifier, checked(++lifecycleAttestationSequence))',
+    'L00CLifecycleShutdownIdentity.Create(runId, instanceId, saveGame.SavegameIdentifier)',
     'lifecycleShutdownLease = L00CLifecycleShutdownBarrier.Open(lifecycleShutdownIdentity);',
     'L00CLifecycleShutdownBarrier.Arm(lifecycleShutdownLease',
     'CloseLifecycleShutdownBarrier();')) {
@@ -34,18 +26,14 @@ $completeMethod = $probeText.Substring($completeStart, $completeEnd - $completeS
 if ($completeMethod.Contains('RequestActiveShutdown') -or $completeMethod.Contains('DelayedShutdownGate') -or $completeMethod.Contains('TryConsumeApprovedShutdown')) {
     throw 'Lifecycle-only completion must not schedule a competing server shutdown after native Save & Quit.'
 }
-foreach ($required in @('TryFindFinalizedWorldSession', 'PrepareReturn(', 'ClientSavegameGuid', 'StartServerSavePath',
-    '() => L00CLifecycleShutdownBarrier.BeginNativeReturn(reservation)', 'AbortBeforeNativeReturn(reservation)')) {
-    if (-not $bootstrapText.Contains($required) -and -not $hostText.Contains($required)) { throw "Client lifecycle return lost required contract: $required" }
+foreach ($required in @('class L00CLifecycleSessionObservation', 'RunId { get; }', 'Iteration { get; }', 'SessionOrdinal { get; }',
+    'CanonicalSavePath { get; }', 'CanonicalSavegameGuid { get; }', 'IsNew { get; }', 'EventKind { get; }',
+    'ConfirmSaveCommitted', 'NativeActionCompleted', 'ServerStopped', 'MainMenuReady', 'TargetExclusivelyOpenable',
+    'ReferenceEquals(ready,observation)', 'run=unbound iteration=0 session=0 state=')) {
+    if (-not $barrierText.Contains($required)) { throw "Lifecycle immutable observation/proof contract lost: $required" }
 }
-foreach ($required in @('active.bootstrap?.SignalLevelFinalize(fixtureSequence);', 'active.host?.SignalLevelFinalize(fixtureSequence);')) {
-    if (-not $controllerText.Contains($required)) { throw "LevelFinalize routing lost: $required" }
-}
-foreach ($required in @('ReadClientSavegameGuid(mainType, main)', 'SaveFileLocation', 'expectedIsNew', 'Guid.TryParseExact(clientSavegameGuid, "D"')) {
-    if (-not $driverText.Contains($required)) { throw "Finalized client attestation lost: $required" }
-}
-if ($barrierText -match 'SavegameGuid\s*,\s*(expected|observed).*Path' -or $barrierText.Contains('SavegameGuid == SavePath')) {
-    throw 'Savegame GUID and .vcdbs path must remain distinct attestation axes.'
+foreach ($forbidden in @('activated-primary', 'activated-secondary', 'fixtureSequence', '1..8')) {
+    if ($barrierText.Contains($forbidden)) { throw "Lifecycle barrier retained obsolete two-role/1..8 contract: $forbidden" }
 }
 
 $out = Join-Path ([IO.Path]::GetTempPath()) ('l00c-lifecycle-shutdown-ordering-' + [Guid]::NewGuid().ToString('N') + '.dll')
@@ -59,9 +47,9 @@ try {
 finally { if (Test-Path -LiteralPath $out) { try { Remove-Item -LiteralPath $out -Force } catch { } } }
 
 [ordered]@{
-    TestId='L00-C-LIFECYCLE-SHUTDOWN-ORDERING'; Status='PASS'; ControlledPrimaryReopenCycles=5; FinalizedSessions=8
-    Identity='server/client canonical GUID plus exact run/instance/server sequence'; SavePath='separate canonical StartServerArgs.SaveFileLocation axis'
-    Refusals='malformed/wrong GUID;wrong role/path/run/instance/server-sequence/fixture-sequence;premature/duplicate/stale/late return;duplicate/stale owner'
-    NativeBoundary='all guards then BeginNativeReturn immediately before SendLeave;no post-Dispose server callback'
+    TestId='L00-C-LIFECYCLE-SHUTDOWN-ORDERING'; Status='PASS'; Iterations=5; FinalizedSessions=15; DedicatedSaves=10
+    Identity='immutable run/iteration/session/path/GUID/IsNew/eventKind plus process-local server lease'
+    Refusals='malformed GUID;wrong path/ordinal;premature/duplicate/stale/reattributed/closing callback;next open before prior SaveCommitted;partial native close proof'
+    NativeBoundary='SaveCommitted only after native action completion, server stopped, main menu, exclusive target open, and released server lease'
     Scope='Executable deterministic production-state oracle and source wiring inspection; no Vintage Story process, F5, fixture coordinate, teleportation, or spatial execution.'
 } | ConvertTo-Json -Depth 4

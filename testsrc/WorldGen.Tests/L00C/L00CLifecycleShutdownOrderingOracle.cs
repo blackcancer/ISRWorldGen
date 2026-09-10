@@ -6,88 +6,68 @@ using ISRWorldGen.WorldgenProbe;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
-// Deterministic production-state oracle only. It proves the pre-return lease
-// and identity contract; it does not claim to execute a Vintage Story client.
 internal static class L00CLifecycleShutdownOrderingOracle
 {
     internal static int Run()
     {
-        string guidA = "11111111-1111-1111-1111-111111111111";
-        string guidB = "22222222-2222-2222-2222-222222222222";
-        string primary = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "l00c-primary.vcdbs"));
-        string secondary = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "l00c-secondary.vcdbs"));
+        const string run="1234567890abcdef1234567890abcdef";
+        string saves=Path.GetFullPath(Path.Combine(Path.GetTempPath(),"l00c-s3-observation-saves"));
+        foreach(string malformed in new[]{"","not-guid","11111111111111111111111111111111","{11111111-1111-1111-1111-111111111111}"})
+            Refuse(()=>L00CLifecycleShutdownIdentity.Create(1,"instance",malformed),"malformed server GUID");
 
-        foreach (string malformed in new[] { "", "not-guid", "11111111111111111111111111111111", "{11111111-1111-1111-1111-111111111111}" })
-            Refuse(() => L00CLifecycleShutdownIdentity.Create(1, "instance", malformed, 1), "malformed server GUID");
-        Refuse(() => L00CLifecycleShutdownIdentity.Create(0, "instance", guidA, 1), "invalid run");
-        Refuse(() => L00CLifecycleShutdownIdentity.Create(1, "instance", guidA, 0), "invalid sequence");
-
-        var negative = new L00CLifecycleShutdownState();
-        L00CLifecycleShutdownIdentity identity = L00CLifecycleShutdownIdentity.Create(7, "instance-a", guidA, 3);
-        L00CLifecycleShutdownLease lease = negative.Open(identity);
-        Refuse(() => negative.Open(identity), "duplicate open");
-        Refuse(() => negative.PrepareReturn(identity, guidA, "activated-primary", primary, primary, 1), "pre-Arm return");
-        negative.Arm(lease);
-        Refuse(() => negative.PrepareReturn(identity, guidB, "activated-primary", primary, primary, 1), "wrong client GUID");
-        Refuse(() => negative.PrepareReturn(identity, guidA, "activated-primary", primary, secondary, 1), "wrong StartServerArgs path");
-        Refuse(() => negative.PrepareReturn(identity, guidA, "unknown", primary, primary, 1), "wrong role");
-        Refuse(() => negative.PrepareReturn(identity, guidA, "activated-primary", primary, primary, 0), "wrong fixture sequence");
-        Refuse(() => negative.PrepareReturn(identity, guidA, "activated-primary", primary, primary, 9), "fixture sequence after campaign");
-        Refuse(() => negative.PrepareReturn(identity, guidA, "activated-primary", primary, primary, 2), "primary role in secondary sequence");
-        Refuse(() => negative.PrepareReturn(identity, guidA, "activated-secondary", secondary, secondary, 3), "secondary role in primary sequence");
-        Refuse(() => negative.PrepareReturn(L00CLifecycleShutdownIdentity.Create(8, "instance-a", guidA, 3), guidA, "activated-primary", primary, primary, 1), "wrong run");
-        Refuse(() => negative.PrepareReturn(L00CLifecycleShutdownIdentity.Create(7, "instance-b", guidA, 3), guidA, "activated-primary", primary, primary, 1), "wrong instance");
-        Refuse(() => negative.PrepareReturn(L00CLifecycleShutdownIdentity.Create(7, "instance-a", guidA, 4), guidA, "activated-primary", primary, primary, 1), "wrong server sequence");
-
-        L00CLifecycleReturnReservation aborted = negative.PrepareReturn(identity, guidA, "activated-primary", primary, primary.ToUpperInvariant(), 1);
-        if (!negative.AbortBeforeNativeReturn(aborted)) throw new InvalidOperationException("Pre-native abort did not clear its exact reservation.");
-        Refuse(() => negative.BeginNativeReturn(aborted), "aborted reservation");
-        L00CLifecycleReturnReservation pending = negative.PrepareReturn(identity, guidA, "activated-primary", primary, primary, 1);
-        Refuse(() => negative.PrepareReturn(identity, guidA, "activated-primary", primary, primary, 1), "duplicate reservation");
-        if (!negative.Close(lease)) throw new InvalidOperationException("Current owner did not close.");
-        Refuse(() => negative.BeginNativeReturn(pending), "return after close");
-
-        L00CLifecycleShutdownIdentity nextIdentity = L00CLifecycleShutdownIdentity.Create(9, "instance-c", guidB, 1);
-        L00CLifecycleShutdownLease nextLease = negative.Open(nextIdentity);
-        if (negative.Close(lease)) throw new InvalidOperationException("A stale owner closed the newer session.");
-        negative.Arm(nextLease);
-        L00CLifecycleReturnReservation next = negative.PrepareReturn(nextIdentity, guidB, "activated-secondary", secondary, secondary, 2);
-        negative.BeginNativeReturn(next);
-        Refuse(() => negative.BeginNativeReturn(next), "duplicate native return");
-        Refuse(() => negative.PrepareReturn(nextIdentity, guidB, "activated-secondary", secondary, secondary, 2), "second reservation after native boundary");
-        Refuse(() => negative.Arm(nextLease), "rearm after native boundary");
-        if (negative.AbortBeforeNativeReturn(next)) throw new InvalidOperationException("A started native return was rolled back into a replayable state.");
-        if (!negative.Close(nextLease)) throw new InvalidOperationException("New owner was lost after stale close.");
-
-        int primaryReopens = 0;
-        int authorizedReturns = 0;
-        for (int fixtureSequence = 1; fixtureSequence <= 8; fixtureSequence++)
+        int committed=0;
+        for(int iteration=1;iteration<=5;iteration++)
         {
-            bool primaryRole = fixtureSequence == 1 || (fixtureSequence >= 3 && fixtureSequence <= 7);
-            if (fixtureSequence >= 3 && fixtureSequence <= 7) primaryReopens++;
-            string role = primaryRole ? "activated-primary" : "activated-secondary";
-            string path = primaryRole ? primary : secondary;
-            string guid = primaryRole ? guidA : guidB;
-            var state = new L00CLifecycleShutdownState();
-            L00CLifecycleShutdownIdentity current = L00CLifecycleShutdownIdentity.Create(fixtureSequence, "instance-" + fixtureSequence, guid, 1);
-            L00CLifecycleShutdownLease currentLease = state.Open(current);
-            state.Arm(currentLease);
-            L00CLifecycleReturnReservation reservation = state.PrepareReturn(current, guid.ToUpperInvariant(), role, path, path, fixtureSequence);
-            state.BeginNativeReturn(reservation);
-            authorizedReturns++;
-            if (!state.Close(currentLease)) throw new InvalidOperationException("Controlled lifecycle owner did not close.");
+            string guidA=GuidFor(iteration,'a'),guidB=GuidFor(iteration,'b');
+            committed+=RunSession(run,saves,iteration,(iteration-1)*3+1,'a',guidA,true);
+            committed+=RunSession(run,saves,iteration,(iteration-1)*3+2,'a',guidA,false);
+            committed+=RunSession(run,saves,iteration,iteration*3,'b',guidB,true);
         }
-        if (primaryReopens != 5 || authorizedReturns != 8)
-            throw new InvalidOperationException("The lifecycle sequence is not two creations, five primary reopens, and one final secondary reopen.");
+        if(committed!=15)throw new InvalidOperationException("L00-C lifecycle barrier did not commit all fifteen exact sessions.");
+
+        string path=SavePath(saves,run,1,'a'),guid=GuidFor(1,'a');
+        var state=new L00CLifecycleShutdownState();var identity=L00CLifecycleShutdownIdentity.Create(90,"negative",guid);var lease=state.Open(identity);
+        var ready=L00CLifecycleSessionObservation.Ready(run,1,1,path,guid,true);
+        Refuse(()=>state.BindReady(lease,ready),"Ready before stable");state.Arm(lease);state.BindReady(lease,ready);
+        Refuse(()=>state.BindReady(lease,ready),"duplicate Ready");
+        var copiedReady=L00CLifecycleSessionObservation.Ready(run,1,1,path,guid,true);
+        Refuse(()=>state.PrepareReturn(copiedReady,path),"reattributed equal-value callback");
+        var reservation=state.PrepareReturn(ready,path);Refuse(()=>state.PrepareReturn(ready,path),"duplicate reservation");
+        if(!state.AbortBeforeNativeReturn(reservation))throw new InvalidOperationException("L00-C pre-native abort did not cancel its exact reservation.");
+        Refuse(()=>state.BeginNativeReturn(reservation),"aborted reservation");
+        var next=state.PrepareReturn(ready,path);state.BeginNativeReturn(next);Refuse(()=>state.BeginNativeReturn(next),"duplicate native return");
+        if(state.AbortBeforeNativeReturn(next))throw new InvalidOperationException("L00-C started native return was made replayable.");
+        Refuse(()=>state.ConfirmSaveCommitted(next,L00CLifecycleSessionObservation.SaveCommitted(run,1,1,path,guid,true),Proof(path,guid,true)),"commit before server release");
+        if(!state.Close(lease))throw new InvalidOperationException("L00-C current owner did not close.");
+        Refuse(()=>state.Open(L00CLifecycleShutdownIdentity.Create(2,"next-server",GuidFor(1,'b'))),"next Open before SaveCommitted");
+        Refuse(()=>state.BindReady(lease,ready),"event during closing");
+        foreach(int missing in new[]{0,1,2,3})
+        {
+            var proof=new L00CNativeSaveQuitReturnProof(missing!=0,missing!=1,missing!=2,missing!=3,path,guid);
+            Refuse(()=>state.ConfirmSaveCommitted(next,L00CLifecycleSessionObservation.SaveCommitted(run,1,1,path,guid,true),proof),"partial native proof");
+        }
+        var committedObservation=state.ConfirmSaveCommitted(next,L00CLifecycleSessionObservation.SaveCommitted(run,1,1,path,guid,true),Proof(path,guid,true));
+        if(committedObservation.EventKind!=L00CLifecycleEventKind.SaveCommitted)throw new InvalidOperationException("L00-C commit event kind changed.");
+        Refuse(()=>state.ConfirmSaveCommitted(next,committedObservation,Proof(path,guid,true)),"duplicate SaveCommitted");
+        L00CLifecycleShutdownLease successor=state.Open(L00CLifecycleShutdownIdentity.Create(2,"next-server",GuidFor(1,'b')));
+        if(!state.Close(successor))throw new InvalidOperationException("L00-C next Open after SaveCommitted could not close.");
+        foreach(string diagnostic in state.Trace)
+            if(!diagnostic.Contains("run=")||!diagnostic.Contains("iteration=")||!diagnostic.Contains("session=")||!diagnostic.Contains("state=")||!diagnostic.Contains("invariant="))throw new InvalidOperationException("L00-C lifecycle diagnostic omitted identity/state/invariant.");
         return 0;
     }
 
-    private static void Refuse(Action action, string label)
+    private static int RunSession(string run,string saves,int iteration,int ordinal,char slot,string guid,bool isNew)
     {
-        try { action(); }
-        catch (ArgumentException) { return; }
-        catch (InvalidOperationException) { return; }
-        throw new InvalidOperationException("Expected lifecycle refusal: " + label);
+        string path=SavePath(saves,run,iteration,slot);var state=new L00CLifecycleShutdownState();
+        var identity=L00CLifecycleShutdownIdentity.Create(ordinal,"instance-"+ordinal,guid);var lease=state.Open(identity);state.Arm(lease);
+        var ready=L00CLifecycleSessionObservation.Ready(run,iteration,ordinal,path,guid,isNew);state.BindReady(lease,ready);
+        var reservation=state.PrepareReturn(ready,path);state.BeginNativeReturn(reservation);state.Close(lease);
+        state.ConfirmSaveCommitted(reservation,L00CLifecycleSessionObservation.SaveCommitted(run,iteration,ordinal,path,guid,isNew),Proof(path,guid,true));
+        return 1;
     }
+    private static L00CNativeSaveQuitReturnProof Proof(string path,string guid,bool value)=>new(value,value,value,value,path,guid);
+    private static string SavePath(string saves,string run,int iteration,char slot)=>Path.GetFullPath(Path.Combine(saves,"ISRWorldGen-L00C-"+run+"-iteration-"+iteration.ToString("D2")+"-"+slot+".vcdbs"));
+    private static string GuidFor(int iteration,char slot)=>new Guid(iteration,(short)slot,0,new byte[]{1,2,3,4,5,6,7,8}).ToString("D");
+    private static void Refuse(Action action,string label){try{action();}catch(ArgumentException){return;}catch(InvalidOperationException){return;}throw new InvalidOperationException("Expected lifecycle refusal: "+label);}
 }
 #endif

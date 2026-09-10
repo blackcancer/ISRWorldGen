@@ -22,7 +22,7 @@ $increment = $markerType.GetMethod('IncrementFor', [Reflection.BindingFlags]'Ins
 $serialize = $markerType.GetMethod('Serialize', [Reflection.BindingFlags]'Instance, Public')
 if ($null -eq $create -or $null -eq $read -or $null -eq $increment -or $null -eq $serialize) { throw 'The lifecycle marker contract is incomplete.' }
 
-$save = 'lifecycle-save-0001'
+$save = '11111111-1111-1111-1111-111111111111'
 $created = $create.Invoke($null, @($save, 1))
 $payload = [byte[]]$serialize.Invoke($created, @())
 $readBack = $read.Invoke($null, @($payload, $save))
@@ -38,7 +38,11 @@ function Assert-Refused([scriptblock]$Action, [string]$Name) {
     throw "Lifecycle marker accepted invalid case: $Name"
 }
 Assert-Refused { $read.Invoke($null, @([byte[]]@(), $save)) } 'empty-payload'
-Assert-Refused { $read.Invoke($null, @($payload, 'another-save')) } 'wrong-save'
+Assert-Refused { $read.Invoke($null, @($payload, '22222222-2222-2222-2222-222222222222')) } 'copied-to-wrong-save'
+Assert-Refused { $read.Invoke($null, @([Text.Encoding]::UTF8.GetBytes('{'), $save)) } 'corrupt-marker'
+$duplicate = [Text.Encoding]::UTF8.GetBytes(([Text.Encoding]::UTF8.GetString($payload)).Replace('"OpenCount":1','"OpenCount":1,"OpenCount":1'))
+Assert-Refused { $read.Invoke($null, @($duplicate, $save)) } 'duplicate-property'
+Assert-Refused { $increment.Invoke($reopened, @($save)) } 'third-open-counter'
 
 $source = Get-Content -LiteralPath $sourcePath -Raw
 $initializeStart = $source.IndexOf('private void InitializeWorldCore()', [StringComparison]::Ordinal)

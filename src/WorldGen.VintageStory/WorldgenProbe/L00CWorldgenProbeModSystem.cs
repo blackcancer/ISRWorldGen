@@ -64,7 +64,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private L00CLifecycleMarker? lifecycleMarker;
     private L00CLifecycleShutdownIdentity? lifecycleShutdownIdentity;
     private L00CLifecycleShutdownLease? lifecycleShutdownLease;
-    private int lifecycleAttestationSequence;
+    private L00CProbeCallbackOwnerLease? callbackOwnerLease;
     private FixtureSnapshot? preLightingSnapshot;
     private FixtureSnapshot? initialSnapshot;
     private HaloSnapshot? initialHaloSnapshot;
@@ -108,9 +108,14 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             // failure and take the normal initialization fail-closed path instead.
             laboratoryConfigurationFailure = exception;
         }
-        serverApi.Event.InitWorldGenerator(InitializeWorld, WorldType);
-        serverApi.Event.GameWorldSave += OnGameWorldSave;
-        tickListenerId = serverApi.Event.RegisterGameTickListener(OnServerTick, 50);
+        var callbacks = new L00CProbeCallbackOwnerLease(this);
+        callbackOwnerLease = callbacks;
+        serverApi.Event.InitWorldGenerator(callbacks.InitializeWorld, WorldType);
+        callbacks.Ledger.RecordRegistered(L00CLifecycleRegistrationKind.InitWorldGenerator);
+        serverApi.Event.GameWorldSave += callbacks.GameWorldSave;
+        callbacks.Ledger.RecordRegistered(L00CLifecycleRegistrationKind.GameWorldSave);
+        tickListenerId = serverApi.Event.RegisterGameTickListener(callbacks.ServerTick, 50);
+        callbacks.Ledger.RecordRegistered(L00CLifecycleRegistrationKind.Tick);
 
         Log($"L00C_PROBE_READY instance={instanceId} pid={Environment.ProcessId} enabled={config.Enabled} autorun={config.AutoRun} autoshutdown={config.AutoShutdown} autoshutdowndelayms={config.AutoShutdownDelayMilliseconds}");
     }
@@ -336,7 +341,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         RestoreResult priorRestore,
         bool sameHandlerSet)
     {
-        lifecycleShutdownIdentity = L00CLifecycleShutdownIdentity.Create(runId, instanceId, saveGame.SavegameIdentifier, checked(++lifecycleAttestationSequence));
+        lifecycleShutdownIdentity = L00CLifecycleShutdownIdentity.Create(runId, instanceId, saveGame.SavegameIdentifier);
         lifecycleShutdownLease = L00CLifecycleShutdownBarrier.Open(lifecycleShutdownIdentity);
         L00CLifecycleMarker? persisted = ReadLifecycleMarker(saveGame);
         if (saveGame.IsNew)
@@ -351,6 +356,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 return;
             }
             lifecycleMarker = L00CLifecycleMarker.Create(saveGame.SavegameIdentifier, 1);
+            LogLifecycleEvent("MarkerCreated", "new save receives counter 1 and a fresh internal marker", runId,
+                $"marker={lifecycleMarker.MarkerId} guid={lifecycleMarker.SavegameIdentifier} open={lifecycleMarker.OpenCount} isnew=True");
         }
         else
         {
@@ -368,10 +375,14 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 return;
             }
             lifecycleMarker = persisted.IncrementFor(saveGame.SavegameIdentifier);
+            LogLifecycleEvent("MarkerReRead", "reopen re-read the same internal marker and increments exactly once", runId,
+                $"marker={lifecycleMarker.MarkerId} guid={lifecycleMarker.SavegameIdentifier} open={lifecycleMarker.OpenCount} isnew=False");
         }
 
         active = true;
         saveGame.StoreData(LifecycleMarkerKey, lifecycleMarker.Serialize());
+        LogLifecycleEvent("MarkerStaged", "StoreData is staged internal marker data and is not SaveCommitted proof", runId,
+            $"marker={lifecycleMarker.MarkerId} guid={lifecycleMarker.SavegameIdentifier} open={lifecycleMarker.OpenCount} isnew={saveGame.IsNew}");
         LogInventory("lifecycle", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
         Log($"L00C_LIFECYCLE_ACTIVATED instance={instanceId} marker={lifecycleMarker.MarkerId} run={runId} open={lifecycleMarker.OpenCount} isnew={saveGame.IsNew} save={saveGame.SavegameIdentifier} spatial=False requests=0 handlersowned=False");
         ScheduleLifecycleShutdown(runId);
@@ -384,6 +395,9 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
             ? null
             : L00CLifecycleMarker.ReadAndValidate(payload, saveGame.SavegameIdentifier);
     }
+
+    private void LogLifecycleEvent(string state,string invariant,long runId,string detail)
+        => Log($"L00C_LIFECYCLE_EVENT run={runId} iteration=0 session=0 state={state} invariant={Sanitize(invariant)} {detail}");
 
     private void ScheduleLifecycleShutdown(long runId)
     {
@@ -1853,7 +1867,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         else if (Volatile.Read(ref disposalStarted) == 0 && lifecycleMarker is not null)
         {
             RequireApi().WorldManager.SaveGame.StoreData(LifecycleMarkerKey, lifecycleMarker.Serialize());
-            Log($"L00C_LIFECYCLE_MARKER_SAVED instance={instanceId} marker={lifecycleMarker.MarkerId} open={lifecycleMarker.OpenCount}");
+            LogLifecycleEvent("GameWorldSaveStoreData", "native save callback re-staged the marker but does not alone prove SaveCommitted",
+                Volatile.Read(ref worldRunId), $"instance={instanceId} marker={lifecycleMarker.MarkerId} open={lifecycleMarker.OpenCount}");
         }
     }
 
@@ -1998,24 +2013,44 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     {
         Interlocked.Exchange(ref disposalStarted, 1);
         Interlocked.Increment(ref worldRunId);
+        L00CProbeCallbackOwnerLease? callbacks = callbackOwnerLease;
+        callbacks?.BeginClosing();
         CloseLifecycleShutdownBarrier();
         ICoreServerAPI? serverApi = api;
         Exception? disposeFailure = null;
         if (serverApi is not null)
         {
-            try
+            if (callbacks is not null)
             {
-                serverApi.Event.GameWorldSave -= OnGameWorldSave;
-                if (tickListenerId != 0)
+                try { callbacks.Ledger.RecordReleased(L00CLifecycleRegistrationKind.InitWorldGenerator, independentlyUnregistered: false); }
+                catch (Exception exception) { disposeFailure = AppendDisposeFailure(serverApi, disposeFailure, "init-world-generator-release", exception); }
+
+                try
                 {
-                    serverApi.Event.UnregisterGameTickListener(tickListenerId);
-                    tickListenerId = 0;
+                    serverApi.Event.GameWorldSave -= callbacks.GameWorldSave;
+                    callbacks.Ledger.RecordReleased(L00CLifecycleRegistrationKind.GameWorldSave, independentlyUnregistered: true);
                 }
-            }
-            catch (Exception exception)
-            {
-                serverApi.Logger.Error($"L00C_DISPOSE_ERROR instance={instanceId} stage=events type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
-                disposeFailure = exception;
+                catch (Exception exception)
+                {
+                    try { callbacks.Ledger.RecordReleased(L00CLifecycleRegistrationKind.GameWorldSave, independentlyUnregistered: false); } catch { }
+                    disposeFailure = AppendDisposeFailure(serverApi, disposeFailure, "game-world-save-unregister", exception);
+                }
+
+                try
+                {
+                    if (tickListenerId != 0) serverApi.Event.UnregisterGameTickListener(tickListenerId);
+                    tickListenerId = 0;
+                    callbacks.Ledger.RecordReleased(L00CLifecycleRegistrationKind.Tick, independentlyUnregistered: true);
+                }
+                catch (Exception exception)
+                {
+                    try { callbacks.Ledger.RecordReleased(L00CLifecycleRegistrationKind.Tick, independentlyUnregistered: false); } catch { }
+                    disposeFailure = AppendDisposeFailure(serverApi, disposeFailure, "tick-unregister", exception);
+                }
+
+                L00CLifecycleRegistrationSnapshot registrations = callbacks.Ledger.Snapshot();
+                foreach (string diagnostic in registrations.Trace) serverApi.Logger.Notification("L00C_LIFECYCLE_REGISTRATION " + diagnostic);
+                if (!registrations.Complete) disposeFailure = AppendDisposeFailure(serverApi, disposeFailure, "registration-release-proof", new InvalidOperationException("L00-C lifecycle registration release proof is incomplete."));
             }
 
             try
@@ -2059,6 +2094,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         initialSnapshot = null;
         initialHaloSnapshot = null;
         active = false;
+        callbackOwnerLease = null;
         api = null;
         base.Dispose();
 
@@ -2066,6 +2102,12 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         {
             throw new InvalidOperationException("L00-C disposal could not restore its handler ownership exactly.", disposeFailure);
         }
+    }
+
+    private Exception AppendDisposeFailure(ICoreServerAPI serverApi,Exception? prior,string stage,Exception exception)
+    {
+        serverApi.Logger.Error($"L00C_DISPOSE_ERROR instance={instanceId} stage={stage} type={exception.GetType().FullName} message={Sanitize(exception.Message)}");
+        return prior is null ? exception : new AggregateException(prior, exception);
     }
 
     private sealed record ReplacementSpec(
@@ -2088,6 +2130,63 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
     private sealed record FixtureSnapshot(string Hash, int SolidCount, int FluidCount, int FreshCount, int SaltCount, int UnexpectedCount, ushort YMax);
     private sealed record HaloSnapshot(string Hash, int ColumnCount);
     private sealed record PersistedFootprintSnapshot(FixtureSnapshot Fixture, HaloSnapshot Halo);
+
+    private void DispatchLifecycleCallback(L00CLifecycleRegistrationKind kind, Action action)
+    {
+        lock (runGate)
+        {
+            if (Volatile.Read(ref disposalStarted) != 0)
+            {
+                callbackOwnerLease?.Ledger.RecordIgnoredCallback(kind, "callback reached owner after disposal began and was ignored");
+                return;
+            }
+            action();
+        }
+    }
+
+    // Registered delegates retain this small trampoline, never the ModSystem.
+    // Closing clears the only weak owner link before any external unregistration.
+    private sealed class L00CProbeCallbackOwnerLease
+    {
+        private readonly object gate = new();
+        private WeakReference<L00CWorldgenProbeModSystem>? owner;
+        private bool closing;
+
+        internal L00CProbeCallbackOwnerLease(L00CWorldgenProbeModSystem value)
+        {
+            owner = new WeakReference<L00CWorldgenProbeModSystem>(value ?? throw new ArgumentNullException(nameof(value)));
+        }
+
+        internal L00CLifecycleRegistrationLedger Ledger { get; } = new();
+        internal void InitializeWorld() => Dispatch(L00CLifecycleRegistrationKind.InitWorldGenerator, static value => value.InitializeWorld());
+        internal void GameWorldSave() => Dispatch(L00CLifecycleRegistrationKind.GameWorldSave, static value => value.OnGameWorldSave());
+        internal void ServerTick(float deltaTime) => Dispatch(L00CLifecycleRegistrationKind.Tick, value => value.OnServerTick(deltaTime));
+
+        internal void BeginClosing()
+        {
+            lock (gate)
+            {
+                if (closing) return;
+                closing = true;
+                owner = null;
+                Ledger.BeginClosing();
+            }
+        }
+
+        private void Dispatch(L00CLifecycleRegistrationKind kind, Action<L00CWorldgenProbeModSystem> action)
+        {
+            L00CWorldgenProbeModSystem? target;
+            lock (gate)
+            {
+                if (closing || owner is null || !owner.TryGetTarget(out target))
+                {
+                    Ledger.RecordIgnoredCallback(kind, "stale, duplicate, collected, or closing callback did not dispatch");
+                    return;
+                }
+            }
+            target.DispatchLifecycleCallback(kind, () => action(target));
+        }
+    }
 
     private sealed class OwnedHandler
     {
@@ -2246,23 +2345,48 @@ internal sealed class L00CLifecycleMarker
         {
             throw new InvalidOperationException("L00-C lifecycle marker payload is outside the bounded range.");
         }
-        L00CLifecycleMarker marker;
         try
         {
-            marker = JsonSerializer.Deserialize<L00CLifecycleMarker>(payload)
-                ?? throw new InvalidOperationException("L00-C lifecycle marker payload deserialized to null.");
+            using JsonDocument document = JsonDocument.Parse(payload);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException("L00-C lifecycle marker root must be an object.");
+            }
+            var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            {
+                if (!values.TryAdd(property.Name, property.Value.Clone()))
+                {
+                    throw new InvalidOperationException("L00-C lifecycle marker contains a duplicate property.");
+                }
+            }
+            if (values.Count != 4 || !values.ContainsKey(nameof(MarkerId)) || !values.ContainsKey(nameof(SavegameIdentifier)) ||
+                !values.ContainsKey(nameof(MarkerVersion)) || !values.ContainsKey(nameof(OpenCount)) ||
+                values[nameof(MarkerId)].ValueKind != JsonValueKind.String || values[nameof(SavegameIdentifier)].ValueKind != JsonValueKind.String ||
+                values[nameof(MarkerVersion)].ValueKind != JsonValueKind.String || values[nameof(OpenCount)].ValueKind != JsonValueKind.Number ||
+                !values[nameof(OpenCount)].TryGetInt32(out int openCount))
+            {
+                throw new InvalidOperationException("L00-C lifecycle marker fields are missing, unknown, or mistyped.");
+            }
+            var marker = new L00CLifecycleMarker
+            {
+                MarkerId = values[nameof(MarkerId)].GetString() ?? string.Empty,
+                SavegameIdentifier = values[nameof(SavegameIdentifier)].GetString() ?? string.Empty,
+                MarkerVersion = values[nameof(MarkerVersion)].GetString() ?? string.Empty,
+                OpenCount = openCount
+            };
+            if (marker.MarkerVersion != Version || marker.SavegameIdentifier != expectedSavegameIdentifier ||
+                marker.MarkerId.Length != 32 || !marker.MarkerId.All(char.IsAsciiHexDigit) || marker.MarkerId.Any(char.IsUpper))
+            {
+                throw new InvalidOperationException("L00-C lifecycle marker identity is incompatible with this save.");
+            }
+            ValidateIdentity(marker.SavegameIdentifier, marker.OpenCount);
+            return marker;
         }
         catch (JsonException exception)
         {
             throw new InvalidOperationException("L00-C lifecycle marker payload is corrupt or truncated.", exception);
         }
-        if (marker.MarkerVersion != Version || marker.SavegameIdentifier != expectedSavegameIdentifier ||
-            marker.MarkerId.Length != 32 || !marker.MarkerId.All(char.IsAsciiHexDigit))
-        {
-            throw new InvalidOperationException("L00-C lifecycle marker identity is incompatible with this save.");
-        }
-        ValidateIdentity(marker.SavegameIdentifier, marker.OpenCount);
-        return marker;
     }
 
     public L00CLifecycleMarker IncrementFor(string expectedSavegameIdentifier)
@@ -2272,6 +2396,10 @@ internal sealed class L00CLifecycleMarker
             throw new InvalidOperationException("L00-C lifecycle marker cannot be incremented for another save or version.");
         }
         ValidateIdentity(SavegameIdentifier, OpenCount);
+        if (OpenCount != 1)
+        {
+            throw new InvalidOperationException("L00-C lifecycle marker permits exactly one A reopen and never a third open.");
+        }
         return new L00CLifecycleMarker
         {
             MarkerId = MarkerId,
@@ -2281,11 +2409,19 @@ internal sealed class L00CLifecycleMarker
         };
     }
 
-    public byte[] Serialize() => JsonSerializer.SerializeToUtf8Bytes(this);
+    public byte[] Serialize()
+    {
+        ValidateIdentity(SavegameIdentifier, OpenCount);
+        if (MarkerVersion != Version || MarkerId.Length != 32 || !MarkerId.All(value => (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f')))
+        {
+            throw new InvalidOperationException("L00-C lifecycle marker cannot serialize an invalid identity.");
+        }
+        return Encoding.UTF8.GetBytes($"{{\"MarkerId\":\"{MarkerId}\",\"SavegameIdentifier\":\"{SavegameIdentifier}\",\"MarkerVersion\":\"{Version}\",\"OpenCount\":{OpenCount}}}");
+    }
 
     private static void ValidateIdentity(string savegameIdentifier, int openCount)
     {
-        if (string.IsNullOrWhiteSpace(savegameIdentifier) || savegameIdentifier.Length > 128 || openCount <= 0 || openCount >= 1_000_000)
+        if (!Guid.TryParseExact(savegameIdentifier, "D", out Guid parsed) || parsed.ToString("D") != savegameIdentifier || openCount < 1 || openCount > 2)
         {
             throw new InvalidOperationException("L00-C lifecycle marker identity is outside the bounded contract.");
         }
