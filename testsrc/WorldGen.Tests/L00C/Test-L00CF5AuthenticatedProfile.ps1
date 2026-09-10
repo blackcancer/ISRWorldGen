@@ -67,7 +67,8 @@ function New-Fixture([string]$Name) {
     $processes[$vsPid] = [pscustomobject]@{ ProcessId=$vsPid; ParentProcessId=100; Name='devenv.exe'; ExecutablePath='C:\Program Files\Microsoft Visual Studio\devenv.exe'; CommandLine='devenv.exe'; StartTimeUtc=$vsStart.ToString('o'); IsRunning=$true }
     $processes[$mcpPid] = [pscustomobject]@{ ProcessId=$mcpPid; ParentProcessId=$vsPid; Name='CodingWithCalvin.MCPServer.Server.exe'; ExecutablePath='C:\Program Files\Microsoft Visual Studio\MCPServer.exe'; CommandLine='MCPServer.exe'; StartTimeUtc=$vsStart.AddMinutes(1).ToString('o'); IsRunning=$true }
     $query = { param($id) return $processes[[int]$id] }.GetNewClosure()
-    return [pscustomobject]@{ Root=$repository; Solution=$solution; Project=$projectFile; Launch=$launch; User=$user; Game=$game; Laboratory=$laboratory; Processes=$processes; Query=$query; VsStart=$vsStart }
+    $listQuery = { return @($processes.Values) }.GetNewClosure()
+    return [pscustomobject]@{ Root=$repository; Solution=$solution; Project=$projectFile; Launch=$launch; User=$user; Game=$game; Laboratory=$laboratory; Processes=$processes; Query=$query; ListQuery=$listQuery; VsStart=$vsStart }
 }
 
 function Prepare([object]$Fixture, [scriptblock]$Hook = $null) {
@@ -194,6 +195,7 @@ function New-ChildAcquisition(
     [switch]$InProcessExecutableMismatch,
     [switch]$InProcessExtraArgument
 ) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Prepared.BackupDirectory 'pre-launch-intent.json'))) { [void](Begin-Launch $Fixture $Prepared) }
     $metadata = Get-Content -LiteralPath (Join-Path $Prepared.BackupDirectory 'metadata.json') -Raw | ConvertFrom-Json -DateKind String
     $armed = Get-Content -LiteralPath (Join-Path $Prepared.BackupDirectory 'armed.json') -Raw | ConvertFrom-Json -DateKind String
     $started = ([DateTimeOffset]$armed.ArmedUtc).AddSeconds(1)
@@ -238,7 +240,23 @@ function New-ChildAcquisition(
 }
 
 function Acquire([object]$Fixture, [object]$Prepared, [scriptblock]$Hook = $null) {
-    return (& $helper -Action Acquire -SyntheticFixtureRoot $Fixture.Root -BackupDirectory $Prepared.BackupDirectory -TestProcessQuery $Fixture.Query -TestHook $Hook | ConvertFrom-Json)
+    if (-not (Test-Path -LiteralPath (Join-Path $Prepared.BackupDirectory 'pre-launch-intent.json'))) { [void](Begin-Launch $Fixture $Prepared) }
+    return (& $helper -Action Acquire -SyntheticFixtureRoot $Fixture.Root -BackupDirectory $Prepared.BackupDirectory -TestProcessQuery $Fixture.Query -TestProcessListQuery $Fixture.ListQuery -TestHook $Hook | ConvertFrom-Json)
+}
+function Get-TestSeal([object]$Receipt) {
+    $canonical=[ordered]@{}
+    foreach($property in @($Receipt.PSObject.Properties)){if([string]$property.Name -cne 'SealSha256'){$canonical[[string]$property.Name]=$property.Value}}
+    $algorithm=[Security.Cryptography.SHA256]::Create()
+    try{return ([BitConverter]::ToString($algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes(($canonical|ConvertTo-Json -Depth 12 -Compress))))).Replace('-','')}
+    finally{$algorithm.Dispose()}
+}
+
+function Begin-Launch([object]$Fixture, [object]$Prepared, [scriptblock]$Hook = $null) {
+    return (& $helper -Action BeginLaunch -SyntheticFixtureRoot $Fixture.Root -BackupDirectory $Prepared.BackupDirectory -TestProcessQuery $Fixture.Query -TestProcessListQuery $Fixture.ListQuery -TestHook $Hook | ConvertFrom-Json)
+}
+
+function Block-Launch([object]$Fixture, [object]$Prepared, [scriptblock]$Hook = $null) {
+    return (& $helper -Action BlockLaunch -SyntheticFixtureRoot $Fixture.Root -BackupDirectory $Prepared.BackupDirectory -TestProcessQuery $Fixture.Query -TestProcessListQuery $Fixture.ListQuery -TestHook $Hook | ConvertFrom-Json)
 }
 
 try {
@@ -270,6 +288,97 @@ try {
     $good.Processes[$vsPid].IsRunning = $false
     & $helper -Action Recover -SyntheticFixtureRoot $good.Root -BackupDirectory $successor.BackupDirectory -TestProcessQuery $good.Query | Out-Null
     Assert-Bytes $originalLaunch $good.Launch 'Successor recovery launchSettings'; Assert-Bytes $legitimateLaterUser $good.User 'Successor recovery user settings'
+
+    # A debugger_launch refusal before action is itself a durable terminal
+    # outcome.  It contains only closed, non-secret status/provenance fields and
+    # restores both settings files while preserving NOT_RUN (never PASS).
+    $blocked=New-Fixture 'pre-launch-blocked'; $blockedLaunch=Bytes $blocked.Launch; $blockedUser=Bytes $blocked.User; $blockedArm=Arm $blocked (Prepare $blocked)
+    Assert-Refused { Block-Launch $blocked $blockedArm } 'PRE_LAUNCH_INTENT receipt is absent' 'blocked outcome without pre-launch intent'
+    $launchIntent=Begin-Launch $blocked $blockedArm
+    if($launchIntent.Status -cne 'PRE_LAUNCH_INTENT' -or $launchIntent.RuntimeStatus -cne 'NOT_RUN'){throw 'Pre-launch intent did not preserve NOT_RUN.'}
+    $blockedResult=Block-Launch $blocked $blockedArm
+    if($blockedResult.Status -cne 'BLOCKED' -or $blockedResult.RuntimeStatus -cne 'NOT_RUN' -or -not $blockedResult.NoChildProcess -or -not $blockedResult.NoCampaignStarted){throw 'Pre-launch refusal was not sealed as BLOCKED/NOT_RUN with non-start assertions.'}
+    $blockedPath=Join-Path $blockedArm.BackupDirectory 'pre-launch-blocked.json'
+    $blockedReceipt=Get-Content -LiteralPath $blockedPath -Raw | ConvertFrom-Json -DateKind String
+    if([string]$blockedReceipt.RefusalCategory -cne 'MCP_TOOL_REFUSED_BEFORE_ACTION' -or [string]$blockedReceipt.Tool -cne 'mcp__visualstudio__debugger_launch'){throw 'Pre-launch refusal category/tool binding is not exact.'}
+    if([string]$blockedReceipt.DebuggerStatusBefore -cne 'Design' -or [string]$blockedReceipt.DebuggerStatusAfter -cne 'NOT_RUN'){throw 'Sealed refusal did not distinguish attested pre-state from terminal debugger non-run status.'}
+    if([string]$blockedReceipt.Status -ceq 'PASS' -or [string]$blockedReceipt.RuntimeStatus -ceq 'PASS'){throw 'NOT_RUN was transformed into PASS.'}
+    foreach($forbidden in @('Arguments','CommandLine','Environment','Credential','Password','Secret','Nonce')){
+        if($null -ne $blockedReceipt.PSObject.Properties[$forbidden]){throw "Sealed refusal leaked forbidden field $forbidden."}
+    }
+    Assert-Bytes $blockedLaunch $blocked.Launch 'Blocked launchSettings'; Assert-Bytes $blockedUser $blocked.User 'Blocked project user settings'
+    Assert-Refused { Block-Launch $blocked $blockedArm } 'refuses every replay' 'blocked terminal replay'
+    $blockedSuccessor=Prepare $blocked; $blocked.Processes[$vsPid].IsRunning=$false
+    & $helper -Action Recover -SyntheticFixtureRoot $blocked.Root -BackupDirectory $blockedSuccessor.BackupDirectory -TestProcessQuery $blocked.Query | Out-Null
+
+    $blockedCut=New-Fixture 'pre-launch-blocked-publication-cut'; $blockedCutLaunch=Bytes $blockedCut.Launch; $blockedCutUser=Bytes $blockedCut.User; $blockedCutArm=Arm $blockedCut (Prepare $blockedCut); [void](Begin-Launch $blockedCut $blockedCutArm)
+    $cutBlocked={param($point) if($point -eq 'StageAfterFlush:pre-launch-blocked.json'){throw 'cut blocked publication'}}
+    Assert-Refused { Block-Launch $blockedCut $blockedCutArm $cutBlocked } 'cut blocked publication' 'blocked terminal publication cutoff'
+    Assert-Bytes (Bytes (Join-Path $blockedCutArm.BackupDirectory 'launchSettings.intended.bin')) $blockedCut.Launch 'Blocked-cut intended launchSettings'
+    $blockedCut.Processes[$vsPid].IsRunning=$false
+    Assert-Refused { & $helper -Action Recover -SyntheticFixtureRoot $blockedCut.Root -BackupDirectory $blockedCutArm.BackupDirectory -TestProcessQuery $blockedCut.Query } 'must complete BlockLaunch' 'Recover replacing staged blocked terminal'
+    $blockedCutResult=Block-Launch $blockedCut $blockedCutArm
+    if($blockedCutResult.Status -cne 'BLOCKED' -or $blockedCutResult.RuntimeStatus -cne 'NOT_RUN'){throw 'Blocked publication retry did not seal NOT_RUN.'}
+    Assert-Bytes $blockedCutLaunch $blockedCut.Launch 'Blocked-cut launchSettings'; Assert-Bytes $blockedCutUser $blockedCut.User 'Blocked-cut project user settings'
+
+    $beforeRestoreCut=New-Fixture 'pre-launch-before-restore-cut'; $beforeRestoreLaunch=Bytes $beforeRestoreCut.Launch; $beforeRestoreUser=Bytes $beforeRestoreCut.User; $beforeRestoreArm=Arm $beforeRestoreCut (Prepare $beforeRestoreCut); [void](Begin-Launch $beforeRestoreCut $beforeRestoreArm)
+    $cutBeforeRestore={param($point) if($point -eq 'BlockLaunchBeforeRestore'){throw 'cut before refusal restore'}}
+    Assert-Refused { Block-Launch $beforeRestoreCut $beforeRestoreArm $cutBeforeRestore } 'cut before refusal restore' 'blocked cutoff before restoration'
+    [IO.File]::WriteAllBytes($beforeRestoreCut.User,(Bytes (Join-Path $beforeRestoreArm.BackupDirectory 'project.user.original.bin')))
+    $beforeRestoreResult=Block-Launch $beforeRestoreCut $beforeRestoreArm
+    if($beforeRestoreResult.Status -cne 'BLOCKED' -or $beforeRestoreResult.RuntimeStatus -cne 'NOT_RUN'){throw 'Split restoration retry did not preserve BLOCKED/NOT_RUN.'}
+    Assert-Bytes $beforeRestoreLaunch $beforeRestoreCut.Launch 'Split-retry launchSettings'; Assert-Bytes $beforeRestoreUser $beforeRestoreCut.User 'Split-retry project user settings'
+
+    $afterRestoreCut=New-Fixture 'pre-launch-after-restore-cut'; $afterRestoreLaunch=Bytes $afterRestoreCut.Launch; $afterRestoreUser=Bytes $afterRestoreCut.User; $afterRestoreArm=Arm $afterRestoreCut (Prepare $afterRestoreCut); [void](Begin-Launch $afterRestoreCut $afterRestoreArm)
+    $cutAfterRestore={param($point) if($point -eq 'BlockLaunchAfterRestore'){throw 'cut after refusal restore'}}
+    Assert-Refused { Block-Launch $afterRestoreCut $afterRestoreArm $cutAfterRestore } 'cut after refusal restore' 'blocked cutoff after restoration'
+    Assert-Bytes $afterRestoreLaunch $afterRestoreCut.Launch 'After-restore-cut launchSettings'; Assert-Bytes $afterRestoreUser $afterRestoreCut.User 'After-restore-cut project user settings'
+    $afterRestoreResult=Block-Launch $afterRestoreCut $afterRestoreArm
+    if($afterRestoreResult.Status -cne 'BLOCKED' -or $afterRestoreResult.RuntimeStatus -cne 'NOT_RUN'){throw 'Original/original retry did not preserve BLOCKED/NOT_RUN.'}
+
+    $observationCut=New-Fixture 'pre-launch-observation-publication-cut'; $observationCutLaunch=Bytes $observationCut.Launch; $observationCutUser=Bytes $observationCut.User; $observationCutArm=Arm $observationCut (Prepare $observationCut); [void](Begin-Launch $observationCut $observationCutArm)
+    $cutObservation={param($point) if($point -eq 'PublishAfterFlush:pre-launch-refusal-observed.json'){throw 'cut refusal observation publication'}}
+    Assert-Refused { Block-Launch $observationCut $observationCutArm $cutObservation } 'cut refusal observation publication' 'refusal observation publication cutoff'
+    if((Get-FileHash $observationCut.Launch -Algorithm SHA256).Hash -cne (Get-FileHash (Join-Path $observationCutArm.BackupDirectory 'launchSettings.intended.bin') -Algorithm SHA256).Hash){throw 'Observation cutoff restored before durable refusal observation.'}
+    $observationCutResult=Block-Launch $observationCut $observationCutArm
+    if($observationCutResult.Status -cne 'BLOCKED' -or $observationCutResult.RuntimeStatus -cne 'NOT_RUN'){throw 'Observation publication retry did not seal NOT_RUN.'}
+    Assert-Bytes $observationCutLaunch $observationCut.Launch 'Observation-cut launchSettings'; Assert-Bytes $observationCutUser $observationCut.User 'Observation-cut project user settings'
+
+    $missing=New-Fixture 'pre-launch-terminal-missing'; $missingLaunch=Bytes $missing.Launch; $missingUser=Bytes $missing.User; $missingArm=Arm $missing (Prepare $missing); [void](Begin-Launch $missing $missingArm); [void](Block-Launch $missing $missingArm)
+    [IO.File]::Delete((Join-Path $missingArm.BackupDirectory 'pre-launch-blocked.json'))
+    Assert-Refused { Prepare $missing } 'Unresolved F5 transaction' 'missing blocked terminal artifact'
+    Assert-Bytes $missingLaunch $missing.Launch 'Missing-terminal launchSettings'; Assert-Bytes $missingUser $missing.User 'Missing-terminal project user settings'
+
+    $tampered=New-Fixture 'pre-launch-terminal-tampered'; $tamperedLaunch=Bytes $tampered.Launch; $tamperedUser=Bytes $tampered.User; $tamperedArm=Arm $tampered (Prepare $tampered); [void](Begin-Launch $tampered $tamperedArm); [void](Block-Launch $tampered $tamperedArm)
+    $tamperedPath=Join-Path $tamperedArm.BackupDirectory 'pre-launch-blocked.json'; $tamperedOriginal=Get-Content -LiteralPath $tamperedPath -Raw
+    foreach($mutation in @('process-status','boolean-coercion','blocked-time')){
+        $tamperedReceipt=$tamperedOriginal|ConvertFrom-Json -DateKind String
+        if($mutation -ceq 'process-status'){$tamperedReceipt.VisualStudioStatusAfter='STOPPED'}
+        elseif($mutation -ceq 'boolean-coercion'){$tamperedReceipt.NoChildProcess='true'}
+        else{$tamperedReceipt.BlockedUtc=[DateTimeOffset]::UtcNow.AddDays(1).ToString('o')}
+        $tamperedReceipt.SealSha256=Get-TestSeal $tamperedReceipt
+        [IO.File]::WriteAllText($tamperedPath,($tamperedReceipt|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+        Assert-Refused { Prepare $tampered } 'malformed, tampered, replayed, or does not prove NOT_RUN|time is outside' "tampered blocked terminal $mutation"
+    }
+    Assert-Bytes $tamperedLaunch $tampered.Launch 'Tampered-terminal launchSettings'; Assert-Bytes $tamperedUser $tampered.User 'Tampered-terminal project user settings'
+
+    $externallyRestored=New-Fixture 'pre-launch-externally-restored'; $externallyRestoredArm=Arm $externallyRestored (Prepare $externallyRestored); [void](Begin-Launch $externallyRestored $externallyRestoredArm)
+    [IO.File]::WriteAllBytes($externallyRestored.Launch,(Bytes (Join-Path $externallyRestoredArm.BackupDirectory 'launchSettings.original.bin')))
+    [IO.File]::WriteAllBytes($externallyRestored.User,(Bytes (Join-Path $externallyRestoredArm.BackupDirectory 'project.user.original.bin')))
+    Assert-Refused { Block-Launch $externallyRestored $externallyRestoredArm } 'without a durable refusal observation' 'externally restored settings without refusal observation'
+    $externallyRestored.Processes[$vsPid].IsRunning=$false; & $helper -Action Recover -SyntheticFixtureRoot $externallyRestored.Root -BackupDirectory $externallyRestoredArm.BackupDirectory -TestProcessQuery $externallyRestored.Query | Out-Null
+
+    $intentTampered=New-Fixture 'pre-launch-intent-tampered'; $intentTamperedArm=Arm $intentTampered (Prepare $intentTampered); [void](Begin-Launch $intentTampered $intentTamperedArm)
+    $intentTamperedPath=Join-Path $intentTamperedArm.BackupDirectory 'pre-launch-intent.json'; $intentTamperedReceipt=Get-Content -LiteralPath $intentTamperedPath -Raw | ConvertFrom-Json -DateKind String; $intentTamperedReceipt.Tool='unsafe-tool'
+    [IO.File]::WriteAllText($intentTamperedPath,($intentTamperedReceipt|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+    Assert-Refused { Block-Launch $intentTampered $intentTamperedArm } 'malformed, unsafe, or detached' 'tampered pre-launch intent'
+    $intentTampered.Processes[$vsPid].IsRunning=$false; & $helper -Action Recover -SyntheticFixtureRoot $intentTampered.Root -BackupDirectory $intentTamperedArm.BackupDirectory -TestProcessQuery $intentTampered.Query | Out-Null
+
+    $started=New-Fixture 'pre-launch-child-started'; $startedArm=Arm $started (Prepare $started); [void](Begin-Launch $started $startedArm)
+    $started.Processes[$childPid]=[pscustomobject]@{ProcessId=$childPid;ParentProcessId=$vsPid;Name='Vintagestory.exe';ExecutablePath=$started.Game;CommandLine='not serialized';StartTimeUtc=[DateTimeOffset]::UtcNow.ToString('o');IsRunning=$true}
+    Assert-Refused { Block-Launch $started $startedArm } 'detected a launched Vintage Story descendant' 'false no-child assertion'
+    $started.Processes[$childPid].IsRunning=$false; $started.Processes[$vsPid].IsRunning=$false
+    & $helper -Action Recover -SyntheticFixtureRoot $started.Root -BackupDirectory $startedArm.BackupDirectory -TestProcessQuery $started.Query | Out-Null
 
     # No receipt named PREPARED is authoritative. Version 1 material is stale
     # even when it is placed under the current transaction parent.
@@ -344,7 +453,7 @@ try {
     # Early restore and recovery race are fail-closed while the bound VS process
     # can still launch. Once that exact process is stopped, recovery is allowed.
     $unacquired = New-Fixture 'child-not-acquired'; $unacquiredLaunch = Bytes $unacquired.Launch; $unacquiredUser = Bytes $unacquired.User
-    $unacquiredPrepared = Prepare $unacquired; $unacquiredPrepared = Arm $unacquired $unacquiredPrepared
+    $unacquiredPrepared = Prepare $unacquired; $unacquiredPrepared = Arm $unacquired $unacquiredPrepared; [void](Begin-Launch $unacquired $unacquiredPrepared)
     Assert-Refused { & $helper -Action Acquire -SyntheticFixtureRoot $unacquired.Root -BackupDirectory $unacquiredPrepared.BackupDirectory -TestProcessQuery $unacquired.Query } 'has not published' 'child not acquired'
     Assert-Refused { & $helper -Action Restore -SyntheticFixtureRoot $unacquired.Root -BackupDirectory $unacquiredPrepared.BackupDirectory -TestProcessQuery $unacquired.Query } 'forbidden before confirmed' 'early restore'
     Assert-Refused { & $helper -Action Recover -SyntheticFixtureRoot $unacquired.Root -BackupDirectory $unacquiredPrepared.BackupDirectory -TestProcessQuery $unacquired.Query } 'while its bound Visual Studio' 'recovery race with live VS'
@@ -557,9 +666,9 @@ try {
     Assert-Bytes $acquireRaceLaunch $acquireRace.Launch 'Acquire race launchSettings'; Assert-Bytes $acquireRaceUser $acquireRace.User 'Acquire race user settings'
 
     [ordered]@{
-        TestId='L00-C-F5-DEBUG-TRANSACTION-V2'; Status='PASS'; Cases=52
-        StateModel='DIRECTORY_RESERVED -> PREPARE_INTENT -> SETTINGS_PREPARED_FOR_VS -> VISUAL_STUDIO_PROFILE_CONSUMED -> ARMED_FOR_F5 -> CHILD_ACQUIRED -> LAUNCH_ACQUIRED -> RESTORED_AFTER_ACQUISITION; recovery requires bound VS stopped'
-        Proof='atomic durable receipts, exact VS PID/start/MCP parent/solution/startup/GUID/config/profile/hash/executable/arguments/working-directory/environment and saved-state attestation, then child nonce/arguments/debugger/ancestry/start proof before restore'
+        TestId='L00-C-F5-DEBUG-TRANSACTION-V2'; Status='PASS'; RuntimeStatus='NOT_RUN'; Cases=68
+        StateModel='DIRECTORY_RESERVED -> PREPARE_INTENT -> SETTINGS_PREPARED_FOR_VS -> VISUAL_STUDIO_PROFILE_CONSUMED -> ARMED_FOR_F5 -> PRE_LAUNCH_INTENT -> (PRE_LAUNCH_REFUSAL_OBSERVED -> BLOCKED/NOT_RUN | CHILD_ACQUIRED -> LAUNCH_ACQUIRED -> RESTORED_AFTER_ACQUISITION); recovery requires bound VS stopped'
+        Proof='atomic durable receipts, content seals, non-secret debugger_launch refusal observation before restore, exact pre/post/restored hashes, VS/MCP/debugger status, no-child/no-campaign assertions, and absence/tamper/replay rejection; launch success still requires child nonce/arguments/debugger/ancestry/start proof before restore'
         Scope='Synthetic temporary fixtures and process records only; no Visual Studio, F5, AppData, credentials, or game process used.'
     } | ConvertTo-Json -Compress
 }

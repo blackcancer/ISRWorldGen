@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('Prepare', 'Arm', 'Acquire', 'Restore', 'Recover')][string]$Action,
+    [Parameter(Mandatory = $true)][ValidateSet('Prepare', 'Arm', 'BeginLaunch', 'BlockLaunch', 'Acquire', 'Restore', 'Recover')][string]$Action,
     [string]$BackupDirectory,
     [int]$VisualStudioProcessId,
     [string]$ExpectedSolutionPath,
@@ -8,13 +8,14 @@ param(
     [string]$VisualStudioAttestationPath,
     [string]$SyntheticFixtureRoot,
     [scriptblock]$TestProcessQuery,
+    [scriptblock]$TestProcessListQuery,
     [scriptblock]$TestHook
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if (($null -ne $TestProcessQuery -or $null -ne $TestHook) -and -not $SyntheticFixtureRoot) {
+if (($null -ne $TestProcessQuery -or $null -ne $TestProcessListQuery -or $null -ne $TestHook) -and -not $SyntheticFixtureRoot) {
     throw 'Test seams are permitted only with -SyntheticFixtureRoot.'
 }
 
@@ -123,6 +124,12 @@ function Write-NewJson([string]$Path, [object]$Value) {
     Write-NewBytes $Path ([Text.Encoding]::UTF8.GetBytes(($Value | ConvertTo-Json -Depth 12)))
 }
 
+function Write-NewPublishingJson([string]$FinalPath, [object]$Value) {
+    if ((Test-Path -LiteralPath $FinalPath) -or (Test-Path -LiteralPath ($FinalPath + '.publishing'))) { throw "Refusal terminal staging already exists: $FinalPath" }
+    Write-DurableNewBytes ($FinalPath + '.publishing') ([Text.Encoding]::UTF8.GetBytes(($Value | ConvertTo-Json -Depth 12)))
+    Invoke-TestHook ('StageAfterFlush:' + [IO.Path]::GetFileName($FinalPath))
+}
+
 function Clear-PublishingResidue([string]$Path) {
     $publishing = $Path + '.publishing'
     if (-not (Test-Path -LiteralPath $publishing)) { return }
@@ -184,6 +191,67 @@ function Get-ProcessRecord([int]$ProcessId) {
         StartTimeUtc = $process.StartTime.ToUniversalTime().ToString('o')
         IsRunning = $true
     }
+}
+
+function Get-ProcessRecords {
+    if ($null -ne $TestProcessListQuery) { return @(& $TestProcessListQuery) }
+    $records = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($native in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)) {
+        $process = Get-Process -Id ([int]$native.ProcessId) -ErrorAction SilentlyContinue
+        if ($null -eq $process) { continue }
+        try { $started = $process.StartTime.ToUniversalTime().ToString('o') } catch { continue }
+        $executable = if ([string]::IsNullOrWhiteSpace([string]$native.ExecutablePath)) { $null } else { [IO.Path]::GetFullPath([string]$native.ExecutablePath) }
+        [void]$records.Add([pscustomobject]@{
+            ProcessId=[int]$native.ProcessId; ParentProcessId=[int]$native.ParentProcessId; Name=[string]$native.Name
+            ExecutablePath=$executable; StartTimeUtc=$started; IsRunning=$true
+        })
+    }
+    return @($records)
+}
+
+function Get-BoundProcessStatus([object]$Transaction) {
+    $attestation = Read-RequiredJson (Join-Path $Transaction.Directory 'visual-studio-consumed.json') 'Visual Studio DTE/MCP attestation'
+    $vs = Get-ProcessRecord ([int]$Transaction.Metadata.VisualStudio.ProcessId)
+    $mcp = Get-ProcessRecord ([int]$attestation.McpProcessId)
+    $vsRunning = $null -ne $vs -and [bool]$vs.IsRunning
+    $mcpRunning = $null -ne $mcp -and [bool]$mcp.IsRunning
+    if ($vsRunning -and (([DateTimeOffset]$vs.StartTimeUtc).UtcTicks -ne ([DateTimeOffset]$Transaction.Metadata.VisualStudio.StartTimeUtc).UtcTicks -or [string]$vs.Name -cne 'devenv.exe')) {
+        throw 'Bound Visual Studio process identity drifted before launch disposition.'
+    }
+    if ($mcpRunning -and ([int]$mcp.ProcessId -ne [int]$attestation.McpProcessId -or [int]$mcp.ParentProcessId -ne [int]$Transaction.Metadata.VisualStudio.ProcessId -or [string]$mcp.Name -cne 'CodingWithCalvin.MCPServer.Server.exe')) {
+        throw 'Bound MCP process identity drifted before launch disposition.'
+    }
+    return [ordered]@{
+        VisualStudioProcessId=[int]$Transaction.Metadata.VisualStudio.ProcessId
+        VisualStudioStatus=if($vsRunning){'RUNNING'}else{'STOPPED'}
+        McpProcessId=[int]$attestation.McpProcessId
+        McpStatus=if($mcpRunning){'RUNNING'}else{'STOPPED'}
+        DebuggerStatus='Design'
+    }
+}
+
+function Get-LaunchDescendantSummary([object]$Transaction) {
+    $records = @(Get-ProcessRecords | Where-Object { $null -ne $_ -and [bool]$_.IsRunning })
+    $byId = @{}
+    foreach ($record in $records) { $byId[[int]$record.ProcessId] = $record }
+    $identities = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($record in $records) {
+        $name = [IO.Path]::GetFileName([string]$record.Name)
+        if ($name -cne 'Vintagestory.exe' -and $name -cne 'VintagestoryServer.exe') { continue }
+        $cursor = $record
+        $descendant = $false
+        $seen = @{}
+        for ($depth=0; $depth -lt 8; $depth++) {
+            $parentId = [int]$cursor.ParentProcessId
+            if ($parentId -eq [int]$Transaction.Metadata.VisualStudio.ProcessId) { $descendant=$true; break }
+            if ($parentId -le 0 -or $seen.ContainsKey($parentId) -or -not $byId.ContainsKey($parentId)) { break }
+            $seen[$parentId]=$true; $cursor=$byId[$parentId]
+        }
+        if ($descendant) { [void]$identities.Add(('{0}:{1}:{2}' -f [int]$record.ProcessId,[string]$record.StartTimeUtc,$name)) }
+    }
+    $ordered = @($identities | Sort-Object -CaseSensitive)
+    $fingerprint = Get-Sha256 ([Text.Encoding]::UTF8.GetBytes(($ordered -join "`n")))
+    return [ordered]@{ Count=[int]$ordered.Count; Fingerprint=$fingerprint }
 }
 
 function Assert-VisualStudio([int]$ProcessId, [string]$ExpectedStartUtc = '') {
@@ -306,7 +374,7 @@ function Read-RequiredJson([string]$Path, [string]$Label) {
 
 function Get-TerminalPaths([string]$Directory) {
     $paths = @()
-    foreach ($name in @('restored.json','recovered.json','prepare-failed-recovered.json','pre-intent-recovered.json')) {
+    foreach ($name in @('restored.json','recovered.json','prepare-failed-recovered.json','pre-intent-recovered.json','pre-launch-blocked.json')) {
         $path = Join-Path $Directory $name
         if (Test-Path -LiteralPath $path) { $paths += $path }
     }
@@ -510,6 +578,132 @@ function Assert-Armed([object]$Transaction) {
     return $receipt
 }
 
+function Assert-ExactProperties([object]$Value, [string[]]$Expected, [string]$Label) {
+    $actual = @($Value.PSObject.Properties.Name | Sort-Object -CaseSensitive)
+    $wanted = @($Expected | Sort-Object -CaseSensitive)
+    if ($actual.Count -ne $wanted.Count) { throw "$Label has an unexpected field set." }
+    for ($index=0; $index -lt $wanted.Count; $index++) {
+        if ([string]$actual[$index] -cne [string]$wanted[$index]) { throw "$Label has an unexpected field set." }
+    }
+}
+
+function Get-ReceiptSeal([object]$Value) {
+    $canonical = [ordered]@{}
+    foreach ($property in @($Value.PSObject.Properties)) {
+        if ([string]$property.Name -cne 'SealSha256') { $canonical[[string]$property.Name] = $property.Value }
+    }
+    return Get-Sha256 ([Text.Encoding]::UTF8.GetBytes(($canonical | ConvertTo-Json -Depth 12 -Compress)))
+}
+
+function Add-ReceiptSeal([Collections.IDictionary]$Value) {
+    $Value['SealSha256'] = Get-Sha256 ([Text.Encoding]::UTF8.GetBytes(($Value | ConvertTo-Json -Depth 12 -Compress)))
+    return $Value
+}
+
+function Get-ValidatedUtc([object]$Value, [string]$Label) {
+    if ($Value -isnot [string]) { throw "$Label must be an ISO UTC string." }
+    try { $parsed = [DateTimeOffset]::ParseExact([string]$Value, 'o', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
+    catch { throw "$Label must be an exact round-trip timestamp." }
+    if ($parsed.Offset -ne [TimeSpan]::Zero) { throw "$Label must be UTC." }
+    return $parsed
+}
+
+function Assert-LaunchIntent([object]$Transaction) {
+    $path = Join-Path $Transaction.Directory 'pre-launch-intent.json'
+    $receipt = Read-RequiredJson $path 'PRE_LAUNCH_INTENT receipt'
+    Assert-ExactProperties $receipt @(
+        'SchemaVersion','Protocol','Status','TransactionId','MetadataSha256','ArmedReceiptSha256','VisualStudioAttestationSha256','Tool',
+        'DebuggerStatus','VisualStudioProcessId','VisualStudioStatus','McpProcessId','McpStatus','LaunchSettingsPreSha256',
+        'ProjectUserSettingsPreSha256','DescendantCountPre','DescendantFingerprintPre','NoChildProcess','NoCampaignStarted','IntentUtc','SealSha256'
+    ) 'PRE_LAUNCH_INTENT receipt'
+    if ([int]$receipt.SchemaVersion -ne 2 -or [string]$receipt.Protocol -cne $Protocol -or [string]$receipt.Status -cne 'PRE_LAUNCH_INTENT' -or
+        [string]$receipt.TransactionId -cne [string]$Transaction.Metadata.TransactionId -or [string]$receipt.MetadataSha256 -cne (Get-FileSha256 $Transaction.MetadataPath) -or
+        [string]$receipt.ArmedReceiptSha256 -cne (Get-FileSha256 (Join-Path $Transaction.Directory 'armed.json')) -or
+        [string]$receipt.VisualStudioAttestationSha256 -cne (Get-FileSha256 (Join-Path $Transaction.Directory 'visual-studio-consumed.json')) -or
+        [string]$receipt.Tool -cne 'mcp__visualstudio__debugger_launch' -or [string]$receipt.DebuggerStatus -cne 'Design' -or
+        [int]$receipt.VisualStudioProcessId -ne [int]$Transaction.Metadata.VisualStudio.ProcessId -or [string]$receipt.VisualStudioStatus -cne 'RUNNING' -or
+        [int]$receipt.McpProcessId -ne [int](Read-RequiredJson (Join-Path $Transaction.Directory 'visual-studio-consumed.json') 'Visual Studio DTE/MCP attestation').McpProcessId -or
+        [string]$receipt.McpStatus -cne 'RUNNING' -or [string]$receipt.LaunchSettingsPreSha256 -cne [string]$Transaction.Metadata.IntendedSha256 -or
+        [string]$receipt.ProjectUserSettingsPreSha256 -cne [string]$Transaction.Metadata.ProjectUserIntendedSha256 -or
+        [int]$receipt.DescendantCountPre -ne 0 -or [string]$receipt.DescendantFingerprintPre -notmatch '^[A-F0-9]{64}$' -or
+        $receipt.NoChildProcess -isnot [bool] -or -not $receipt.NoChildProcess -or $receipt.NoCampaignStarted -isnot [bool] -or -not $receipt.NoCampaignStarted -or
+        [string]$receipt.SealSha256 -cne (Get-ReceiptSeal $receipt)) {
+        throw 'PRE_LAUNCH_INTENT receipt is malformed, unsafe, or detached from the armed transaction.'
+    }
+    $intentUtc = Get-ValidatedUtc $receipt.IntentUtc 'PRE_LAUNCH_INTENT IntentUtc'
+    $armed = Read-RequiredJson (Join-Path $Transaction.Directory 'armed.json') 'ARMED_FOR_F5 receipt'
+    if ($intentUtc -lt (Get-ValidatedUtc $armed.ArmedUtc 'ARMED_FOR_F5 ArmedUtc') -or $intentUtc -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { throw 'PRE_LAUNCH_INTENT time is outside the armed interval.' }
+    return $receipt
+}
+
+function Assert-RefusalObservation([object]$Transaction, [string]$Path = '') {
+    $path = if ([string]::IsNullOrWhiteSpace($Path)) { Join-Path $Transaction.Directory 'pre-launch-refusal-observed.json' } else { $Path }
+    $receipt = Read-RequiredJson $path 'PRE_LAUNCH_REFUSAL_OBSERVED receipt'
+    Assert-ExactProperties $receipt @(
+        'SchemaVersion','Protocol','Status','RuntimeStatus','RefusalCategory','Tool','TransactionId','LaunchIntentSha256',
+        'VisualStudioProcessId','VisualStudioStatus','McpProcessId','McpStatus','DebuggerStatus','LaunchSettingsPostRefusalSha256',
+        'ProjectUserSettingsPostRefusalSha256','DescendantCount','DescendantFingerprint','NoChildProcess','NoCampaignStarted','ObservedUtc','SealSha256'
+    ) 'PRE_LAUNCH_REFUSAL_OBSERVED receipt'
+    $intent = Assert-LaunchIntent $Transaction
+    if ([int]$receipt.SchemaVersion -ne 2 -or [string]$receipt.Protocol -cne $Protocol -or [string]$receipt.Status -cne 'PRE_LAUNCH_REFUSAL_OBSERVED' -or
+        [string]$receipt.RuntimeStatus -cne 'NOT_RUN' -or [string]$receipt.RefusalCategory -cne 'MCP_TOOL_REFUSED_BEFORE_ACTION' -or
+        [string]$receipt.Tool -cne 'mcp__visualstudio__debugger_launch' -or [string]$receipt.TransactionId -cne [string]$Transaction.Metadata.TransactionId -or
+        [string]$receipt.LaunchIntentSha256 -cne (Get-FileSha256 (Join-Path $Transaction.Directory 'pre-launch-intent.json')) -or
+        [int]$receipt.VisualStudioProcessId -ne [int]$intent.VisualStudioProcessId -or
+        ([string]$receipt.VisualStudioStatus -cne 'RUNNING' -and [string]$receipt.VisualStudioStatus -cne 'STOPPED') -or
+        [int]$receipt.McpProcessId -ne [int]$intent.McpProcessId -or ([string]$receipt.McpStatus -cne 'RUNNING' -and [string]$receipt.McpStatus -cne 'STOPPED') -or
+        [string]$receipt.DebuggerStatus -cne 'NOT_RUN' -or [string]$receipt.LaunchSettingsPostRefusalSha256 -cne [string]$Transaction.Metadata.IntendedSha256 -or
+        [string]$receipt.ProjectUserSettingsPostRefusalSha256 -cne [string]$Transaction.Metadata.ProjectUserIntendedSha256 -or [int]$receipt.DescendantCount -ne 0 -or
+        [string]$receipt.DescendantFingerprint -cne [string]$intent.DescendantFingerprintPre -or $receipt.NoChildProcess -isnot [bool] -or -not $receipt.NoChildProcess -or
+        $receipt.NoCampaignStarted -isnot [bool] -or -not $receipt.NoCampaignStarted -or [string]$receipt.SealSha256 -cne (Get-ReceiptSeal $receipt)) {
+        throw 'PRE_LAUNCH_REFUSAL_OBSERVED receipt is malformed, tampered, or detached.'
+    }
+    $observedUtc = Get-ValidatedUtc $receipt.ObservedUtc 'PRE_LAUNCH_REFUSAL_OBSERVED ObservedUtc'
+    if ($observedUtc -lt (Get-ValidatedUtc $intent.IntentUtc 'PRE_LAUNCH_INTENT IntentUtc') -or $observedUtc -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { throw 'PRE_LAUNCH_REFUSAL_OBSERVED time is outside the launch interval.' }
+    return $receipt
+}
+
+function Assert-BlockedReceipt([object]$Transaction, [object]$Receipt) {
+    Assert-ExactProperties $Receipt @(
+        'SchemaVersion','Protocol','Status','RuntimeStatus','RefusalCategory','Tool','TransactionId','MetadataSha256','ArmedReceiptSha256',
+        'VisualStudioAttestationSha256','LaunchIntentSha256','RefusalObservationSha256','DebuggerStatusBefore','DebuggerStatusAfter','VisualStudioProcessId',
+        'VisualStudioStatusBefore','VisualStudioStatusAfter','McpProcessId','McpStatusBefore','McpStatusAfter','LaunchSettingsPreSha256',
+        'LaunchSettingsPostRefusalSha256','ProjectUserSettingsPreSha256','ProjectUserSettingsPostRefusalSha256','RestoredLaunchSettingsSha256',
+        'RestoredProjectUserSettingsSha256','DescendantCountBefore','DescendantFingerprintBefore','DescendantCountAfter','DescendantFingerprintAfter',
+        'NoChildProcess','NoCampaignStarted','BlockedUtc','SealSha256'
+    ) 'PRE_LAUNCH_BLOCKED terminal receipt'
+    $intent = Assert-LaunchIntent $Transaction
+    $observation = Assert-RefusalObservation $Transaction
+    if ([int]$Receipt.SchemaVersion -ne 2 -or [string]$Receipt.Protocol -cne $Protocol -or [string]$Receipt.Status -cne 'BLOCKED' -or
+        [string]$Receipt.RuntimeStatus -cne 'NOT_RUN' -or [string]$Receipt.RefusalCategory -cne 'MCP_TOOL_REFUSED_BEFORE_ACTION' -or
+        [string]$Receipt.Tool -cne 'mcp__visualstudio__debugger_launch' -or [string]$Receipt.TransactionId -cne [string]$Transaction.Metadata.TransactionId -or
+        [string]$Receipt.MetadataSha256 -cne (Get-FileSha256 $Transaction.MetadataPath) -or [string]$Receipt.ArmedReceiptSha256 -cne (Get-FileSha256 (Join-Path $Transaction.Directory 'armed.json')) -or
+        [string]$Receipt.VisualStudioAttestationSha256 -cne (Get-FileSha256 (Join-Path $Transaction.Directory 'visual-studio-consumed.json')) -or
+        [string]$Receipt.LaunchIntentSha256 -cne (Get-FileSha256 (Join-Path $Transaction.Directory 'pre-launch-intent.json')) -or
+        [string]$Receipt.RefusalObservationSha256 -cne (Get-FileSha256 (Join-Path $Transaction.Directory 'pre-launch-refusal-observed.json')) -or
+        [string]$Receipt.DebuggerStatusBefore -cne 'Design' -or [string]$Receipt.DebuggerStatusAfter -cne 'NOT_RUN' -or
+        [int]$Receipt.VisualStudioProcessId -ne [int]$intent.VisualStudioProcessId -or [string]$Receipt.VisualStudioStatusBefore -cne [string]$intent.VisualStudioStatus -or
+        [string]$Receipt.VisualStudioStatusAfter -cne [string]$observation.VisualStudioStatus -or
+        [int]$Receipt.McpProcessId -ne [int]$intent.McpProcessId -or [string]$Receipt.McpStatusBefore -cne [string]$intent.McpStatus -or
+        [string]$Receipt.McpStatusAfter -cne [string]$observation.McpStatus -or
+        [string]$Receipt.LaunchSettingsPreSha256 -cne [string]$intent.LaunchSettingsPreSha256 -or
+        [string]$Receipt.LaunchSettingsPostRefusalSha256 -cne [string]$observation.LaunchSettingsPostRefusalSha256 -or
+        [string]$Receipt.ProjectUserSettingsPreSha256 -cne [string]$intent.ProjectUserSettingsPreSha256 -or
+        [string]$Receipt.ProjectUserSettingsPostRefusalSha256 -cne [string]$observation.ProjectUserSettingsPostRefusalSha256 -or
+        [string]$Receipt.RestoredLaunchSettingsSha256 -cne [string]$Transaction.Metadata.OriginalSha256 -or
+        [string]$Receipt.RestoredProjectUserSettingsSha256 -cne [string]$Transaction.Metadata.ProjectUserOriginalSha256 -or
+        [int]$Receipt.DescendantCountBefore -ne 0 -or [string]$Receipt.DescendantFingerprintBefore -cne [string]$observation.DescendantFingerprint -or
+        [int]$Receipt.DescendantCountAfter -ne 0 -or [string]$Receipt.DescendantFingerprintAfter -cne [string]$intent.DescendantFingerprintPre -or
+        $Receipt.NoChildProcess -isnot [bool] -or -not $Receipt.NoChildProcess -or $Receipt.NoCampaignStarted -isnot [bool] -or -not $Receipt.NoCampaignStarted -or
+        [string]$Receipt.SealSha256 -cne (Get-ReceiptSeal $Receipt) -or
+        (Test-Path -LiteralPath (Join-Path $Transaction.Directory 'child-acquisition.json')) -or (Test-Path -LiteralPath (Join-Path $Transaction.Directory 'acquired.json'))) {
+        throw 'Prior pre-launch refusal terminal is malformed, tampered, replayed, or does not prove NOT_RUN.'
+    }
+    $blockedUtc = Get-ValidatedUtc $Receipt.BlockedUtc 'PRE_LAUNCH_BLOCKED BlockedUtc'
+    if ($blockedUtc -lt (Get-ValidatedUtc $observation.ObservedUtc 'PRE_LAUNCH_REFUSAL_OBSERVED ObservedUtc') -or $blockedUtc -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { throw 'PRE_LAUNCH_BLOCKED time is outside the refusal interval.' }
+    return $Receipt
+}
+
 function Assert-Acquired([object]$Transaction) {
     $path = Join-Path $Transaction.Directory 'acquired.json'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Restore is forbidden before confirmed launch acquisition.' }
@@ -531,7 +725,7 @@ function Assert-TerminalTransaction([string]$Directory) {
     $receipt = Read-RequiredJson $found[0] 'Prior F5 transaction terminal receipt'
     $isPreIntent = [IO.Path]::GetFileName($found[0]) -ceq 'pre-intent-recovered.json'
     if ($isPreIntent) {
-        foreach ($name in @('metadata.json','settings-prepared.json','visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
+        foreach ($name in @('metadata.json','settings-prepared.json','visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','pre-launch-intent.json','pre-launch-refusal-observed.json','child-acquisition.json','acquired.json')) {
             if (Test-Path -LiteralPath (Join-Path $envelopeTransaction.Directory $name)) { throw 'Pre-intent terminal cannot coexist with a later transaction state.' }
         }
         if ([int]$receipt.SchemaVersion -ne 2 -or [string]$receipt.Protocol -cne $Protocol -or [string]$receipt.Status -cne 'PRE_INTENT_RECOVERED' -or
@@ -542,6 +736,11 @@ function Assert-TerminalTransaction([string]$Directory) {
         return
     }
     $transaction = Read-ValidatedTransaction $Directory
+    $terminalName = [IO.Path]::GetFileName($found[0])
+    if ($terminalName -ceq 'pre-launch-blocked.json') {
+        [void](Assert-BlockedReceipt $transaction $receipt)
+        return
+    }
     $expected = @{
         'restored.json'='RESTORED_AFTER_ACQUISITION'; 'recovered.json'='RECOVERED_WITH_BOUND_VS_STOPPED'; 'prepare-failed-recovered.json'='PREPARE_FAILED_RECOVERED'
     }[[IO.Path]::GetFileName($found[0])]
@@ -550,7 +749,6 @@ function Assert-TerminalTransaction([string]$Directory) {
         [string]$receipt.OriginalSha256 -cne [string]$transaction.Metadata.OriginalSha256 -or [string]$receipt.ProjectUserOriginalSha256 -cne [string]$transaction.Metadata.ProjectUserOriginalSha256) {
         throw 'Prior F5 transaction terminal receipt is malformed or detached.'
     }
-    $terminalName = [IO.Path]::GetFileName($found[0])
     if ($terminalName -ceq 'restored.json') {
         [void](Assert-Acquired $transaction)
     }
@@ -558,7 +756,7 @@ function Assert-TerminalTransaction([string]$Directory) {
         if (Test-Path -LiteralPath (Join-Path $transaction.Directory 'acquired.json')) { throw 'Recovered terminal cannot coexist with launch acquisition.' }
     }
     else {
-        foreach ($name in @('visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
+        foreach ($name in @('visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','pre-launch-intent.json','pre-launch-refusal-observed.json','child-acquisition.json','acquired.json')) {
             if (Test-Path -LiteralPath (Join-Path $transaction.Directory $name)) { throw 'Prepare-failure terminal cannot coexist with a later transaction state.' }
         }
     }
@@ -847,7 +1045,7 @@ try {
             [string]$prepared.LaunchSettingsSha256 -cne [string]$metadata.IntendedSha256 -or [string]$prepared.ProjectUserSettingsSha256 -cne [string]$metadata.ProjectUserIntendedSha256) {
             throw 'SETTINGS_PREPARED_FOR_VS receipt is malformed or detached.'
         }
-        if ((Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'armed.json')) -or (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'child-acquisition.json')) -or (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'acquired.json'))) {
+        if ((Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'armed.json')) -or (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'pre-launch-intent.json')) -or (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'child-acquisition.json')) -or (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'acquired.json'))) {
             throw 'Arm refuses a transaction that is already armed or has launch evidence.'
         }
         if ((Get-CurrentState $launchSettings ([string]$metadata.OriginalSha256) ([string]$metadata.IntendedSha256) 'launchSettings.json') -ne 'INTENDED' -or
@@ -869,8 +1067,118 @@ try {
         return
     }
 
+    if ($Action -eq 'BeginLaunch') {
+        [void](Assert-Armed $currentTransaction)
+        foreach ($name in @('pre-launch-intent.json','child-acquisition.json','acquired.json')) {
+            if (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory $name)) { throw 'BeginLaunch refuses replay or existing launch evidence.' }
+        }
+        if ((Get-CurrentState $launchSettings ([string]$metadata.OriginalSha256) ([string]$metadata.IntendedSha256) 'launchSettings.json') -ne 'INTENDED' -or
+            (Get-CurrentState $projectUserSettings ([string]$metadata.ProjectUserOriginalSha256) ([string]$metadata.ProjectUserIntendedSha256) 'WorldGen.VintageStory.csproj.user') -ne 'INTENDED') {
+            throw 'BeginLaunch requires both exact intended settings.'
+        }
+        $status = Get-BoundProcessStatus $currentTransaction
+        if ([string]$status.VisualStudioStatus -cne 'RUNNING' -or [string]$status.McpStatus -cne 'RUNNING') { throw 'BeginLaunch requires the attested Visual Studio and MCP processes to be running.' }
+        $descendants = Get-LaunchDescendantSummary $currentTransaction
+        if ([int]$descendants.Count -ne 0) { throw 'BeginLaunch detected an existing Vintage Story descendant of the bound Visual Studio process.' }
+        $intentPath = Join-Path $currentTransaction.Directory 'pre-launch-intent.json'
+        Clear-PublishingResidue $intentPath
+        Invoke-TestHook 'BeginLaunchBeforePublish'
+        $intentReceipt = [ordered]@{
+            SchemaVersion=2; Protocol=$Protocol; Status='PRE_LAUNCH_INTENT'; TransactionId=[string]$metadata.TransactionId
+            MetadataSha256=Get-FileSha256 $currentTransaction.MetadataPath; ArmedReceiptSha256=Get-FileSha256 (Join-Path $currentTransaction.Directory 'armed.json')
+            VisualStudioAttestationSha256=Get-FileSha256 (Join-Path $currentTransaction.Directory 'visual-studio-consumed.json')
+            Tool='mcp__visualstudio__debugger_launch'; DebuggerStatus='Design'; VisualStudioProcessId=[int]$status.VisualStudioProcessId
+            VisualStudioStatus=[string]$status.VisualStudioStatus; McpProcessId=[int]$status.McpProcessId; McpStatus=[string]$status.McpStatus
+            LaunchSettingsPreSha256=[string]$metadata.IntendedSha256; ProjectUserSettingsPreSha256=[string]$metadata.ProjectUserIntendedSha256
+            DescendantCountPre=[int]$descendants.Count; DescendantFingerprintPre=[string]$descendants.Fingerprint
+            NoChildProcess=$true; NoCampaignStarted=$true; IntentUtc=[DateTimeOffset]::UtcNow.ToString('o')
+        }
+        Write-NewJson $intentPath (Add-ReceiptSeal $intentReceipt)
+        [ordered]@{ Status='PRE_LAUNCH_INTENT'; RuntimeStatus='NOT_RUN'; TransactionId=[string]$metadata.TransactionId; BackupDirectory=$currentTransaction.Directory; Tool='mcp__visualstudio__debugger_launch' } | ConvertTo-Json -Compress
+        return
+    }
+
+    if ($Action -eq 'BlockLaunch') {
+        $intent = Assert-LaunchIntent $currentTransaction
+        foreach ($name in @('child-acquisition.json','child-acquisition.json.publishing','acquired.json','acquired.json.publishing')) {
+            if (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory $name)) { throw 'BlockLaunch refuses because child or acquisition evidence exists.' }
+        }
+        $launchState = Get-CurrentState $launchSettings ([string]$metadata.OriginalSha256) ([string]$metadata.IntendedSha256) 'launchSettings.json'
+        $userState = Get-CurrentState $projectUserSettings ([string]$metadata.ProjectUserOriginalSha256) ([string]$metadata.ProjectUserIntendedSha256) 'WorldGen.VintageStory.csproj.user'
+        $blockedPath = Join-Path $currentTransaction.Directory 'pre-launch-blocked.json'
+        $blockedPublishingPath = $blockedPath + '.publishing'
+        $observationPath = Join-Path $currentTransaction.Directory 'pre-launch-refusal-observed.json'
+        $observationPublishingPath = $observationPath + '.publishing'
+        if (Test-Path -LiteralPath $observationPath -PathType Leaf) {
+            $observation = Assert-RefusalObservation $currentTransaction
+        }
+        elseif (Test-Path -LiteralPath $observationPublishingPath -PathType Leaf) {
+            Assert-PhysicalFile $observationPublishingPath 'PRE_LAUNCH_REFUSAL_OBSERVED publication residue'
+            [void](Assert-RefusalObservation $currentTransaction $observationPublishingPath)
+            [IO.File]::Move($observationPublishingPath, $observationPath)
+            $observation = Assert-RefusalObservation $currentTransaction
+        }
+        else {
+            if ($launchState -cne 'INTENDED' -or $userState -cne 'INTENDED') { throw 'BlockLaunch refuses restored or split settings without a durable refusal observation.' }
+            $statusAfterRefusal = Get-BoundProcessStatus $currentTransaction
+            $beforeRestore = Get-LaunchDescendantSummary $currentTransaction
+            if ([int]$beforeRestore.Count -ne 0) { throw 'BlockLaunch detected a launched Vintage Story descendant.' }
+            $launchPostRefusal = Get-FileSha256 $launchSettings
+            $userPostRefusal = Get-FileSha256 $projectUserSettings
+            $observationReceipt = [ordered]@{
+                SchemaVersion=2; Protocol=$Protocol; Status='PRE_LAUNCH_REFUSAL_OBSERVED'; RuntimeStatus='NOT_RUN'; RefusalCategory='MCP_TOOL_REFUSED_BEFORE_ACTION'
+                Tool='mcp__visualstudio__debugger_launch'; TransactionId=[string]$metadata.TransactionId; LaunchIntentSha256=Get-FileSha256 (Join-Path $currentTransaction.Directory 'pre-launch-intent.json')
+                VisualStudioProcessId=[int]$intent.VisualStudioProcessId; VisualStudioStatus=[string]$statusAfterRefusal.VisualStudioStatus
+                McpProcessId=[int]$intent.McpProcessId; McpStatus=[string]$statusAfterRefusal.McpStatus; DebuggerStatus='NOT_RUN'
+                LaunchSettingsPostRefusalSha256=$launchPostRefusal; ProjectUserSettingsPostRefusalSha256=$userPostRefusal
+                DescendantCount=[int]$beforeRestore.Count; DescendantFingerprint=[string]$beforeRestore.Fingerprint
+                NoChildProcess=$true; NoCampaignStarted=$true; ObservedUtc=[DateTimeOffset]::UtcNow.ToString('o')
+            }
+            Invoke-TestHook 'BlockLaunchBeforeObservationPublish'
+            Write-NewJson $observationPath (Add-ReceiptSeal $observationReceipt)
+            $observation = Assert-RefusalObservation $currentTransaction
+        }
+        if (Test-Path -LiteralPath $blockedPublishingPath -PathType Leaf) {
+            Assert-PhysicalFile $blockedPublishingPath 'PRE_LAUNCH_BLOCKED publication residue'
+            [void](Assert-BlockedReceipt $currentTransaction (Read-RequiredJson $blockedPublishingPath 'Flushed PRE_LAUNCH_BLOCKED receipt'))
+        }
+        else {
+            if ($launchState -cne 'INTENDED' -or $userState -cne 'INTENDED') { throw 'BlockLaunch refuses restored or split settings without the previously flushed refusal terminal.' }
+            $blockedReceipt = [ordered]@{
+                SchemaVersion=2; Protocol=$Protocol; Status='BLOCKED'; RuntimeStatus='NOT_RUN'; RefusalCategory='MCP_TOOL_REFUSED_BEFORE_ACTION'
+                Tool='mcp__visualstudio__debugger_launch'; TransactionId=[string]$metadata.TransactionId; MetadataSha256=Get-FileSha256 $currentTransaction.MetadataPath
+                ArmedReceiptSha256=Get-FileSha256 (Join-Path $currentTransaction.Directory 'armed.json'); VisualStudioAttestationSha256=Get-FileSha256 (Join-Path $currentTransaction.Directory 'visual-studio-consumed.json')
+                LaunchIntentSha256=Get-FileSha256 (Join-Path $currentTransaction.Directory 'pre-launch-intent.json'); RefusalObservationSha256=Get-FileSha256 $observationPath
+                DebuggerStatusBefore='Design'; DebuggerStatusAfter='NOT_RUN'
+                VisualStudioProcessId=[int]$intent.VisualStudioProcessId; VisualStudioStatusBefore=[string]$intent.VisualStudioStatus; VisualStudioStatusAfter=[string]$observation.VisualStudioStatus
+                McpProcessId=[int]$intent.McpProcessId; McpStatusBefore=[string]$intent.McpStatus; McpStatusAfter=[string]$observation.McpStatus
+                LaunchSettingsPreSha256=[string]$intent.LaunchSettingsPreSha256; LaunchSettingsPostRefusalSha256=[string]$observation.LaunchSettingsPostRefusalSha256
+                ProjectUserSettingsPreSha256=[string]$intent.ProjectUserSettingsPreSha256; ProjectUserSettingsPostRefusalSha256=[string]$observation.ProjectUserSettingsPostRefusalSha256
+                RestoredLaunchSettingsSha256=[string]$metadata.OriginalSha256; RestoredProjectUserSettingsSha256=[string]$metadata.ProjectUserOriginalSha256
+                DescendantCountBefore=[int]$observation.DescendantCount; DescendantFingerprintBefore=[string]$observation.DescendantFingerprint
+                DescendantCountAfter=0; DescendantFingerprintAfter=[string]$intent.DescendantFingerprintPre
+                NoChildProcess=$true; NoCampaignStarted=$true; BlockedUtc=[DateTimeOffset]::UtcNow.ToString('o')
+            }
+            Write-NewPublishingJson $blockedPath (Add-ReceiptSeal $blockedReceipt)
+            [void](Assert-BlockedReceipt $currentTransaction (Read-RequiredJson $blockedPublishingPath 'Flushed PRE_LAUNCH_BLOCKED receipt'))
+        }
+        Invoke-TestHook 'BlockLaunchBeforeRestore'
+        Restore-TransactionBytes $currentTransaction 'BlockLaunchUserAfterTruncate' 'BlockLaunchSettingsAfterTruncate'
+        $afterRestore = Get-LaunchDescendantSummary $currentTransaction
+        if ([int]$afterRestore.Count -ne 0 -or [string]$afterRestore.Fingerprint -cne [string]$intent.DescendantFingerprintPre) { throw 'BlockLaunch detected a Vintage Story descendant during restoration.' }
+        Invoke-TestHook 'BlockLaunchAfterRestore'
+        [void](Assert-BlockedReceipt $currentTransaction (Read-RequiredJson $blockedPublishingPath 'Flushed PRE_LAUNCH_BLOCKED receipt'))
+        [IO.File]::Move($blockedPublishingPath, $blockedPath)
+        [ordered]@{ Status='BLOCKED'; RuntimeStatus='NOT_RUN'; RefusalCategory='MCP_TOOL_REFUSED_BEFORE_ACTION'; TransactionId=[string]$metadata.TransactionId; BackupDirectory=$currentTransaction.Directory; NoChildProcess=$true; NoCampaignStarted=$true } | ConvertTo-Json -Compress
+        return
+    }
+
     if ($Action -eq 'Acquire') {
         $armed = Assert-Armed $currentTransaction
+        [void](Assert-LaunchIntent $currentTransaction)
+        if ((Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'pre-launch-refusal-observed.json')) -or (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'pre-launch-refusal-observed.json.publishing'))) {
+            throw 'Acquire refuses after a pre-launch refusal observation.'
+        }
         $launchState = Get-CurrentState $launchSettings ([string]$metadata.OriginalSha256) ([string]$metadata.IntendedSha256) 'launchSettings.json'
         $userState = Get-CurrentState $projectUserSettings ([string]$metadata.ProjectUserOriginalSha256) ([string]$metadata.ProjectUserIntendedSha256) 'WorldGen.VintageStory.csproj.user'
         if ($launchState -ne 'INTENDED' -or $userState -ne 'INTENDED') { throw 'F5 settings are not both intended at launch acquisition.' }
@@ -904,7 +1212,7 @@ try {
 
     if ($Action -eq 'Restore') {
         [void](Assert-Acquired $currentTransaction)
-        foreach ($name in @('visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json')) {
+        foreach ($name in @('visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','pre-launch-intent.json','pre-launch-refusal-observed.json','child-acquisition.json','acquired.json')) {
             Clear-PublishingResidue (Join-Path $currentTransaction.Directory $name)
         }
         Restore-TransactionBytes $currentTransaction 'RestoreUserAfterTruncate' 'RestoreLaunchAfterTruncate'
@@ -917,11 +1225,16 @@ try {
 
     if ($Action -eq 'Recover') {
         if (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'acquired.json')) { throw 'Acquired transaction must use Restore so its launch proof remains explicit.' }
+        if ((Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'pre-launch-refusal-observed.json')) -or
+            (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'pre-launch-refusal-observed.json.publishing')) -or
+            (Test-Path -LiteralPath (Join-Path $currentTransaction.Directory 'pre-launch-blocked.json.publishing'))) {
+            throw 'A durable pre-launch refusal must complete BlockLaunch; Recover cannot replace BLOCKED/NOT_RUN.'
+        }
         $boundVisualStudio = Get-ProcessRecord ([int]$metadata.VisualStudio.ProcessId)
         if ($null -ne $boundVisualStudio -and [bool]$boundVisualStudio.IsRunning -and [DateTimeOffset]$boundVisualStudio.StartTimeUtc -eq [DateTimeOffset]$metadata.VisualStudio.StartTimeUtc) {
             throw 'Unacquired transaction cannot be recovered while its bound Visual Studio instance is running.'
         }
-        foreach ($name in @('settings-prepared.json','visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','child-acquisition.json','acquired.json','prepare-failed-recovered.json')) {
+        foreach ($name in @('settings-prepared.json','visual-studio-reload-intent.json','visual-studio-consumed.json','armed.json','pre-launch-intent.json','pre-launch-refusal-observed.json','child-acquisition.json','acquired.json','prepare-failed-recovered.json','pre-launch-blocked.json')) {
             Clear-PublishingResidue (Join-Path $currentTransaction.Directory $name)
         }
         Restore-TransactionBytes $currentTransaction 'RecoverUserAfterTruncate' 'RecoverLaunchAfterTruncate'

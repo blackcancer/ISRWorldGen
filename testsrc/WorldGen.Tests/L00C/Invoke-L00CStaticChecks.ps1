@@ -299,7 +299,7 @@ if ($Configuration -eq 'Debug') {
     $fixtureCoordinatePolicyOracleStatus = $fixtureCoordinatePolicyOracle.Status
     $f5TransactionOraclePath = Join-Path $PSScriptRoot 'Test-L00CF5AuthenticatedProfile.ps1'
     $f5TransactionOracle = (& $f5TransactionOraclePath | Out-String | ConvertFrom-Json)
-    if ($f5TransactionOracle.Status -ne 'PASS' -or $f5TransactionOracle.Cases -lt 47) {
+    if ($f5TransactionOracle.Status -ne 'PASS' -or $f5TransactionOracle.RuntimeStatus -ne 'NOT_RUN' -or $f5TransactionOracle.Cases -lt 68) {
         throw 'The authenticated F5 transaction v2 oracle did not pass.'
     }
     $f5TransactionOracleStatus = $f5TransactionOracle.Status
