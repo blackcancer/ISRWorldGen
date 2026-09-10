@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
+using ISRWorldGen.WorldgenProbe;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
@@ -172,11 +173,12 @@ internal static class L00CMenuActionDriver
     // returned; the exact save must then be non-empty and exclusively openable,
     // and StartMainMenu must have installed its audited main-screen instance.
     internal static bool TryObserveSaveCommitted(object screenManager, L00CScenarioSession expected,
-        out L00CScenarioObservation? observation)
+        out L00CScenarioObservation? observation, out L00CNativeSaveQuitReturnProof? proof)
     {
         RequireDebugLab();
         if (expected is null) throw new ArgumentNullException(nameof(expected));
         observation = null;
+        proof = null;
         GuardNativeShutdownAudit();
         if (ReadIsServerRunning(screenManager)) return false;
         if (!IsMainMenuScreen(screenManager)) return false;
@@ -189,6 +191,13 @@ internal static class L00CMenuActionDriver
         catch (UnauthorizedAccessException) { return false; }
         observation = L00CScenarioObservation.SaveCommitted(expected.Ordinal, expected.CanonicalSavePath,
             expected.CanonicalSavegameGuid, commitEventObserved: true);
+        proof = new L00CNativeSaveQuitReturnProof(
+            nativeActionCompleted: true,
+            serverStopped: true,
+            mainMenuReady: true,
+            targetExclusivelyOpenable: true,
+            expected.CanonicalSavePath,
+            expected.CanonicalSavegameGuid);
         return true;
     }
 

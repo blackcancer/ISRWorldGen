@@ -78,11 +78,16 @@ internal static class L00CLifecycleShutdownBarrier
     internal static L00CLifecycleShutdownLease Open(L00CLifecycleShutdownIdentity identity)=>State.Open(identity);
     internal static bool Close(L00CLifecycleShutdownLease lease)=>State.Close(lease);
     internal static void Arm(L00CLifecycleShutdownLease lease)=>State.Arm(lease);
+    internal static void CaptureInternalMarker(L00CLifecycleShutdownLease lease,L00CLifecycleInternalMarkerProof proof)=>State.CaptureInternalMarker(lease,proof);
     internal static void BindReady(L00CLifecycleShutdownLease lease,L00CLifecycleSessionObservation observation)=>State.BindReady(lease,observation);
+    internal static L00CLifecycleInternalMarkerProof BindReadyCurrent(L00CLifecycleSessionObservation observation)=>State.BindReadyCurrent(observation);
     internal static L00CLifecycleShutdownIdentity RequireCurrentIdentity()=>State.RequireCurrentIdentity();
     internal static L00CLifecycleReturnReservation PrepareReturn(L00CLifecycleSessionObservation observation,string observedStartServerSavePath)=>State.PrepareReturn(observation,observedStartServerSavePath);
     internal static void BeginNativeReturn(L00CLifecycleReturnReservation reservation)=>State.BeginNativeReturn(reservation);
     internal static L00CLifecycleSessionObservation ConfirmSaveCommitted(L00CLifecycleReturnReservation reservation,L00CLifecycleSessionObservation observation,L00CNativeSaveQuitReturnProof proof)=>State.ConfirmSaveCommitted(reservation,observation,proof);
+    internal static void CaptureRegistrationRelease(L00CLifecycleShutdownLease lease,L00CLifecycleRegistrationProof proof)=>State.CaptureRegistrationRelease(lease,proof);
+    internal static bool TryGetCompletedEvidence(L00CLifecycleReturnReservation reservation,out L00CLifecycleCommittedEvidence? evidence)=>State.TryGetCompletedEvidence(reservation,out evidence);
+    internal static L00CLifecycleCommittedEvidence RequireCompletedEvidence(L00CLifecycleReturnReservation reservation)=>State.RequireCompletedEvidence(reservation);
     internal static bool AbortBeforeNativeReturn(L00CLifecycleReturnReservation reservation)=>State.AbortBeforeNativeReturn(reservation);
 }
 
@@ -136,6 +141,17 @@ internal sealed class L00CLifecycleShutdownState
         }
     }
 
+    internal void CaptureInternalMarker(L00CLifecycleShutdownLease lease,L00CLifecycleInternalMarkerProof proof)
+    {
+        if(lease is null)throw new ArgumentNullException(nameof(lease));if(proof is null)throw new ArgumentNullException(nameof(proof));
+        lock(gate)
+        {
+            if(!ReferenceEquals(activeLease,lease)||lease.Closed||stable||ready is not null||lease.InternalMarker is not null)throw new InvalidOperationException("L00-C lifecycle internal marker proof is stale, duplicate, or late.");
+            if(lease.Identity.SavegameGuid!=proof.CanonicalSavegameGuid)throw new InvalidOperationException("L00-C lifecycle internal marker proof belongs to another save.");
+            lease.InternalMarker=proof;TraceEvent(null,"InternalMarkerCaptured","immutable SaveGame marker captured before Ready");
+        }
+    }
+
     internal void BindReady(L00CLifecycleShutdownLease lease,L00CLifecycleSessionObservation observation)
     {
         if(lease is null)throw new ArgumentNullException(nameof(lease));if(observation is null)throw new ArgumentNullException(nameof(observation));
@@ -144,6 +160,20 @@ internal sealed class L00CLifecycleShutdownState
             if(observation.EventKind!=L00CLifecycleEventKind.Ready||!ReferenceEquals(activeLease,lease)||lease.Closed||!stable||ready is not null||pendingReturn is not null)throw new InvalidOperationException("L00-C lifecycle Ready callback is stale, duplicate, closing, or premature.");
             if(lease.Identity.SavegameGuid!=observation.CanonicalSavegameGuid)throw new InvalidOperationException("L00-C lifecycle Ready server/client GUID mismatch.");
             ready=observation;TraceEvent(observation,"ReadyBound","captured session bound exactly once");
+        }
+    }
+
+    internal L00CLifecycleInternalMarkerProof BindReadyCurrent(L00CLifecycleSessionObservation observation)
+    {
+        if(observation is null)throw new ArgumentNullException(nameof(observation));
+        lock(gate)
+        {
+            L00CLifecycleShutdownLease lease=activeLease??throw new InvalidOperationException("L00-C lifecycle Ready callback has no active server owner.");
+            L00CLifecycleInternalMarkerProof marker=lease.InternalMarker??throw new InvalidOperationException("L00-C lifecycle Ready callback has no captured internal marker proof.");
+            if(marker.CanonicalSavegameGuid!=observation.CanonicalSavegameGuid)throw new InvalidOperationException("L00-C lifecycle Ready marker/client GUID mismatch.");
+            if(observation.EventKind!=L00CLifecycleEventKind.Ready||lease.Closed||!stable||ready is not null||pendingReturn is not null)throw new InvalidOperationException("L00-C lifecycle Ready callback is stale, duplicate, closing, or premature.");
+            if(lease.Identity.SavegameGuid!=observation.CanonicalSavegameGuid)throw new InvalidOperationException("L00-C lifecycle Ready server/client GUID mismatch.");
+            ready=observation;TraceEvent(observation,"ReadyBound","captured session and internal marker bound exactly once");return marker;
         }
     }
 
@@ -185,6 +215,42 @@ internal sealed class L00CLifecycleShutdownState
         }
     }
 
+    internal void CaptureRegistrationRelease(L00CLifecycleShutdownLease lease,L00CLifecycleRegistrationProof proof)
+    {
+        if(lease is null)throw new ArgumentNullException(nameof(lease));if(proof is null)throw new ArgumentNullException(nameof(proof));
+        lock(gate)
+        {
+            if(!lease.Closed||!lease.ServerReleased||lease.Registrations is not null)throw new InvalidOperationException("L00-C lifecycle registration proof is premature or duplicate.");
+            if(pendingReturn is not null&&!ReferenceEquals(pendingReturn.Lease,lease))throw new InvalidOperationException("L00-C lifecycle registration proof belongs to another return.");
+            proof.RequireComplete();lease.Registrations=proof;TraceEvent(pendingReturn?.ReadyObservation,"RegistrationsReleased","all server callback owners released before SaveCommitted");
+        }
+    }
+
+    internal L00CLifecycleCommittedEvidence RequireCompletedEvidence(L00CLifecycleReturnReservation reservation)
+    {
+        if(reservation is null)throw new ArgumentNullException(nameof(reservation));
+        lock(gate)
+        {
+            if(!ReferenceEquals(pendingReturn,reservation)||!reservation.Started||reservation.Cancelled||reservation.Committed||!reservation.Lease.Closed||!reservation.Lease.ServerReleased)throw new InvalidOperationException("L00-C lifecycle completed evidence request is stale, premature, duplicate, or closing.");
+            L00CLifecycleInternalMarkerProof marker=reservation.Lease.InternalMarker??throw new InvalidOperationException("L00-C lifecycle completed evidence has no internal marker proof.");
+            L00CLifecycleRegistrationProof registrations=reservation.Lease.Registrations??throw new InvalidOperationException("L00-C lifecycle completed evidence has no registration release proof.");
+            registrations.RequireComplete();return new L00CLifecycleCommittedEvidence(marker,registrations);
+        }
+    }
+
+    internal bool TryGetCompletedEvidence(L00CLifecycleReturnReservation reservation,out L00CLifecycleCommittedEvidence? evidence)
+    {
+        if(reservation is null)throw new ArgumentNullException(nameof(reservation));
+        lock(gate)
+        {
+            if(!ReferenceEquals(pendingReturn,reservation)||!reservation.Started||reservation.Cancelled||reservation.Committed)throw new InvalidOperationException("L00-C lifecycle completed evidence poll is stale, duplicate, or invalid.");
+            evidence=null;
+            if(!reservation.Lease.Closed||!reservation.Lease.ServerReleased||reservation.Lease.Registrations is null)return false;
+            L00CLifecycleInternalMarkerProof marker=reservation.Lease.InternalMarker??throw new InvalidOperationException("L00-C lifecycle completed evidence has no internal marker proof.");
+            reservation.Lease.Registrations.RequireComplete();evidence=new L00CLifecycleCommittedEvidence(marker,reservation.Lease.Registrations);return true;
+        }
+    }
+
     internal bool AbortBeforeNativeReturn(L00CLifecycleReturnReservation reservation)
     {
         if(reservation is null)throw new ArgumentNullException(nameof(reservation));
@@ -219,6 +285,8 @@ internal sealed class L00CLifecycleShutdownLease
     internal long Generation { get; }
     internal bool Closed { get; set; }
     internal bool ServerReleased { get; set; }
+    internal L00CLifecycleInternalMarkerProof? InternalMarker { get; set; }
+    internal L00CLifecycleRegistrationProof? Registrations { get; set; }
 }
 
 internal sealed class L00CLifecycleReturnReservation
@@ -248,5 +316,59 @@ internal sealed class L00CNativeSaveQuitReturnProof
     {
         if(!NativeActionCompleted||!ServerStopped||!MainMenuReady||!TargetExclusivelyOpenable||!string.Equals(CanonicalSavePath,observation.CanonicalSavePath,StringComparison.OrdinalIgnoreCase)||CanonicalSavegameGuid!=observation.CanonicalSavegameGuid)throw new InvalidOperationException("L00-C SaveCommitted requires actual native Save&Quit completion, stopped server, main menu, exclusive target, and exact identity.");
     }
+}
+
+internal sealed class L00CLifecycleInternalMarkerProof
+{
+    internal L00CLifecycleInternalMarkerProof(string markerId,string canonicalSavegameGuid,int openCount)
+    {
+        if(markerId is null||markerId.Length!=32)throw new InvalidOperationException("L00-C lifecycle internal marker id must be 32 lower-case hexadecimal characters.");
+        foreach(char value in markerId)if(!((value>='0'&&value<='9')||(value>='a'&&value<='f')))throw new InvalidOperationException("L00-C lifecycle internal marker id must be 32 lower-case hexadecimal characters.");
+        if(openCount<1||openCount>2)throw new InvalidOperationException("L00-C lifecycle internal marker open count must be within 1..2.");
+        MarkerId=markerId;CanonicalSavegameGuid=L00CLifecycleShutdownIdentity.NormalizeGuid(canonicalSavegameGuid,nameof(canonicalSavegameGuid));OpenCount=openCount;
+    }
+    internal string MarkerId { get; }
+    internal string CanonicalSavegameGuid { get; }
+    internal int OpenCount { get; }
+}
+
+internal sealed class L00CLifecycleRegistrationProof
+{
+    internal L00CLifecycleRegistrationProof(bool initRegistered,bool gameSaveRegistered,bool tickRegistered,
+        bool initOwnerReleased,bool gameSaveOwnerReleased,bool tickOwnerReleased,
+        bool gameSaveIndependentlyUnregistered,bool tickIndependentlyUnregistered,
+        int staleCallbacks,int duplicateCallbacks,int closingCallbacks,int unregistrationFailures)
+    {
+        InitRegistered=initRegistered;GameSaveRegistered=gameSaveRegistered;TickRegistered=tickRegistered;
+        InitOwnerReleased=initOwnerReleased;GameSaveOwnerReleased=gameSaveOwnerReleased;TickOwnerReleased=tickOwnerReleased;
+        GameSaveIndependentlyUnregistered=gameSaveIndependentlyUnregistered;TickIndependentlyUnregistered=tickIndependentlyUnregistered;
+        StaleCallbacks=staleCallbacks;DuplicateCallbacks=duplicateCallbacks;ClosingCallbacks=closingCallbacks;UnregistrationFailures=unregistrationFailures;
+    }
+    internal bool InitRegistered { get; }
+    internal bool GameSaveRegistered { get; }
+    internal bool TickRegistered { get; }
+    internal bool InitOwnerReleased { get; }
+    internal bool GameSaveOwnerReleased { get; }
+    internal bool TickOwnerReleased { get; }
+    internal bool GameSaveIndependentlyUnregistered { get; }
+    internal bool TickIndependentlyUnregistered { get; }
+    internal int StaleCallbacks { get; }
+    internal int DuplicateCallbacks { get; }
+    internal int ClosingCallbacks { get; }
+    internal int UnregistrationFailures { get; }
+    internal void RequireComplete()
+    {
+        if(!InitRegistered||!GameSaveRegistered||!TickRegistered||!InitOwnerReleased||!GameSaveOwnerReleased||!TickOwnerReleased||
+            !GameSaveIndependentlyUnregistered||!TickIndependentlyUnregistered||StaleCallbacks!=0||DuplicateCallbacks!=0||ClosingCallbacks!=0||UnregistrationFailures!=0)
+            throw new InvalidOperationException("L00-C lifecycle registration proof is incomplete or contains rejected callbacks.");
+    }
+}
+
+internal sealed class L00CLifecycleCommittedEvidence
+{
+    internal L00CLifecycleCommittedEvidence(L00CLifecycleInternalMarkerProof marker,L00CLifecycleRegistrationProof registrations)
+    { InternalMarker=marker??throw new ArgumentNullException(nameof(marker));Registrations=registrations??throw new ArgumentNullException(nameof(registrations)); }
+    internal L00CLifecycleInternalMarkerProof InternalMarker { get; }
+    internal L00CLifecycleRegistrationProof Registrations { get; }
 }
 #endif

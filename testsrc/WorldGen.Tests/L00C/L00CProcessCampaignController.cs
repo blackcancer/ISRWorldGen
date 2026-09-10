@@ -36,7 +36,8 @@ internal sealed class L00CProcessCampaignController
     {
         screenManager = manager; campaign = campaignStorage; root = campaign.LaboratoryRoot;
         evidence = campaign.EvidenceDirectory;
-        bootstrap = new L00CFixtureBootstrap(campaign);
+        bootstrap = new L00CFixtureBootstrap(campaign,
+            new L00CNativeScenarioHostAdapter(new L00CProductionScenarioComposition(campaign)));
         levelFinalizeGate.AdoptSession(initialSession);
         currentSession = initialSession;
     }

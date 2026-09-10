@@ -83,11 +83,11 @@ function Assert-NewPath([string]$Path, [string]$Label) {
 }
 
 function Assert-Candidate($InitializeReceipt) {
-    $head = (& git -C $RepositoryRoot rev-parse HEAD).Trim()
+    $head = (& git -c "safe.directory=$RepositoryRoot" -C $RepositoryRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $head -ne [string]$InitializeReceipt.TestedCommit) {
         throw "Campaign candidate is not current HEAD: expected=$($InitializeReceipt.TestedCommit) actual=$head"
     }
-    $tracked = @(& git -C $RepositoryRoot status --porcelain=v1 --untracked-files=no)
+    $tracked = @(& git -c "safe.directory=$RepositoryRoot" -C $RepositoryRoot status --porcelain=v1 --untracked-files=no)
     if ($LASTEXITCODE -ne 0 -or $tracked.Count -ne 0) {
         throw 'Campaign controller requires a clean tracked worktree.'
     }

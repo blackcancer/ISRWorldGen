@@ -8,11 +8,13 @@ namespace ISRWorldGen.L00C.Laboratory;
 // the executable LevelFinalize oracle use L00CProcessCampaignController.
 internal static class L00CProcessCampaignController
 {
+    private static L00CLevelFinalizeGate gate = new();
     internal static L00CNativeOpenReservation BeginNativeOpen(int fixtureSequence) =>
-        throw new System.NotSupportedException("Compile-only native-open seam.");
+        gate.BeginOpen(fixtureSequence);
     internal static void CompleteNativeOpen(L00CNativeOpenReservation reservation) =>
-        throw new System.NotSupportedException("Compile-only native-open seam.");
+        gate.CompleteOpen(reservation);
     internal static bool AbortNativeOpen(L00CNativeOpenReservation reservation) =>
-        throw new System.NotSupportedException("Compile-only native-open seam.");
+        gate.AbortOpen(reservation);
+    internal static void ResetForTests() => gate = new L00CLevelFinalizeGate();
 }
 #endif

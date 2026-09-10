@@ -256,6 +256,7 @@ $lifecycleSpatialIsolationOracleStatus = 'NOT_APPLICABLE'
 $lifecycleShutdownOrderingOracleStatus = 'NOT_APPLICABLE'
 $lifecycleRegistrationReleaseOracleStatus = 'NOT_APPLICABLE'
 $t00LifecycleValidatorOracleStatus = 'NOT_APPLICABLE'
+$scenarioCompositionOracleStatus = 'NOT_APPLICABLE'
 if ($Configuration -eq 'Debug') {
     $lifecycleShutdownOrderingOraclePath = Join-Path $PSScriptRoot 'Test-L00CLifecycleShutdownOrdering.ps1'
     $lifecycleShutdownOrderingOracle = (& $lifecycleShutdownOrderingOraclePath -RepositoryRoot $RepositoryRoot | Out-String | ConvertFrom-Json)
@@ -277,6 +278,13 @@ if ($Configuration -eq 'Debug') {
         throw 'The standalone T00-06 lifecycle validator oracle did not pass.'
     }
     $t00LifecycleValidatorOracleStatus = $t00LifecycleValidatorOracle.Status
+    $scenarioCompositionOraclePath = Join-Path $PSScriptRoot 'Test-L00CScenarioComposition.ps1'
+    $scenarioCompositionOracle = (& $scenarioCompositionOraclePath -RepositoryRoot $RepositoryRoot | Out-String | ConvertFrom-Json)
+    if ($scenarioCompositionOracle.Status -ne 'PASS' -or $scenarioCompositionOracle.Iterations -ne 5 -or
+        $scenarioCompositionOracle.Sessions -ne 15 -or $scenarioCompositionOracle.DedicatedSaves -ne 10) {
+        throw 'The S2/S3 production scenario composition oracle did not pass.'
+    }
+    $scenarioCompositionOracleStatus = $scenarioCompositionOracle.Status
     $lifecycleSpatialIsolationOraclePath = Join-Path $PSScriptRoot 'Test-L00CLifecycleSpatialIsolation.ps1'
     $lifecycleSpatialIsolationOracle = (& $lifecycleSpatialIsolationOraclePath -RepositoryRoot $RepositoryRoot -GamePath $GamePath | Out-String | ConvertFrom-Json)
     if ($lifecycleSpatialIsolationOracle.Status -ne 'PASS' -or $lifecycleSpatialIsolationOracle.LifecycleSpatialCalls -ne 0 -or $lifecycleSpatialIsolationOracle.LifecycleTeleportCalls -ne 0 -or $lifecycleSpatialIsolationOracle.LifecycleProfileSpatialDefault) {
@@ -430,6 +438,7 @@ $result = [ordered]@{
     LifecycleShutdownOrderingOracle = $lifecycleShutdownOrderingOracleStatus
     LifecycleRegistrationReleaseOracle = $lifecycleRegistrationReleaseOracleStatus
     T00LifecycleValidatorOracle = $t00LifecycleValidatorOracleStatus
+    ScenarioCompositionOracle = $scenarioCompositionOracleStatus
     AssemblySha256 = (Get-FileHash -LiteralPath $assemblyPath -Algorithm SHA256).Hash
     PdbSha256 = (Get-FileHash -LiteralPath $pdbPath -Algorithm SHA256).Hash
 }

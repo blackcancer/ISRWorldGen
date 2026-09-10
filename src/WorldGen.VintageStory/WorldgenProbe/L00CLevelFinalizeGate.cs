@@ -119,8 +119,8 @@ internal sealed class L00CLevelFinalizeGate
 
     private static void ValidateFixtureSequence(int fixtureSequence)
     {
-        if (fixtureSequence < 1 || fixtureSequence > 8)
-            throw new InvalidOperationException("L00-C LevelFinalize fixture sequence must be within the exact 1..8 campaign.");
+        if (fixtureSequence < 1 || fixtureSequence > 15)
+            throw new InvalidOperationException("L00-C LevelFinalize session sequence must be within the exact 1..15 campaign.");
     }
 }
 

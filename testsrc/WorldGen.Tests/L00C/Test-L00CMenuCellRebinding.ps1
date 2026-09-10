@@ -1,17 +1,22 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path,
+    [string]$GamePath = 'D:\Jeux\Vintagestory'
+)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
-$sources = @('L00CMenuActionDriver.cs','L00CMenuActionLaboratoryHost.cs','L00CStrictEvidenceJson.cs','L00CCampaignStorage.cs','L00CMenuCellRebindingOracle.cs') | ForEach-Object { Join-Path $root $_ }
-$csc = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\Roslyn\csc.exe'
-$out = Join-Path ([IO.Path]::GetTempPath()) ('l00c-rebind-oracle-' + [Guid]::NewGuid().ToString('N') + '.dll')
-try {
-    & $csc /nologo /target:library /define:DEBUG /langversion:latest "/out:$out" $sources
-    if ($LASTEXITCODE -ne 0) { throw 'L00-C menu-cell rebinding oracle compilation failed.' }
-    $a = [Reflection.Assembly]::LoadFrom($out)
-    $m = $a.GetType('ISRWorldGen.L00C.Laboratory.L00CMenuCellRebindingOracle', $true).GetMethod('Run', [Reflection.BindingFlags]'Static,NonPublic')
-    if ($null -eq $m -or $m.Invoke($null, @()) -ne 0) { throw 'L00-C menu-cell rebinding oracle failed.' }
-    [ordered]@{ TestId='L00-C-MENU-CELL-REBINDING-EXECUTABLE-ORACLE'; Status='PASS'; Cases='sort/index relocation; missing path; duplicate path; vanished file'; Scope='Temporary paths only; no AppData, UI or Vintage Story process.' } | ConvertTo-Json -Compress
-}
-finally { if (Test-Path -LiteralPath $out) { try { Remove-Item -LiteralPath $out -Force } catch { } } }
+
+# Retired S1 oracle: production no longer rebinds GuiScreenSingleplayer cells.
+# Its replacement directly audits the immutable StartServerArgs path mapping and
+# executes the full S2/S3 5 x 3 scheduler composition.
+$native = & (Join-Path $PSScriptRoot 'Test-L00CNativeFixtureOracle.ps1') -GamePath $GamePath | ConvertFrom-Json
+$composition = & (Join-Path $PSScriptRoot 'Test-L00CScenarioComposition.ps1') -RepositoryRoot $RepositoryRoot | ConvertFrom-Json
+if ($native.Status -ne 'PASS' -or $composition.Status -ne 'PASS') { throw 'L00-C direct-path replacement gates did not pass.' }
+
+[ordered]@{
+    TestId = 'L00-C-MENU-CELL-REBINDING-RETIRED'
+    Status = 'PASS'
+    Replacement = @($native.TestId, $composition.TestId)
+    Contract = 'No menu cell/index is retained or rebound; canonical StartServerArgs paths drive ten saves and fifteen sessions.'
+    Scope = 'Legacy oracle retirement backed by stronger direct-path and controlled-composition tests; no game process or T00-06 PASS claim.'
+} | ConvertTo-Json -Depth 4 -Compress

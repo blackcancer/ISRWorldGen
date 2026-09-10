@@ -65,7 +65,7 @@ if ([string]$evidence.TestedCommit -notmatch '^[0-9a-f]{40}$') {
 if ([string]$evidence.CampaignId -notmatch '^[0-9a-f]{32}$') {
     throw 'CampaignId must be a fresh 32-character lowercase identifier.'
 }
-& git -C $RepositoryRoot cat-file -e "$($evidence.TestedCommit)^{commit}" 2>$null
+& git -c "safe.directory=$RepositoryRoot" -C $RepositoryRoot cat-file -e "$($evidence.TestedCommit)^{commit}" 2>$null
 if ($LASTEXITCODE -ne 0) {
     throw "TestedCommit is unavailable locally: $($evidence.TestedCommit)"
 }

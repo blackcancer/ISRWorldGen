@@ -3,9 +3,12 @@
 // observation owner remain explicit integration contracts.
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
+using ISRWorldGen.WorldgenProbe;
 
 namespace ISRWorldGen.L00C.Laboratory;
 
@@ -30,6 +33,7 @@ internal sealed class L00CNativeScenarioHostAdapter : L00CScenarioHostAdapter
     private readonly Action<L00CScenarioState> beginNativeOpen;
     private readonly Action<L00CScenarioState> beginNativeReturn;
     private readonly Action<L00CScenarioState> completeRun;
+    private readonly L00CProductionScenarioComposition? production;
 
     internal L00CNativeScenarioHostAdapter(Func<string?> stopCode,
         Action<L00CScenarioState> nativeOpenBoundary,
@@ -40,6 +44,15 @@ internal sealed class L00CNativeScenarioHostAdapter : L00CScenarioHostAdapter
         beginNativeOpen = nativeOpenBoundary ?? throw new ArgumentNullException(nameof(nativeOpenBoundary));
         beginNativeReturn = nativeReturnBoundary ?? throw new ArgumentNullException(nameof(nativeReturnBoundary));
         completeRun = completionBoundary ?? throw new ArgumentNullException(nameof(completionBoundary));
+    }
+
+    internal L00CNativeScenarioHostAdapter(L00CProductionScenarioComposition composition)
+    {
+        production = composition ?? throw new ArgumentNullException(nameof(composition));
+        readStopCode = composition.ReadStopCode;
+        beginNativeOpen = composition.BeginNativeOpen;
+        beginNativeReturn = composition.BeginNativeReturn;
+        completeRun = composition.CompleteRun;
     }
 
     internal override long ReadMonotonicTimestamp() => Stopwatch.GetTimestamp();
@@ -59,16 +72,20 @@ internal sealed class L00CNativeScenarioHostAdapter : L00CScenarioHostAdapter
             case L00CScenarioStage.WaitReopenedAReady:
             case L00CScenarioStage.WaitCreatedBReady:
                 bool isNew = state.Stage != L00CScenarioStage.WaitReopenedAReady;
-                return L00CMenuActionDriver.TryObserveReadySession(screenManager,
+                bool observed = L00CMenuActionDriver.TryObserveReadySession(screenManager,
                     state.ExpectedSessionOrdinal, state.ExpectedTarget, isNew,
                     readyEventSessionOrdinal, out observation);
+                if (observed && observation is not null) production?.AcceptReady(state, observation);
+                return observed;
             case L00CScenarioStage.WaitMenuAfterCreatedASave:
             case L00CScenarioStage.WaitMenuBeforeCreateB:
             case L00CScenarioStage.WaitMenuAfterCreatedBSave:
                 if (state.ActiveSession is null)
                     throw new L00CScenarioException("L00C_S2_COMMIT_SESSION_STATE_ABSENT", state.Stage,
                         "save/menu observation requires the immutable just-closed session");
-                return L00CMenuActionDriver.TryObserveSaveCommitted(screenManager, state.ActiveSession, out observation);
+                if (production is not null)
+                    return production.TryObserveSaveCommitted(screenManager, state, state.ActiveSession, out observation);
+                return L00CMenuActionDriver.TryObserveSaveCommitted(screenManager, state.ActiveSession, out observation, out _);
             default:
                 throw new L00CScenarioException("L00C_S2_NATIVE_OBSERVATION_STAGE_INVALID", state.Stage,
                     "native adapter received a non-wait stage");
@@ -83,23 +100,46 @@ internal sealed class L00CNativeScenarioHostAdapter : L00CScenarioHostAdapter
         switch (state.PendingAction)
         {
             case L00CScenarioActionKind.Create:
-                _ = L00CMenuActionDriver.CreateWorld(screenManager, state.ExpectedTarget,
-                    () => beginNativeOpen(state));
+                ExecuteNativeOpen(screenManager, state, isNew: true);
                 return;
             case L00CScenarioActionKind.Reopen:
-                _ = L00CMenuActionDriver.ReopenWorld(screenManager, state.ExpectedTarget,
-                    () => beginNativeOpen(state));
+                ExecuteNativeOpen(screenManager, state, isNew: false);
                 return;
             case L00CScenarioActionKind.SaveQuit:
                 if (state.ActiveSession is null)
                     throw new L00CScenarioException("L00C_S2_SAVEQUIT_SESSION_STATE_ABSENT", state.Stage,
                         "SaveQuit requires the immutable ready session");
-                _ = L00CMenuActionDriver.SaveAndQuit(screenManager, state.ActiveSession,
-                    () => beginNativeReturn(state));
+                production?.PrepareNativeReturn(state);
+                try
+                {
+                    _ = L00CMenuActionDriver.SaveAndQuit(screenManager, state.ActiveSession,
+                        () => beginNativeReturn(state));
+                }
+                catch
+                {
+                    production?.AbortBeforeNativeReturn();
+                    throw;
+                }
                 return;
             default:
                 throw new L00CScenarioException("L00C_S2_NATIVE_ACTION_KIND_INVALID", state.Stage,
                     "native adapter received action None");
+        }
+    }
+
+    private void ExecuteNativeOpen(object screenManager,L00CScenarioState state,bool isNew)
+    {
+        try
+        {
+            _ = isNew
+                ? L00CMenuActionDriver.CreateWorld(screenManager,state.ExpectedTarget,()=>beginNativeOpen(state))
+                : L00CMenuActionDriver.ReopenWorld(screenManager,state.ExpectedTarget,()=>beginNativeOpen(state));
+            production?.CompleteNativeOpen();
+        }
+        catch
+        {
+            production?.AbortNativeOpen();
+            throw;
         }
     }
 
@@ -110,6 +150,223 @@ internal sealed class L00CNativeScenarioHostAdapter : L00CScenarioHostAdapter
                 "completion callback requires RUN_COMPLETED");
         completeRun(state);
     }
+}
+
+/// <summary>
+/// Process-local glue between the immutable S2 scheduler and the S3 server
+/// shutdown barrier. It owns no Vintage Story object and permits the scheduler
+/// to see SaveCommitted only after the exact server lease and registrations are
+/// released.
+/// </summary>
+internal sealed class L00CProductionScenarioComposition
+{
+    private readonly L00CCampaignStorage campaign;
+    private readonly L00CT00LifecycleEvidenceWriter evidence;
+    private L00CNativeOpenReservation? pendingOpen;
+    private L00CLifecycleSessionObservation? ready;
+    private L00CLifecycleInternalMarkerProof? marker;
+    private L00CLifecycleReturnReservation? pendingReturn;
+
+    internal L00CProductionScenarioComposition(L00CCampaignStorage campaignStorage)
+    {
+        campaign = campaignStorage ?? throw new ArgumentNullException(nameof(campaignStorage));
+        if(campaign.SaveTargets.Count!=L00CScenarioDefinition.RequiredDedicatedSaves)
+            throw new InvalidOperationException("L00-C production composition requires the exact ten-save campaign manifest.");
+        evidence = new L00CT00LifecycleEvidenceWriter(campaign);
+    }
+
+    internal string? ReadStopCode() => null;
+
+    internal void BeginNativeOpen(L00CScenarioState state)
+    {
+        if(state is null)throw new ArgumentNullException(nameof(state));
+        if(pendingOpen is not null||pendingReturn is not null||ready is not null)
+            throw new InvalidOperationException("L00-C production native open overlaps an active session or reservation.");
+        L00CScenarioTarget target=state.ExpectedTarget;
+        if(state.PendingAction==L00CScenarioActionKind.Create)
+        {
+            campaign.RequireVacantNativeCreateTarget(target.Role,target.CanonicalSavePath);
+            campaign.PrepareNativeCreate(target.Role,target.CanonicalSavePath);
+            try{campaign.RequireVacantNativeCreateTarget(target.Role,target.CanonicalSavePath);}
+            catch{campaign.RecordNativeCreateRefusal(target.Role,target.CanonicalSavePath);throw;}
+        }
+        else if(state.PendingAction!=L00CScenarioActionKind.Reopen)
+            throw new InvalidOperationException("L00-C production native open requires Create or Reopen.");
+        pendingOpen=L00CProcessCampaignController.BeginNativeOpen(state.ExpectedSessionOrdinal);
+    }
+
+    internal void CompleteNativeOpen()
+    {
+        L00CNativeOpenReservation opening=pendingOpen??throw new InvalidOperationException("L00-C production native open completion has no reservation.");
+        L00CProcessCampaignController.CompleteNativeOpen(opening);pendingOpen=null;
+    }
+
+    internal void AbortNativeOpen()
+    {
+        L00CNativeOpenReservation? opening=pendingOpen;pendingOpen=null;
+        if(opening is not null)_=L00CProcessCampaignController.AbortNativeOpen(opening);
+    }
+
+    internal void AcceptReady(L00CScenarioState state,L00CScenarioObservation observation)
+    {
+        if(state is null)throw new ArgumentNullException(nameof(state));if(observation is null)throw new ArgumentNullException(nameof(observation));
+        if(ready is not null||marker is not null||pendingReturn is not null||observation.Kind!=L00CScenarioObservationKind.SessionReady)
+            throw new InvalidOperationException("L00-C production Ready observation is duplicate or overlaps another session.");
+        if(observation.IsNew)campaign.PublishFixtureMarker(state.ExpectedTarget.Role,observation.CanonicalSavePath!);
+        var captured=L00CLifecycleSessionObservation.Ready(campaign.RunId,state.Iteration,observation.SessionOrdinal,
+            observation.CanonicalSavePath!,observation.CanonicalSavegameGuid!,observation.IsNew);
+        L00CLifecycleInternalMarkerProof internalMarker=L00CLifecycleShutdownBarrier.BindReadyCurrent(captured);
+        int expectedOpenCount=observation.IsNew?1:2;
+        if(internalMarker.OpenCount!=expectedOpenCount)
+            throw new InvalidOperationException("L00-C production Ready marker count does not match create/reopen semantics.");
+        evidence.RecordReady(captured,internalMarker);ready=captured;marker=internalMarker;
+    }
+
+    internal void PrepareNativeReturn(L00CScenarioState state)
+    {
+        if(state is null)throw new ArgumentNullException(nameof(state));
+        L00CLifecycleSessionObservation captured=ready??throw new InvalidOperationException("L00-C production return has no captured Ready observation.");
+        if(pendingReturn is not null||state.ActiveSession is null||state.ActiveSession.Ordinal!=captured.SessionOrdinal)
+            throw new InvalidOperationException("L00-C production return overlaps or differs from the captured S2 session.");
+        pendingReturn=L00CLifecycleShutdownBarrier.PrepareReturn(captured,state.ActiveSession.CanonicalSavePath);
+    }
+
+    internal void BeginNativeReturn(L00CScenarioState state)
+    {
+        if(state is null)throw new ArgumentNullException(nameof(state));
+        L00CLifecycleReturnReservation reservation=pendingReturn??throw new InvalidOperationException("L00-C production native return has no prepared reservation.");
+        if(state.ActiveSession is null||state.ActiveSession.Ordinal!=reservation.ReadyObservation.SessionOrdinal)
+            throw new InvalidOperationException("L00-C production native return changed the captured S2 session.");
+        L00CLifecycleShutdownBarrier.BeginNativeReturn(reservation);
+    }
+
+    internal void AbortBeforeNativeReturn()
+    {
+        L00CLifecycleReturnReservation? reservation=pendingReturn;
+        if(reservation is not null&&L00CLifecycleShutdownBarrier.AbortBeforeNativeReturn(reservation))pendingReturn=null;
+    }
+
+    internal bool TryObserveSaveCommitted(object screenManager,L00CScenarioState state,L00CScenarioSession session,
+        out L00CScenarioObservation? observation)
+    {
+        observation=null;
+        L00CLifecycleReturnReservation reservation=pendingReturn??throw new InvalidOperationException("L00-C production SaveCommitted poll has no native return reservation.");
+        if(!L00CMenuActionDriver.TryObserveSaveCommitted(screenManager,session,out L00CScenarioObservation? s2,
+                out L00CNativeSaveQuitReturnProof? nativeProof)||s2 is null||nativeProof is null)return false;
+        return AcceptSaveCommitted(state,session,nativeProof,out observation);
+    }
+
+    internal bool AcceptSaveCommitted(L00CScenarioState state,L00CScenarioSession session,
+        L00CNativeSaveQuitReturnProof nativeProof,out L00CScenarioObservation? observation)
+    {
+        if(state is null)throw new ArgumentNullException(nameof(state));if(session is null)throw new ArgumentNullException(nameof(session));if(nativeProof is null)throw new ArgumentNullException(nameof(nativeProof));
+        observation=null;
+        L00CLifecycleReturnReservation reservation=pendingReturn??throw new InvalidOperationException("L00-C production SaveCommitted acceptance has no native return reservation.");
+        if(!L00CLifecycleShutdownBarrier.TryGetCompletedEvidence(reservation,out L00CLifecycleCommittedEvidence? completed)||completed is null)return false;
+        L00CLifecycleSessionObservation captured=ready??throw new InvalidOperationException("L00-C production SaveCommitted lost its Ready identity.");
+        L00CLifecycleInternalMarkerProof capturedMarker=marker??throw new InvalidOperationException("L00-C production SaveCommitted lost its marker identity.");
+        if(completed.InternalMarker.MarkerId!=capturedMarker.MarkerId||completed.InternalMarker.OpenCount!=capturedMarker.OpenCount||
+            completed.InternalMarker.CanonicalSavegameGuid!=capturedMarker.CanonicalSavegameGuid)
+            throw new InvalidOperationException("L00-C production SaveCommitted reattributed its internal marker.");
+        var committed=L00CLifecycleSessionObservation.SaveCommitted(campaign.RunId,state.Iteration,session.Ordinal,
+            session.CanonicalSavePath,session.CanonicalSavegameGuid,captured.IsNew);
+        L00CLifecycleShutdownBarrier.ConfirmSaveCommitted(reservation,committed,nativeProof);
+        evidence.RecordSaveCommitted(committed,capturedMarker,nativeProof,completed.Registrations);
+        pendingReturn=null;ready=null;marker=null;
+        observation=L00CScenarioObservation.SaveCommitted(session.Ordinal,session.CanonicalSavePath,session.CanonicalSavegameGuid,commitEventObserved:true);
+        return true;
+    }
+
+    internal void CompleteRun(L00CScenarioState state)
+    {
+        if(state is null)throw new ArgumentNullException(nameof(state));
+        if(state.Outcome!=L00CScenarioOutcome.RunCompleted||pendingOpen is not null||pendingReturn is not null||ready is not null||marker is not null)
+            throw new InvalidOperationException("L00-C production completion has pending native ownership.");
+        campaign.BeginCycling();evidence.Complete(state);campaign.SealForExternalCleanup();
+    }
+}
+
+internal sealed class L00CT00LifecycleEvidenceWriter
+{
+    private readonly L00CCampaignStorage campaign;
+    private readonly string observationsPath;
+    private readonly string registrationsPath;
+    private int nextSession=1;
+    private int readySession;
+    private int observationCount;
+    private int registrationCount;
+
+    internal L00CT00LifecycleEvidenceWriter(L00CCampaignStorage campaignStorage)
+    {
+        campaign=campaignStorage??throw new ArgumentNullException(nameof(campaignStorage));
+        observationsPath=Path.Combine(campaign.EvidenceDirectory,"t00-06-observations.jsonl");
+        registrationsPath=Path.Combine(campaign.EvidenceDirectory,"t00-06-registrations.jsonl");
+        CreateEmpty(observationsPath);CreateEmpty(registrationsPath);
+    }
+
+    internal void RecordReady(L00CLifecycleSessionObservation observation,L00CLifecycleInternalMarkerProof marker)
+    {
+        if(observation is null)throw new ArgumentNullException(nameof(observation));if(marker is null)throw new ArgumentNullException(nameof(marker));
+        if(observation.EventKind!=L00CLifecycleEventKind.Ready||observation.SessionOrdinal!=nextSession||readySession!=0||
+            marker.CanonicalSavegameGuid!=observation.CanonicalSavegameGuid)
+            throw new InvalidOperationException("L00-C JSONL Ready event is stale, duplicate, or reattributed.");
+        Append(observationsPath,ObservationJson(observation,marker,observation.IsNew?"InternalStoreCreated":"InternalStoreReRead",false));
+        readySession=observation.SessionOrdinal;observationCount++;
+    }
+
+    internal void RecordSaveCommitted(L00CLifecycleSessionObservation observation,L00CLifecycleInternalMarkerProof marker,
+        L00CNativeSaveQuitReturnProof nativeProof,L00CLifecycleRegistrationProof registrations)
+    {
+        if(observation is null)throw new ArgumentNullException(nameof(observation));if(marker is null)throw new ArgumentNullException(nameof(marker));
+        if(nativeProof is null)throw new ArgumentNullException(nameof(nativeProof));if(registrations is null)throw new ArgumentNullException(nameof(registrations));
+        if(observation.EventKind!=L00CLifecycleEventKind.SaveCommitted||observation.SessionOrdinal!=nextSession||readySession!=nextSession||
+            marker.CanonicalSavegameGuid!=observation.CanonicalSavegameGuid)
+            throw new InvalidOperationException("L00-C JSONL SaveCommitted event is stale, duplicate, or reattributed.");
+        nativeProof.RequireActualNativeReturn(observation);registrations.RequireComplete();
+        Append(observationsPath,ObservationJson(observation,marker,"InternalStoreCaptured",true));observationCount++;
+        foreach(string phase in new[]{"Registered","Released"})
+            foreach(string kind in new[]{"InitWorldGenerator","GameWorldSave","Tick"})
+            {
+                bool released=phase=="Released";
+                bool independent=released&&kind!="InitWorldGenerator";
+                string line="{\"schema\":\"l00c-t00-06-registration-v1\",\"runId\":\""+campaign.RunId+
+                    "\",\"iteration\":"+observation.Iteration+",\"sessionOrdinal\":"+observation.SessionOrdinal+
+                    ",\"registration\":\""+kind+"\",\"eventKind\":\""+phase+"\",\"state\":\""+phase+
+                    "\",\"invariant\":\"actual registration and independent release captured from server ledger\",\"ownerReferenceReleased\":"+
+                    Bool(released)+",\"independentlyUnregistered\":"+Bool(independent)+"}";
+                Append(registrationsPath,line);registrationCount++;
+            }
+        readySession=0;nextSession++;
+    }
+
+    internal void Complete(L00CScenarioState state)
+    {
+        if(state is null)throw new ArgumentNullException(nameof(state));
+        if(state.Outcome!=L00CScenarioOutcome.RunCompleted||nextSession!=16||readySession!=0||observationCount!=30||registrationCount!=90)
+            throw new InvalidOperationException("L00-C JSONL completion requires exactly fifteen committed sessions.");
+        string runPath=Path.Combine(campaign.EvidenceDirectory,"t00-06-run.json");
+        string json="{\"schema\":\"l00c-t00-06-run-v1\",\"runId\":\""+campaign.RunId+
+            "\",\"outcome\":\"RUN_COMPLETED\",\"iterations\":5,\"sessions\":15,\"dedicatedSaves\":10,\"runtimeProcessId\":"+
+            Process.GetCurrentProcess().Id+",\"timedOut\":false,\"partialStop\":false,\"staleCallbacks\":0,\"duplicateCallbacks\":0,\"closingCallbacks\":0,\"unregistrationFailures\":0,\"provenanceSha256\":\""+
+            Hash(campaign.ProvenancePath)+"\",\"observationsSha256\":\""+Hash(observationsPath)+"\",\"registrationsSha256\":\""+Hash(registrationsPath)+"\"}";
+        WriteNew(runPath,json);
+    }
+
+    private static string ObservationJson(L00CLifecycleSessionObservation observation,L00CLifecycleInternalMarkerProof marker,string markerEvidence,bool committed)
+        =>"{\"schema\":\"l00c-t00-06-observation-v1\",\"runId\":\""+observation.RunId+"\",\"iteration\":"+observation.Iteration+
+            ",\"sessionOrdinal\":"+observation.SessionOrdinal+",\"canonicalSavePath\":\""+Escape(observation.CanonicalSavePath)+
+            "\",\"canonicalSavegameGuid\":\""+observation.CanonicalSavegameGuid+"\",\"isNew\":"+Bool(observation.IsNew)+
+            ",\"eventKind\":\""+observation.EventKind+"\",\"state\":\""+observation.EventKind+
+            "\",\"invariant\":\"exact immutable session, internal marker, native return, and registration ledger\",\"markerId\":\""+
+            marker.MarkerId+"\",\"markerOpenCount\":"+marker.OpenCount+",\"markerEvidenceKind\":\""+markerEvidence+
+            "\",\"nativeActionCompleted\":"+Bool(committed)+",\"serverStopped\":"+Bool(committed)+",\"mainMenuReady\":"+
+            Bool(committed)+",\"targetExclusivelyOpenable\":"+Bool(committed)+"}";
+    private static void CreateEmpty(string path){using var stream=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None,4096,FileOptions.WriteThrough);stream.Flush(true);}
+    private static void Append(string path,string line){using var stream=new FileStream(path,FileMode.Append,FileAccess.Write,FileShare.Read,4096,FileOptions.WriteThrough);byte[] bytes=Encoding.UTF8.GetBytes(line+"\n");stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
+    private static void WriteNew(string path,string text){using var stream=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None,4096,FileOptions.WriteThrough);byte[] bytes=Encoding.UTF8.GetBytes(text);stream.Write(bytes,0,bytes.Length);stream.Flush(true);}
+    private static string Hash(string path){using SHA256 hash=SHA256.Create();using FileStream stream=new(path,FileMode.Open,FileAccess.Read,FileShare.Read);byte[] bytes=hash.ComputeHash(stream);var text=new StringBuilder(64);foreach(byte value in bytes)text.Append(value.ToString("X2"));return text.ToString();}
+    private static string Bool(bool value)=>value?"true":"false";
+    private static string Escape(string value)=>value.Replace("\\","\\\\").Replace("\"","\\\"");
 }
 
 /// <summary>

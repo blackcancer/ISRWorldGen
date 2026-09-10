@@ -23,7 +23,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'L00-C LevelFinalize concurrent oracle compilation failed.' }
     $oracleAssembly = [Reflection.Assembly]::LoadFrom($oracleAssemblyPath)
     $run = $oracleAssembly.GetType('ISRWorldGen.L00C.Laboratory.L00CLevelFinalizeGateOracle', $true).GetMethod('Run', [Reflection.BindingFlags]'Static,NonPublic')
-    if ($null -eq $run -or [int]$run.Invoke($null, @()) -ne 8) { throw 'L00-C LevelFinalize concurrent oracle did not execute all eight sessions.' }
+    if ($null -eq $run -or [int]$run.Invoke($null, @()) -ne 15) { throw 'L00-C LevelFinalize concurrent oracle did not execute all fifteen sessions.' }
 }
 finally { if (Test-Path -LiteralPath $oracleAssemblyPath) { try { Remove-Item -LiteralPath $oracleAssemblyPath -Force } catch { } } }
 
@@ -85,11 +85,10 @@ Assert-Contains $text 'value => value.currentSession' 'Subscription compensation
 Assert-Contains $storageText 'campaign collision preserves existing data' 'Collision refusal without reuse'
 Assert-Contains $storageText 'campaign-provenance.json' 'Persisted campaign provenance'
 Assert-Contains $storageText 'Guid.NewGuid().ToString("N")' 'Fresh stable run id'
-Assert-Contains $text 'new L00CFixtureBootstrap(campaign)' 'Bootstrap accepts attested campaign storage'
-Assert-Contains $bootstrapText 'campaign.PrimarySavePath' 'Primary save isolated to campaign'
-Assert-Contains $bootstrapText 'campaign.SecondarySavePath' 'Secondary save isolated to campaign'
+Assert-Contains $text 'new L00CFixtureBootstrap(campaign,' 'Bootstrap accepts attested campaign storage'
+Assert-Contains $text 'new L00CNativeScenarioHostAdapter(new L00CProductionScenarioComposition(campaign))' 'Production S2 to S3 composition'
+Assert-Contains $storageText 'SaveTargets => saveTargets' 'Exact ten-save manifest exposed immutably'
 Assert-Contains $driverText '"2D0E0FEC4E3D47E083F2BEF081D24672E8CC03051C47BDBDAEC8CFB37FA7E977"' 'Enqueue IL lock'
-Assert-Contains $driverText '"EEFC023F05EF3E3E1FAA5F06D3EB6C1996812827854F67532E5AA34CEB1B389E"' 'OnNewFrame IL lock'
 Assert-Contains $text 'bootstrap.TryAdvance(screenManager' 'Bootstrap survives ModSystem Dispose'
 Assert-Contains $text 'host.TryAdvance(screenManager)' 'Campaign survives ModSystem Dispose'
 Assert-Contains $text 'UnregisterAndClearSingleton();' 'Terminal cleanup'
@@ -97,13 +96,12 @@ Assert-Contains $text 'terminal = true;' 'Terminal state'
 Assert-Contains $text 'installTransaction.Clear(this);' 'Singleton release'
 if ($text -notmatch 'private ICoreClientAPI\? api;' -or $text -notmatch 'api = null; token\?\.Complete\(\); token = null;') { throw 'The sole adapter API reference is not explicitly severed.' }
 
-Assert-Before $hostText 'ExpectPrimaryMenu' 'ExpectSecondaryMenu' 'Primary cycles before secondary campaign phase'
-Assert-Contains $hostText 'state != State.SecondaryMenuOpen || primaryCycles != RequiredPrimaryCycles' 'Five primary cycles gate secondary open'
-Assert-Contains $hostText 'ReturnToMainMenu(attestation.ClientMain, screenManager' 'Return transition evidence'
-Assert-Contains $bootstrapText 'WaitPrimaryMenu' 'Primary bootstrap state'
-Assert-Contains $bootstrapText 'WaitSecondaryCell' 'Secondary bootstrap state'
-Assert-Contains $bootstrapText 'L00CMenuActionDriver.EnterSingleplayerMenu(menu);' 'Native menu transition for live cell binding'
-Assert-Contains $bootstrapText 'ReadUniqueSaveCell' 'Observed save-cell binding'
+Assert-Contains $hostText 'L00CScenarioDefinition.RequiredDedicatedSaves' 'Production composition requires ten paths'
+Assert-Contains $hostText 'L00CLifecycleShutdownBarrier.BindReadyCurrent(captured)' 'Ready binds immutable server evidence'
+Assert-Before $hostText 'TryGetCompletedEvidence' 'ConfirmSaveCommitted' 'Completed server evidence gates SaveCommitted'
+Assert-Before $hostText 'ConfirmSaveCommitted' 'RecordSaveCommitted' 'Barrier commit precedes JSONL publication'
+Assert-Contains $hostText 'campaign.BeginCycling();evidence.Complete(state);campaign.SealForExternalCleanup();' 'Completion seals ten-save cleanup only after evidence'
+Assert-Contains $bootstrapText 'L00CMenuActionLaboratoryHost.OpenIntegrated' 'Bootstrap publishes the composed scenario host'
 Assert-Contains $modSystemText 'api.Event.LevelFinalize += OnLevelFinalize;' 'Native LevelFinalize subscription'
 Assert-Contains $modSystemText 'subscribed.Event.LevelFinalize -= OnLevelFinalize;' 'Native LevelFinalize unsubscription'
 Assert-Contains $modSystemText 'L00CLevelFinalizeSignal? signal = finalizeLease?.Capture();' 'LevelFinalize captures owner/epoch before controller lock'
@@ -111,26 +109,22 @@ Assert-Contains $modSystemText 'L00CProcessCampaignController.SignalLevelFinaliz
 Assert-Contains $text 'internal static void SignalLevelFinalize(L00CLevelFinalizeSignal? signal)' 'Process-level finalization signal'
 Assert-Contains $text 'active.levelFinalizeGate.TryAccept(signal, out int fixtureSequence)' 'Exact owner/epoch acceptance'
 Assert-Contains $text 'active.bootstrap?.SignalLevelFinalize(fixtureSequence);' 'Bootstrap receives exact finalization epoch'
-Assert-Contains $text 'active.host?.SignalLevelFinalize(fixtureSequence);' 'Five-cycle host receives exact finalization epoch'
-Assert-Contains $bootstrapText 'internal void SignalLevelFinalize(int fixtureSequence)' 'Fixture finalization latch'
-Assert-Contains $bootstrapText 'fixture.LevelFinalizeObserved' 'Finalization latch required before return'
-Assert-Contains $hostText 'internal void SignalLevelFinalize(int finalizedFixtureSequence)' 'Host finalization latch'
-Assert-Contains $bootstrapText 'L00CProcessCampaignController.BeginNativeOpen(fixture.Sequence)' 'Creation open epoch begins before native click'
-Assert-Contains $hostText 'L00CProcessCampaignController.BeginNativeOpen(openingSequence)' 'Reopen epoch begins before native click'
-Assert-Contains $hostText 'TryFindFinalizedWorldSession(screenManager, activeTarget.SavePath, false' 'Reopen finalization/path contract'
-if ($bootstrapText.IndexOf('clientPlayingFired` is the audited client-side LevelFinalize gate', [StringComparison]::Ordinal) -ge 0) { throw 'Player-ready flag must not be mislabeled as LevelFinalize.' }
-Assert-Contains $hostText 'expectedRole' 'Role rejection'
-Assert-Contains $hostText 'requires distinct marked saves' 'Distinct role/cell rejection'
+Assert-Contains $text 'active.host?.SignalLevelFinalize(fixtureSequence);' 'Fifteen-session host receives exact finalization epoch'
+Assert-Contains $hostText 'internal void SignalLevelFinalize(int sessionOrdinal)' 'Host finalization latch'
+Assert-Contains $hostText 'L00CProcessCampaignController.BeginNativeOpen(state.ExpectedSessionOrdinal)' 'Every create/reopen acquires an exact native-open epoch'
+foreach ($forbidden in @('RebindCurrentCell', 'OnClickCellLeft', 'PrimarySavePath', 'SecondarySavePath')) {
+    if ($hostText.Contains($forbidden) -or $bootstrapText.Contains($forbidden)) { throw "Obsolete two-save/menu-cell production binding remains: $forbidden" }
+}
 
 [ordered]@{
     TestId = 'L00-C-PROCESS-CAMPAIGN-CONTROLLER'
     Status = 'PASS'
-    StateOrdering = 'PASS: bootstrap primary/secondary then five primary open-return cycles then secondary final return'
+    StateOrdering = 'PASS: exact A-create/A-reopen/B-create ordering repeated five times; next session gated by SaveCommitted'
     SingletonPumpLifetime = 'PASS: static singleton, static ScreenManager queue, no retained client/session API'
     DisposeSurvival = 'PASS: pump owns bootstrap/host outside ModSystem lifetime'
-    InvalidRoleAndPathRejection = 'PASS: marked-save role/path/cell guards remain in host'
+    InvalidRoleAndPathRejection = 'PASS: exact immutable role/path/GUID guards remain in scheduler and S3 barrier'
     TerminalCleanup = 'PASS: terminal state stops requeue and clears singleton'
     CampaignIsolation = 'PASS: every new run owns a fresh attested campaigns/<run-id> root; collision and constructor/enqueue diagnostics are explicit'
-    LevelFinalizeEpochOracle = 'PASS: stale pre-click refused; Retire/open owner gap then current ModSystem accepted for exact 8 sessions'
+    LevelFinalizeEpochOracle = 'PASS: stale pre-click refused; Retire/open owner gap then current ModSystem accepted for exact 15 sessions'
     Scope = 'Executable production-gate concurrency plus deterministic source contract; no Vintage Story process was launched.'
 } | ConvertTo-Json -Depth 4

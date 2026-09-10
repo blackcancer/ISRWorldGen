@@ -54,7 +54,7 @@ foreach ($fragment in @('CampaignControl', 'RecordOpen1', 'AuthorizeOpen2', 'Ope
     if (-not $validatorSource.Contains($fragment)) { throw "Final evidence validator is missing campaign phase wiring: $fragment" }
 }
 
-$head = (& git -C $RepositoryRoot rev-parse HEAD).Trim()
+$head = (& git -c "safe.directory=$RepositoryRoot" -C $RepositoryRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve repository HEAD.' }
 $assemblyPath = Join-Path $RepositoryRoot 'src\WorldGen.VintageStory\bin\Debug\Mods\isrworldgen\ISRWorldGen.dll'
 if (-not (Test-Path -LiteralPath $assemblyPath -PathType Leaf)) { throw 'Debug candidate assembly is missing.' }
@@ -91,6 +91,36 @@ function Write-NewJson([string]$Path, $Value) {
         try { $writer.Write(($Value | ConvertTo-Json -Depth 6)) } finally { $writer.Dispose() }
     }
     finally { $stream.Dispose() }
+}
+
+function ConvertFrom-L00CInvariantRoundTripUtc([string]$Value) {
+    $instant = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParse(
+        $Value,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind,
+        [ref]$instant)) {
+        throw "L00-C fixture timestamp is not invariant round-trip UTC: $Value"
+    }
+    return $instant.ToUniversalTime()
+}
+
+function Get-StrictlyLaterUtc([DateTimeOffset]$Boundary) {
+    do { $candidate = [DateTimeOffset]::UtcNow } while ($candidate -le $Boundary)
+    return $candidate
+}
+
+function Assert-FrFrInvariantTimestampRegression {
+    $previous = [Globalization.CultureInfo]::CurrentCulture
+    try {
+        [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('fr-FR')
+        $started = ConvertFrom-L00CInvariantRoundTripUtc '2026-09-10T01:02:03.0000000+00:00'
+        $completed = ConvertFrom-L00CInvariantRoundTripUtc '2026-09-10T01:02:03.0000002+00:00'
+        if ($started.Year -ne 2026 -or $started.Month -ne 9 -or $started.Day -ne 10 -or $started -ge $completed) {
+            throw 'Invariant ISO parsing did not preserve September 10 and strict Start/Complete ordering under fr-FR.'
+        }
+    }
+    finally { [Globalization.CultureInfo]::CurrentCulture = $previous }
 }
 
 function Write-Varint([IO.Stream]$Stream, [int]$Value) {
@@ -270,11 +300,13 @@ function New-Campaign([string]$Name) {
 function Complete-Open1(
     $Fixture,
     [switch]$WithWal,
-    [ValidateSet('None', 'MissingChunk')][string]$DatabaseMutation = 'None') {
-    $initialized = [DateTimeOffset]::Parse([string]$Fixture.Initialize.InitializedUtc).ToUniversalTime()
+    [ValidateSet('None', 'MissingChunk')][string]$DatabaseMutation = 'None',
+    [ValidateSet('None', 'StartedAtInitialize')][string]$TimestampMutation = 'None') {
+    $initialized = ConvertFrom-L00CInvariantRoundTripUtc ([string]$Fixture.Initialize.InitializedUtc)
     $initializeReceiptPath = Join-Path $Fixture.Evidence 'campaign-control\01-initialize.json'
     $initializeWritten = [DateTimeOffset](Get-Item -LiteralPath $initializeReceiptPath).LastWriteTimeUtc
-    $started = if ($initialized -gt $initializeWritten) { $initialized.AddTicks(1) } else { $initializeWritten.AddTicks(1) }
+    $startBoundary = if ($initialized -gt $initializeWritten) { $initialized } else { $initializeWritten }
+    $started = Get-StrictlyLaterUtc $startBoundary
     New-CompleteDatabase $Fixture.Database
     if ($DatabaseMutation -eq 'MissingChunk') {
         $mutationConnection = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$($Fixture.Database);Mode=ReadWrite;Pooling=False")
@@ -311,8 +343,7 @@ function Complete-Open1(
             throw 'Synthetic persisted source did not retain a real WAL-backed update.'
         }
     }
-    Start-Sleep -Milliseconds 2
-    $completed = [DateTimeOffset]::UtcNow
+    $completed = Get-StrictlyLaterUtc $started
     [IO.File]::SetCreationTimeUtc($Fixture.Database, $started.AddTicks(1).UtcDateTime)
     [IO.File]::SetLastWriteTimeUtc($Fixture.Database, $completed.AddTicks(-1).UtcDateTime)
     $save = '33333333-3333-3333-3333-333333333333'
@@ -336,7 +367,7 @@ function Complete-Open1(
     [IO.File]::WriteAllText($Fixture.Open1Log, $log, [Text.UTF8Encoding]::new($false))
     $session = [ordered]@{
         EvidenceSequence = 3
-        StartedUtc = $started.ToString('o')
+        StartedUtc = $(if ($TimestampMutation -eq 'StartedAtInitialize') { $initialized.ToString('o') } else { $started.ToString('o') })
         CompletedUtc = $completed.ToString('o')
         WorldRole = 'activated-primary'
         SavegameIdentifier = $save
@@ -371,11 +402,11 @@ function Complete-Open2(
     [bool]$UseFalseStableFormat = $false,
     [int]$PersistedOpenCount = 2,
     [ValidateSet('None', 'MissingWorldSave', 'ReorderedTerminal')][string]$TerminalMutation = 'None') {
-    $authorized = [DateTimeOffset]::Parse([string]$Fixture.AuthorizeOpen2.AuthorizedUtc).ToUniversalTime()
+    $authorized = ConvertFrom-L00CInvariantRoundTripUtc ([string]$Fixture.AuthorizeOpen2.AuthorizedUtc)
     $authorizationReceiptPath = Join-Path $Fixture.Evidence 'campaign-control\03-authorize-open2.json'
     $authorizationWritten = [DateTimeOffset](Get-Item -LiteralPath $authorizationReceiptPath).LastWriteTimeUtc
-    $started = if ($authorized -gt $authorizationWritten) { $authorized.AddTicks(1) } else { $authorizationWritten.AddTicks(1) }
-    Start-Sleep -Milliseconds 2
+    $startBoundary = if ($authorized -gt $authorizationWritten) { $authorized } else { $authorizationWritten }
+    $started = Get-StrictlyLaterUtc $startBoundary
     $session = [ordered]@{
         EvidenceSequence = 4
         StartedUtc = $started.ToString('o')
@@ -440,7 +471,7 @@ function Complete-Open2(
     }
     [IO.File]::WriteAllText($Fixture.Open2Log, $open2Log, [Text.UTF8Encoding]::new($false))
     Set-DatabaseMarkerOpenCount $Fixture.Database $PersistedOpenCount
-    $completed = [DateTimeOffset]::UtcNow
+    $completed = Get-StrictlyLaterUtc $started
     $session.CompletedUtc = $completed.ToString('o')
     [IO.File]::SetLastWriteTimeUtc($Fixture.Database, $completed.AddTicks(-1).UtcDateTime)
     Write-NewJson $Fixture.Open2Session $session
@@ -453,7 +484,20 @@ function Assert-Rejected([scriptblock]$Action, [string]$Label) {
     throw "$Label was unexpectedly accepted."
 }
 
+function Assert-RejectedWithMessage([scriptblock]$Action, [string]$Label, [string]$ExpectedMessage) {
+    try { [void](& $Action) }
+    catch {
+        if ($_.Exception.Message -notlike "*$ExpectedMessage*") {
+            throw "$Label failed for the wrong invariant: $($_.Exception.Message)"
+        }
+        return
+    }
+    throw "$Label was unexpectedly accepted."
+}
+
 try {
+    Assert-FrFrInvariantTimestampRegression
+
     $preexistingRoot = Join-Path $selfTestRoot 'preexisting'
     [void](New-Item -ItemType Directory -Path $preexistingRoot)
     $preexistingDatabase = Join-Path $preexistingRoot 'fresh.vcdbs'
@@ -470,8 +514,13 @@ try {
     $reversed = New-Campaign 'reversed'
     Assert-Rejected { & $controllerPath -Phase AuthorizeOpen2 -EvidenceDirectory $reversed.Evidence -RepositoryRoot $RepositoryRoot } 'AuthorizeOpen2 before RecordOpen1'
 
+    $invalidOpen1Time = New-Campaign 'invalid-open1-time'
+    Assert-RejectedWithMessage { Complete-Open1 $invalidOpen1Time -TimestampMutation 'StartedAtInitialize' } `
+        'Open1 started at Initialize instead of strictly after it' `
+        'Open1 timestamps must be after Initialize and completed before RecordOpen1.'
+
     $stale = New-Campaign 'stale-renamed'
-    $initialized = [DateTimeOffset]::Parse([string]$stale.Initialize.InitializedUtc).ToUniversalTime()
+    $initialized = ConvertFrom-L00CInvariantRoundTripUtc ([string]$stale.Initialize.InitializedUtc)
     $started = $initialized.AddTicks(1)
     New-CompleteDatabase $stale.Database
     Start-Sleep -Milliseconds 2
@@ -598,6 +647,8 @@ try {
         SidecarDependentSnapshotRejected = $true
         SnapshotHashMismatchRejected = $true
         ReversedOrderRejected = $true
+        FrFrInvariantIsoTimestampParsing = $true
+        InvalidOpen1TimestampOrderRejected = $true
         FalseStableOpenFieldRejected = $true
         Open2DatabaseIncrementRequired = $true
         IncompleteOpen1DatabaseRejected = $true

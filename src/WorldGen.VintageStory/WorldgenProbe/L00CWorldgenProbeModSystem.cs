@@ -381,6 +381,9 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
 
         active = true;
         saveGame.StoreData(LifecycleMarkerKey, lifecycleMarker.Serialize());
+        L00CLifecycleShutdownBarrier.CaptureInternalMarker(
+            lifecycleShutdownLease ?? throw new InvalidOperationException("L00-C lifecycle shutdown lease is absent while capturing the internal marker."),
+            new L00CLifecycleInternalMarkerProof(lifecycleMarker.MarkerId, lifecycleMarker.SavegameIdentifier, lifecycleMarker.OpenCount));
         LogLifecycleEvent("MarkerStaged", "StoreData is staged internal marker data and is not SaveCommitted proof", runId,
             $"marker={lifecycleMarker.MarkerId} guid={lifecycleMarker.SavegameIdentifier} open={lifecycleMarker.OpenCount} isnew={saveGame.IsNew}");
         LogInventory("lifecycle", handlers, saveGame, priorRestore.RemovedOwned, sameHandlerSet);
@@ -2014,6 +2017,8 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         Interlocked.Exchange(ref disposalStarted, 1);
         Interlocked.Increment(ref worldRunId);
         L00CProbeCallbackOwnerLease? callbacks = callbackOwnerLease;
+        L00CLifecycleShutdownLease? lifecycleLease = lifecycleShutdownLease;
+        L00CLifecycleRegistrationSnapshot? lifecycleRegistrations = null;
         callbacks?.BeginClosing();
         CloseLifecycleShutdownBarrier();
         ICoreServerAPI? serverApi = api;
@@ -2049,6 +2054,7 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
                 }
 
                 L00CLifecycleRegistrationSnapshot registrations = callbacks.Ledger.Snapshot();
+                lifecycleRegistrations = registrations;
                 foreach (string diagnostic in registrations.Trace) serverApi.Logger.Notification("L00C_LIFECYCLE_REGISTRATION " + diagnostic);
                 if (!registrations.Complete) disposeFailure = AppendDisposeFailure(serverApi, disposeFailure, "registration-release-proof", new InvalidOperationException("L00-C lifecycle registration release proof is incomplete."));
             }
@@ -2097,6 +2103,28 @@ public sealed class L00CWorldgenProbeModSystem : ModSystem
         callbackOwnerLease = null;
         api = null;
         base.Dispose();
+
+        if (disposeFailure is null && lifecycleLease is not null && lifecycleRegistrations is not null)
+        {
+            try
+            {
+                L00CLifecycleRegistrationState init = lifecycleRegistrations.States[L00CLifecycleRegistrationKind.InitWorldGenerator];
+                L00CLifecycleRegistrationState save = lifecycleRegistrations.States[L00CLifecycleRegistrationKind.GameWorldSave];
+                L00CLifecycleRegistrationState tick = lifecycleRegistrations.States[L00CLifecycleRegistrationKind.Tick];
+                int closingCallbacks = lifecycleRegistrations.Trace.Count(value => value.Contains(" state=IgnoredDuringClosing ", StringComparison.Ordinal));
+                int staleCallbacks = lifecycleRegistrations.Trace.Count(value => value.Contains(" state=IgnoredStaleOrDuplicate ", StringComparison.Ordinal));
+                L00CLifecycleShutdownBarrier.CaptureRegistrationRelease(lifecycleLease,
+                    new L00CLifecycleRegistrationProof(
+                        init.Registered, save.Registered, tick.Registered,
+                        init.OwnerReferenceReleased, save.OwnerReferenceReleased, tick.OwnerReferenceReleased,
+                        save.IndependentlyUnregistered, tick.IndependentlyUnregistered,
+                        staleCallbacks, 0, closingCallbacks, 0));
+            }
+            catch (Exception exception)
+            {
+                disposeFailure = AppendDisposeFailure(serverApi!, disposeFailure, "registration-evidence-publication", exception);
+            }
+        }
 
         if (disposeFailure is not null)
         {

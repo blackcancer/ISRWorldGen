@@ -68,11 +68,11 @@ if ($TestedCommit -notmatch '^[0-9a-f]{40}$' -or $CampaignId -notmatch '^[0-9a-f
     $Open1EvidenceSequence -le 0 -or $ExpectedOpenCount -le 0) {
     throw 'Persistence attestation identity fields are malformed.'
 }
-$repositoryHead = (& git -C $RepositoryRoot rev-parse HEAD).Trim()
+$repositoryHead = (& git -c "safe.directory=$RepositoryRoot" -C $RepositoryRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $repositoryHead -ne $TestedCommit) {
     throw "Persistence attestation candidate '$TestedCommit' is not the repository HEAD '$repositoryHead'."
 }
-$trackedStatus = (& git -C $RepositoryRoot status --porcelain=v1 --untracked-files=no)
+$trackedStatus = (& git -c "safe.directory=$RepositoryRoot" -C $RepositoryRoot status --porcelain=v1 --untracked-files=no)
 if ($LASTEXITCODE -ne 0 -or @($trackedStatus).Count -ne 0) {
     throw 'Persistence attestation requires a clean tracked worktree for the exact candidate commit.'
 }

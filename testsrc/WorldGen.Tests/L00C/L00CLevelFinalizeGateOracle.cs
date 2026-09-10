@@ -52,7 +52,7 @@ internal static class L00CLevelFinalizeGateOracle
             throw new InvalidOperationException("Current client owner was not accepted for the second epoch.");
 
         int finalizedSessions = 2;
-        for (int fixtureSequence = 3; fixtureSequence <= 8; fixtureSequence++)
+        for (int fixtureSequence = 3; fixtureSequence <= 15; fixtureSequence++)
         {
             gate.RetireSession(second);
             L00CNativeOpenReservation open = gate.BeginOpen(fixtureSequence);
@@ -69,11 +69,11 @@ internal static class L00CLevelFinalizeGateOracle
         }
 
         Refuse(() => gate.BeginOpen(0), "sequence zero");
-        Refuse(() => gate.BeginOpen(9), "sequence after campaign");
+        Refuse(() => gate.BeginOpen(16), "sequence after campaign");
         gate.Close();
         if (second.Capture() is not null) throw new InvalidOperationException("Closed gate retained a session epoch.");
         Refuse(() => gate.BeginOpen(1), "reopen after close");
-        if (finalizedSessions != 8) throw new InvalidOperationException("The finalize gate did not execute all eight sessions.");
+        if (finalizedSessions != 15) throw new InvalidOperationException("The finalize gate did not execute all fifteen sessions.");
         return finalizedSessions;
     }
 
