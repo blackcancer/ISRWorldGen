@@ -5,6 +5,10 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- SDK defaults exclude this project's active output directories only.
+         Nested laboratory projects and old/relocated builds can leave generated
+         C# under other bin/obj folders. Never compile those as test sources. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

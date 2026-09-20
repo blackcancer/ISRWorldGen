@@ -1,0 +1,62 @@
+name: Test project generated-source isolation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - testsrc/WorldGen.Tests/WorldGen.Tests.csproj
+      - Directory.Build.props
+      - global.json
+      - tools/test_testproject_inputs.py
+      - .github/workflows/test-project-inputs.yml
+  pull_request:
+    paths:
+      - testsrc/WorldGen.Tests/WorldGen.Tests.csproj
+      - Directory.Build.props
+      - global.json
+      - tools/test_testproject_inputs.py
+      - .github/workflows/test-project-inputs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  project-inputs:
+    name: ${{ matrix.os }} / ${{ matrix.configuration }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        configuration: [Debug, Release]
+    env:
+      CONFIGURATION: ${{ matrix.configuration }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_UI_LANGUAGE: en-US
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reproduce CS0579 and verify the actual project input filter
+        shell: pwsh
+        run: |
+          python tools/test_testproject_inputs.py --configuration $env:CONFIGURATION --report-dir (Join-Path $env:RUNNER_TEMP 'test-project-inputs')
+          if ($LASTEXITCODE -ne 0) { throw 'Test project input regression failed.' }
+      - name: Retain evaluated inputs and compiler evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-project-inputs-${{ matrix.os }}-${{ matrix.configuration }}
+          path: ${{ runner.temp }}/test-project-inputs/
+          if-no-files-found: error
+          retention-days: 14
