@@ -71,7 +71,9 @@ def main() -> None:
                   '-Configuration', args.configuration, '-Scope', 'L03BProtocol']
     invalid = run(invocation + ['-PreflightOnly', '-PowerShellPath', str(reports / 'missing/pwsh.exe')],
                   root, env, reports / 'invalid-explicit-shell.log')
-    check(invalid.returncode != 0 and 'No fallback' in invalid.stdout,
+    # Match the diagnostic prefix, not its tail: PowerShell wraps long error
+    # messages and inserts ANSI formatting between "No" and "fallback".
+    check(invalid.returncode != 0 and 'PowerShellPath must name' in invalid.stdout,
           'Invalid explicit shell must fail before tests, not silently fall back.')
     ready = run(invocation + ['-PreflightOnly', '-PowerShellPath', shell], root, env, reports / 'preflight.log')
     check(ready.returncode == 0, ready.stdout)
