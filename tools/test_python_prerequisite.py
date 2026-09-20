@@ -28,6 +28,14 @@ def check(value: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def same_interpreter(actual: str, expected: str) -> bool:
+    # Preserve the environment directory as well as file identity: on Unix a
+    # venv executable can symlink to the base Python, but those are not the same
+    # environment. On Windows this accepts both 8.3 and long-path spellings.
+    return (os.path.samefile(actual, expected)
+            and os.path.samefile(Path(actual).parent, Path(expected).parent))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--configuration', choices=['Debug', 'Release'], required=True)
@@ -72,9 +80,6 @@ def main() -> None:
         passed(run([sys.executable, '-I', '-B', '-m', 'venv', '--without-pip', str(venv)], 'create-venv'))
         real = venv / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
         check(real.is_file(), 'The private test interpreter was not created.')
-        # sys.executable may expand Windows 8.3 TEMP paths. Observe it through
-        # an independent direct launch and still require the same physical file
-        # and virtual environment, rather than weakening identity to a basename.
         observed = passed(run([str(real), '-I', '-B', '-c',
                                'import sys,json; print(json.dumps({"executable":sys.executable,"prefix":sys.prefix}))'],
                               'direct-runtime-identity'))
@@ -84,7 +89,7 @@ def main() -> None:
         ready = passed(run(invocation + ['-PreflightOnly', '-PythonPath', str(real)], 'preflight'))
         info = json.loads(ready.stdout)
         check(info['Tests'] == 'NOT_RUN' and info['Status'] == 'READY_FOR_TEST_INVOCATION', 'Preflight must not claim executed tests.')
-        check(os.path.normcase(info['PythonPath']) == os.path.normcase(expected['executable']), 'Explicit interpreter identity was lost.')
+        check(same_interpreter(info['PythonPath'], expected['executable']), 'Explicit interpreter identity was lost.')
         check(tuple(map(int, info['PythonVersion'].split('.')[:2])) >= (3, 10), 'Python version was not validated.')
         invalid = run(invocation + ['-PreflightOnly', '-PythonPath', str(temp / 'missing-python')], 'invalid-explicit')
         check(invalid.returncode != 0 and 'PYTHON_PREREQUISITE_INVALID' in invalid.stdout, 'Invalid explicit settings must not fall back.')
@@ -94,7 +99,7 @@ def main() -> None:
             ps51 = shutil.which('powershell.exe')
             check(ps51 is not None, 'Windows bootstrap requires PowerShell 5.1.')
             bootstrap = passed(run([ps51] + invocation[1:] + ['-PreflightOnly', '-PythonPath', str(real)], 'bootstrap51'))
-            check(os.path.normcase(json.loads(bootstrap.stdout)['PythonPath']) == os.path.normcase(expected['executable']), '5.1 bootstrap lost PythonPath.')
+            check(same_interpreter(json.loads(bootstrap.stdout)['PythonPath'], expected['executable']), '5.1 bootstrap lost PythonPath.')
         # Compiled unavailable-interpreter stand-in. Unlike the Store alias it
         # cannot open a store, install anything, or access non-fixture files.
         fixture = temp / 'alias-project'
@@ -119,8 +124,6 @@ def main() -> None:
                        '-Module', str(root / 'tools/Resolve-TestPython.ps1')], 'alias-only-missing', missing_env)
         check(missing.returncode != 0 and 'PYTHON_PREREQUISITE_MISSING' in missing.stdout, 'An alias-only environment must fail discovery.')
         marker.unlink()
-        # Both reported tests must execute the real tool despite a broken python
-        # command first on PATH; the wrapper pins sys.executable for testhost.
         suite = passed(run(invocation + ['-PythonPath', str(real)], 'l05d-original-tests', masked))
         check(not marker.exists(), 'The L05-D test subprocess ignored the pinned interpreter.')
         results = list(ET.parse(reports / 'development.trx').iterfind('.//{*}UnitTestResult'))
