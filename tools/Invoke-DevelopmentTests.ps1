@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
-    [ValidateSet('Development', 'L03BProtocol')][string]$Scope = 'Development',
+    [ValidateSet('Development', 'L03BProtocol', 'L05DProtocol')][string]$Scope = 'Development',
     [string]$PowerShellPath,
+    [string]$PythonPath,
     [switch]$PreflightOnly
 )
 Set-StrictMode -Version Latest
@@ -43,19 +44,22 @@ function Resolve-PowerShellExecutable {
 
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $pwsh = Resolve-PowerShellExecutable -ExplicitPath $PowerShellPath
-$project = if ($Scope -eq 'L03BProtocol') {
-    Join-Path $repository 'testsrc/WorldGen.L03B.Protocol.Tests/WorldGen.L03B.Protocol.Tests.csproj'
-} else {
-    Join-Path $repository 'testsrc/WorldGen.Tests/WorldGen.Tests.csproj'
+$project = switch ($Scope) {
+    'L03BProtocol' { Join-Path $repository 'testsrc/WorldGen.L03B.Protocol.Tests/WorldGen.L03B.Protocol.Tests.csproj' }
+    'L05DProtocol' { Join-Path $repository 'testsrc/WorldGen.PlanAdoption.Tests/WorldGen.PlanAdoption.Tests.csproj' }
+    default { Join-Path $repository 'testsrc/WorldGen.Tests/WorldGen.Tests.csproj' }
 }
 $settings = Join-Path $repository 'tests/Development.runsettings'
 foreach ($inputPath in @($project, $settings)) {
     if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) { throw "Missing test input: $inputPath" }
 }
+if ($PSBoundParameters.ContainsKey('PythonPath') -and [string]::IsNullOrWhiteSpace($PythonPath)) {
+    throw 'PYTHON_PREREQUISITE_INVALID: an explicit PythonPath cannot be empty. No tests were run.'
+}
 
-# Child processes (including the timeout test's grandchild) inherit this PATH.
 # Restore the caller's process environment; never change user/machine settings.
 $originalPath = $env:PATH
+$originalPython = $env:ISR_TEST_PYTHON
 $separator = [IO.Path]::PathSeparator
 $env:PATH = (Split-Path -Parent $pwsh) + $separator + $originalPath
 Push-Location $repository
@@ -63,17 +67,25 @@ try {
     if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
         $forward = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $PSCommandPath,
             '-Configuration', $Configuration, '-Scope', $Scope, '-PowerShellPath', $pwsh)
+        if ($PSBoundParameters.ContainsKey('PythonPath')) { $forward += '-PythonPath', $PythonPath }
         if ($PreflightOnly) { $forward += '-PreflightOnly' }
         & $pwsh @forward
         exit $LASTEXITCODE
     }
-    # Validate an explicitly selected executable too; its name alone is not a version check.
     $versionProbe = & $pwsh -NoLogo -NoProfile -NonInteractive -Command 'if ($PSVersionTable.PSEdition -ne "Core" -or $PSVersionTable.PSVersion.Major -lt 7) { exit 7 }; $PSVersionTable.PSVersion.ToString()'
     if ($LASTEXITCODE -ne 0 -or @($versionProbe).Count -ne 1) { throw 'The selected executable is not a usable PowerShell 7+ Core.' }
     foreach ($tool in @('dotnet', 'git')) {
         if ($null -eq (Get-Command $tool -CommandType Application -ErrorAction SilentlyContinue)) {
             throw "Required test tool '$tool' is unavailable. No tests were run."
         }
+    }
+    $python = $null
+    if ($Scope -ne 'L03BProtocol') {
+        . (Join-Path $PSScriptRoot 'Resolve-TestPython.ps1')
+        $requestedPython = if ($PSBoundParameters.ContainsKey('PythonPath')) { $PythonPath } else { $originalPython }
+        $python = Resolve-TestPython -ExplicitPath $requestedPython
+        # Tests launch this confirmed sys.executable, not a PATH/Store alias.
+        $env:ISR_TEST_PYTHON = $python.Path
     }
     $sdk = & dotnet --version
     if ($LASTEXITCODE -ne 0) { throw 'The SDK required by global.json could not be resolved. No tests were run.' }
@@ -83,6 +95,8 @@ try {
             Scope = $Scope
             PowerShellPath = $pwsh
             PowerShellVersion = [string]$versionProbe
+            PythonPath = if ($null -ne $python) { $python.Path } else { $null }
+            PythonVersion = if ($null -ne $python) { $python.Version } else { 'NOT_REQUIRED_FOR_THIS_SCOPE' }
             DotnetSdk = [string]$sdk
             Project = $project
             Configuration = $Configuration
@@ -95,6 +109,8 @@ try {
     Write-Warning 'DEVELOPMENT RUN ONLY: T03-05/T03-06 publication and independent blind review are NOT_RUN. Use Run-L03BEvidenceS.ps1 for the certified campaign.'
     if ($Scope -eq 'L03BProtocol') {
         Write-Warning 'Portable protocol project: original L03B C# tests and real PowerShell scripts, without Vintage Story assemblies. This is not a full mod build.'
+    } elseif ($Scope -eq 'L05DProtocol') {
+        Write-Warning 'Portable L05D project: original plan adoption tests and real Python tool on disposable fixtures, without Vintage Story assemblies.'
     }
     $arguments = @('test', $project, '--configuration', $Configuration, '--settings', $settings,
         '--logger', 'trx;LogFileName=development.trx', '--results-directory', (Join-Path (Split-Path $project -Parent) 'TestResults'))
@@ -106,4 +122,5 @@ try {
 } finally {
     Pop-Location
     $env:PATH = $originalPath
+    $env:ISR_TEST_PYTHON = $originalPython
 }

@@ -1,0 +1,74 @@
+name: Python prerequisite and original L05-D tests
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/Resolve-TestPython.ps1'
+      - 'tools/Invoke-DevelopmentTests.ps1'
+      - 'tools/test_python_prerequisite.py'
+      - 'tools/prepare_plan_update.py'
+      - 'testsrc/WorldGen.Tests/L05D/**'
+      - 'testsrc/WorldGen.PlanAdoption.Tests/**'
+      - 'tests/Development.runsettings'
+      - 'registry/**'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - '.github/workflows/python-prerequisite.yml'
+  pull_request:
+    paths:
+      - 'tools/Resolve-TestPython.ps1'
+      - 'tools/Invoke-DevelopmentTests.ps1'
+      - 'tools/test_python_prerequisite.py'
+      - 'tools/prepare_plan_update.py'
+      - 'testsrc/WorldGen.Tests/L05D/**'
+      - 'testsrc/WorldGen.PlanAdoption.Tests/**'
+      - 'tests/Development.runsettings'
+      - 'registry/**'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - '.github/workflows/python-prerequisite.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: python-prerequisite-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    name: ${{ matrix.os }} / ${{ matrix.configuration }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        configuration: [Debug, Release]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_UI_LANGUAGE: en-US
+      CONFIGURATION: ${{ matrix.configuration }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reject unavailable aliases and execute original adoption tests
+        shell: pwsh
+        run: |
+          python tools/test_python_prerequisite.py --configuration $env:CONFIGURATION
+          if ($LASTEXITCODE -ne 0) { throw 'Python prerequisite/L05-D regression failed.' }
+      - name: Retain actual results and prerequisite diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-prerequisite-${{ matrix.os }}-${{ matrix.configuration }}
+          path: testsrc/WorldGen.PlanAdoption.Tests/TestResults/
+          if-no-files-found: error
+          retention-days: 14

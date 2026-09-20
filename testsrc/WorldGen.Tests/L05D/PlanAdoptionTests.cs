@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 
 namespace ISRWorldGen.Tests.L05D;
@@ -199,18 +200,40 @@ internal sealed class AdoptionFixture : IDisposable
 
     private ProcessResult RunPrepareCore()
     {
-        var start = new ProcessStartInfo("python")
+        // The development launcher pins a probed sys.executable. A configured
+        // but invalid path is never silently replaced by the Windows Store alias.
+        string? selectedPython = Environment.GetEnvironmentVariable("ISR_TEST_PYTHON");
+        if (selectedPython is not null &&
+            (!Path.IsPathFullyQualified(selectedPython) || !File.Exists(selectedPython)))
+            throw new InvalidOperationException("ISR_TEST_PYTHON must name an existing absolute Python 3.10+ executable. Use tools/Invoke-DevelopmentTests.ps1 -PreflightOnly -PythonPath <path>.");
+        var start = new ProcessStartInfo(selectedPython ?? "python")
         {
-            WorkingDirectory = Package, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true
+            WorkingDirectory = Package, RedirectStandardOutput = true, RedirectStandardError = true,
+            UseShellExecute = false, CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
         };
+        start.Environment["PYTHON_MANAGER_AUTOMATIC_INSTALL"] = "false";
+        start.Environment.Remove("PYLAUNCHER_ALLOW_INSTALL");
+        start.Environment.Remove("PYLAUNCHER_ALWAYS_INSTALL");
+        start.ArgumentList.Add("-I"); start.ArgumentList.Add("-B");
+        start.ArgumentList.Add("-X"); start.ArgumentList.Add("utf8");
         start.ArgumentList.Add(Path.Combine(Package, "tools", "prepare_plan_update.py"));
         start.ArgumentList.Add("--existing"); start.ArgumentList.Add(Existing);
         start.ArgumentList.Add("--output"); start.ArgumentList.Add(Output);
         using Process process = Process.Start(start)!;
-        string output = process.StandardOutput.ReadToEnd();
-        string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return new ProcessResult(process.ExitCode, output, error);
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        Task completion = Task.WhenAll(process.WaitForExitAsync(), output, error);
+        if (!completion.Wait(TimeSpan.FromSeconds(30)))
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (!completion.Wait(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("Python plan-adoption process did not release its streams after termination.");
+            throw new TimeoutException("Python plan-adoption process exceeded its 30-second budget.");
+        }
+        if (process.ExitCode == 9009)
+            throw new InvalidOperationException("PYTHON_PREREQUISITE_MISSING: the python command resolved to an unavailable interpreter/Store alias. Install Python 3.10+ or use tools/Invoke-DevelopmentTests.ps1 -PythonPath <absolute executable>.");
+        return new ProcessResult(process.ExitCode, output.Result, error.Result);
     }
 
     private static void Copy(string sourceRoot, string destinationRoot, string relative)

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Links the original L05-D tests. No game DLLs and no production solution change. -->
+  <PropertyGroup>
+    <AssemblyName>ISRWorldGen.PlanAdoption.Tests</AssemblyName>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MSTest" Version="4.0.2" />
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+    <Compile Include="../WorldGen.Tests/L05D/PlanAdoptionTests.cs" Link="PlanAdoptionTests.cs" />
+    <Compile Include="TestAssembly.cs" />
+  </ItemGroup>
+</Project>
