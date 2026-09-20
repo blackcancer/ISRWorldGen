@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <!-- Explicit development profile only. This single publisher is executed
+         by Run-L03BEvidenceS.ps1 on its clean, detached Release worktree.
+         Exclusion is NOT_RUN, not PASS or qualification of T03-05/T03-06.
+         All protocol/PowerShell regression tests remain selected. -->
+    <TestCaseFilter>FullyQualifiedName!=ISRWorldGen.Tests.L03B.EvidenceArtifactTests.T0305AndT0306PublishAtomicBlindReviewEvidence</TestCaseFilter>
+    <TreatNoTestsAsError>true</TreatNoTestsAsError>
+  </RunConfiguration>
+</RunSettings>

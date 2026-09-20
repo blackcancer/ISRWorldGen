@@ -1,0 +1,71 @@
+name: L03-B protocol and test prerequisites
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/Invoke-DevelopmentTests.ps1'
+      - 'tools/test_l03b_development.py'
+      - 'tests/Development.runsettings'
+      - 'testsrc/WorldGen.L03B.Protocol.Tests/**'
+      - 'testsrc/WorldGen.Tests/L03B/**'
+      - 'src/WorldGen.Core/**'
+      - 'registry/fixtures.json'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - '.github/workflows/l03b-protocol.yml'
+  pull_request:
+    paths:
+      - 'tools/Invoke-DevelopmentTests.ps1'
+      - 'tools/test_l03b_development.py'
+      - 'tests/Development.runsettings'
+      - 'testsrc/WorldGen.L03B.Protocol.Tests/**'
+      - 'testsrc/WorldGen.Tests/L03B/**'
+      - 'src/WorldGen.Core/**'
+      - 'registry/fixtures.json'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - '.github/workflows/l03b-protocol.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: l03b-protocol-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  protocol:
+    name: ${{ matrix.os }} / ${{ matrix.configuration }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        configuration: [Debug, Release]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_UI_LANGUAGE: en-US
+      CONFIGURATION: ${{ matrix.configuration }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run unchanged protocol tests and preserve campaign provenance refusal
+        shell: pwsh
+        run: |
+          python tools/test_l03b_development.py --configuration $env:CONFIGURATION
+          if ($LASTEXITCODE -ne 0) { throw 'L03-B protocol/prerequisite regression failed.' }
+      - name: Retain test results only, never a certified blind evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l03b-protocol-${{ matrix.os }}-${{ matrix.configuration }}
+          path: testsrc/WorldGen.L03B.Protocol.Tests/TestResults/
+          retention-days: 14
+          if-no-files-found: error
