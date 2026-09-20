@@ -28,7 +28,9 @@ internal static class L00CLifecycleShutdownOrderingOracle
         string path=SavePath(saves,run,1,'a'),guid=GuidFor(1,'a');
         var state=new L00CLifecycleShutdownState();var identity=L00CLifecycleShutdownIdentity.Create(90,"negative",guid);var lease=state.Open(identity);
         var ready=L00CLifecycleSessionObservation.Ready(run,1,1,path,guid,true);
-        Refuse(()=>state.BindReady(lease,ready),"Ready before stable");state.Arm(lease);state.BindReady(lease,ready);
+        Refuse(()=>state.BindReady(lease,ready),"Ready before stable");
+        state.CaptureInternalMarker(lease,new L00CLifecycleInternalMarkerProof(run,guid,1));
+        state.Arm(lease);state.BindReady(lease,ready);
         Refuse(()=>state.BindReady(lease,ready),"duplicate Ready");
         var copiedReady=L00CLifecycleSessionObservation.Ready(run,1,1,path,guid,true);
         Refuse(()=>state.PrepareReturn(copiedReady,path),"reattributed equal-value callback");
@@ -41,6 +43,7 @@ internal static class L00CLifecycleShutdownOrderingOracle
         if(!state.Close(lease))throw new InvalidOperationException("L00-C current owner did not close.");
         Refuse(()=>state.Open(L00CLifecycleShutdownIdentity.Create(2,"next-server",GuidFor(1,'b'))),"next Open before SaveCommitted");
         Refuse(()=>state.BindReady(lease,ready),"event during closing");
+        state.CaptureRegistrationRelease(lease,CompleteRegistrations());
         foreach(int missing in new[]{0,1,2,3})
         {
             var proof=new L00CNativeSaveQuitReturnProof(missing!=0,missing!=1,missing!=2,missing!=3,path,guid);
@@ -59,12 +62,16 @@ internal static class L00CLifecycleShutdownOrderingOracle
     private static int RunSession(string run,string saves,int iteration,int ordinal,char slot,string guid,bool isNew)
     {
         string path=SavePath(saves,run,iteration,slot);var state=new L00CLifecycleShutdownState();
-        var identity=L00CLifecycleShutdownIdentity.Create(ordinal,"instance-"+ordinal,guid);var lease=state.Open(identity);state.Arm(lease);
+        var identity=L00CLifecycleShutdownIdentity.Create(ordinal,"instance-"+ordinal,guid);var lease=state.Open(identity);
+        state.CaptureInternalMarker(lease,new L00CLifecycleInternalMarkerProof(run,guid,isNew?1:2));
+        state.Arm(lease);
         var ready=L00CLifecycleSessionObservation.Ready(run,iteration,ordinal,path,guid,isNew);state.BindReady(lease,ready);
         var reservation=state.PrepareReturn(ready,path);state.BeginNativeReturn(reservation);state.Close(lease);
+        state.CaptureRegistrationRelease(lease,CompleteRegistrations());
         state.ConfirmSaveCommitted(reservation,L00CLifecycleSessionObservation.SaveCommitted(run,iteration,ordinal,path,guid,isNew),Proof(path,guid,true));
         return 1;
     }
+    private static L00CLifecycleRegistrationProof CompleteRegistrations()=>new(true,true,true,true,true,true,true,true,0,0,0,0);
     private static L00CNativeSaveQuitReturnProof Proof(string path,string guid,bool value)=>new(value,value,value,value,path,guid);
     private static string SavePath(string saves,string run,int iteration,char slot)=>Path.GetFullPath(Path.Combine(saves,"ISRWorldGen-L00C-"+run+"-iteration-"+iteration.ToString("D2")+"-"+slot+".vcdbs"));
     private static string GuidFor(int iteration,char slot)=>new Guid(iteration,(short)slot,0,new byte[]{1,2,3,4,5,6,7,8}).ToString("D");
