@@ -1,0 +1,102 @@
+name: L00-C lifecycle evidence
+
+on:
+  push:
+    branches: [main, codex/l00c-evidence-guard-20260920]
+    paths:
+      - src/WorldGen.VintageStory/WorldgenProbe/L00CLifecycleShutdownBarrier.cs
+      - testsrc/WorldGen.Tests/L00C/L00CLifecycle*Oracle.cs
+      - testsrc/WorldGen.LifecycleEvidence.Tests/**
+      - .github/workflows/l00c-lifecycle-evidence.yml
+      - global.json
+      - Directory.Build.props
+  pull_request:
+    paths:
+      - src/WorldGen.VintageStory/WorldgenProbe/L00CLifecycleShutdownBarrier.cs
+      - testsrc/WorldGen.Tests/L00C/L00CLifecycle*Oracle.cs
+      - testsrc/WorldGen.LifecycleEvidence.Tests/**
+      - .github/workflows/l00c-lifecycle-evidence.yml
+      - global.json
+      - Directory.Build.props
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: l00c-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  state-machine:
+    name: ${{ matrix.os }} / ${{ matrix.configuration }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        configuration: [Debug, Release]
+    env:
+      CONFIGURATION: ${{ matrix.configuration }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Prove the regression and the correction on actual C# sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $project = Join-Path $env:GITHUB_WORKSPACE 'testsrc/WorldGen.LifecycleEvidence.Tests/WorldGen.LifecycleEvidence.Tests.csproj'
+          $reports = Join-Path $env:GITHUB_WORKSPACE 'artifacts/l00c-evidence-ci'
+          New-Item -ItemType Directory -Path $reports -Force | Out-Null
+          $baseline = Join-Path $env:RUNNER_TEMP 'L00CLifecycleShutdownBarrier.before.cs'
+          $text = & git show 'fa506251d9ee78e95ca83c728279aa2eb7d73306:src/WorldGen.VintageStory/WorldgenProbe/L00CLifecycleShutdownBarrier.cs'
+          if ($LASTEXITCODE -ne 0) { throw 'The pinned baseline could not be read.' }
+          [IO.File]::WriteAllLines($baseline, [string[]]$text, [Text.UTF8Encoding]::new($false))
+          $oldOutput = Join-Path $env:RUNNER_TEMP 'l00c-before/bin/'
+          $oldObj = Join-Path $env:RUNNER_TEMP 'l00c-before/obj/'
+          & dotnet build $project -c $env:CONFIGURATION --nologo "-p:BarrierSource=$baseline" "-p:BaseIntermediateOutputPath=$oldObj" "-p:OutputPath=$oldOutput"
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline compilation failed; this is not regression evidence.' }
+          $oldLog = & dotnet (Join-Path $oldOutput 'WorldGen.LifecycleEvidence.Tests.dll') --regression-only 2>&1
+          $oldExit = $LASTEXITCODE
+          $oldLog | Set-Content -LiteralPath (Join-Path $reports 'baseline.log') -Encoding utf8
+          $oldLog | ForEach-Object { Write-Host $_ }
+          if ($oldExit -ne 1 -or ($oldLog -join "`n") -notlike '*Expected lifecycle refusal: commit without registration proof*') {
+            throw 'The pinned source did not reproduce the exact missing-registration false acceptance.'
+          }
+          Write-Host 'EXPECTED_RED: pinned baseline incorrectly accepted missing registration evidence.'
+          $newOutput = Join-Path $env:RUNNER_TEMP 'l00c-after/bin/'
+          $newObj = Join-Path $env:RUNNER_TEMP 'l00c-after/obj/'
+          & dotnet build $project -c $env:CONFIGURATION --nologo "-p:BaseIntermediateOutputPath=$newObj" "-p:OutputPath=$newOutput"
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate compilation failed.' }
+          $newLog = & dotnet (Join-Path $newOutput 'WorldGen.LifecycleEvidence.Tests.dll') 2>&1
+          $newExit = $LASTEXITCODE
+          $newLog | Set-Content -LiteralPath (Join-Path $reports 'candidate.log') -Encoding utf8
+          $newLog | ForEach-Object { Write-Host $_ }
+          if ($newExit -ne 0) { throw 'Candidate regression checks failed.' }
+          $result = ($newLog -join "`n") | ConvertFrom-Json
+          if ($result.Status -ne 'PASS' -or $result.Scope -ne 'SYNTHETIC_STATE_MACHINE_ONLY' -or $result.EvidenceCases -ne 21 -or $result.HistoricalFinalizedSessions -ne 15) {
+            throw 'Candidate report does not cover the complete case matrix.'
+          }
+          [ordered]@{
+            Scope='SYNTHETIC_STATE_MACHINE_ONLY'; Status='PASS'; Commit=$env:GITHUB_SHA
+            Baseline='fa506251d9ee78e95ca83c728279aa2eb7d73306'; ExpectedRedExit=$oldExit
+            Configuration=$env:CONFIGURATION; OS=$env:RUNNER_OS
+            EvidenceCases=21; HistoricalFinalizedSessions=15; NativeGameTests='NOT_RUN'; VisualStudioMcp='NOT_RUN'
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $reports 'result.json') -Encoding utf8
+      - name: Retain synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l00c-evidence-${{ matrix.os }}-${{ matrix.configuration }}
+          path: artifacts/l00c-evidence-ci/
+          if-no-files-found: warn
+          retention-days: 14

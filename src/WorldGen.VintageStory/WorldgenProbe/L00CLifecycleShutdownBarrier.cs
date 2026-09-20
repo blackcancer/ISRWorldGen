@@ -211,6 +211,9 @@ internal sealed class L00CLifecycleShutdownState
             if(!ReferenceEquals(pendingReturn,reservation)||!reservation.Started||reservation.Cancelled||reservation.Committed||!reservation.Lease.Closed||!reservation.Lease.ServerReleased)throw new InvalidOperationException("L00-C lifecycle SaveCommitted callback is stale, duplicate, or precedes server release.");
             if(observation.EventKind!=L00CLifecycleEventKind.SaveCommitted||!reservation.ReadyObservation.SameCapturedSession(observation))throw new InvalidOperationException("L00-C lifecycle SaveCommitted callback reattributed the captured session.");
             proof.RequireActualNativeReturn(observation);
+            // Enforce the evidence contract at the transition itself, not only
+            // in callers that poll TryGetCompletedEvidence. The monitor is reentrant.
+            RequireCompletedEvidence(reservation);
             reservation.Committed=true;pendingReturn=null;TraceEvent(observation,"SaveCommitted","native server stop, main menu, and exclusive target proof accepted");return observation;
         }
     }
