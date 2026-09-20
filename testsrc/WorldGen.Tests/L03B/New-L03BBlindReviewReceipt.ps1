@@ -5,6 +5,10 @@ param(
     [string]$ReviewParent)
 
 $ErrorActionPreference = 'Stop'
+# This CLI is consumed through redirected stderr. ConciseView inserts terminal-
+# width decorations into refusal messages; NormalView keeps the diagnostic text
+# intact without changing the exception or any publication/replay checks.
+$ErrorView = 'NormalView'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'L03BBlindReviewProtocol.psm1') -Force
 
