@@ -1,0 +1,89 @@
+name: Material-attached plate history candidate
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/**'
+      - 'testsrc/WorldGen.MaterialBoundEvolution/**'
+      - 'tools/export_material_bound_history.py'
+      - 'tools/verify_material_bound_platforms.py'
+      - '.github/workflows/material-bound-history.yml'
+      - 'src/WorldGen.Core/Foundation/**'
+      - 'tools/export_tectonic_history.py'
+      - 'tools/verify_tectonic_platforms.py'
+      - 'global.json'
+      - 'Directory.Build.props'
+permissions:
+  contents: read
+concurrency:
+  group: material-bound-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build real Core, keep baseline checks, run candidate and export full worlds
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.MaterialBoundEvolution/WorldGen.MaterialBoundEvolution.csproj -c Release -- .local/material-bound 256
+          if ($LASTEXITCODE -ne 0) { throw 'Material-bound C# checks or candidate generation failed.' }
+          python tools/export_material_bound_history.py --root .local/material-bound
+          if ($LASTEXITCODE -ne 0) { throw 'Actual field encoding failed.' }
+      - name: Preserve exact source for this candidate
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .local/material-bound/source -Force | Out-Null
+          git archive --format=zip --output=.local/material-bound/source/source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source capture failed.' }
+      - name: Preserve candidate outputs, even if a check rejected the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: material-bound-${{ matrix.os }}-${{ github.sha }}
+          path: .local/material-bound/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
+  platforms:
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: material-bound-ubuntu-latest-${{ github.sha }}
+          path: .local/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: material-bound-windows-latest-${{ github.sha }}
+          path: .local/windows
+      - name: Compare the actual candidate without relaxing baseline tolerances
+        run: python tools/verify_material_bound_platforms.py .local/linux .local/windows .local/material-platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: material-bound-platforms-${{ github.sha }}
+          path: .local/material-platforms.json
+          if-no-files-found: error
+          retention-days: 30
