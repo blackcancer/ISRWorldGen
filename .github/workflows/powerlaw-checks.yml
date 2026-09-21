@@ -1,0 +1,43 @@
+name: Power-law constitutive and nonlinear operator checks
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, codex/rheology-20260921]
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/**'
+      - 'testsrc/WorldGen.Rheology/PowerLawChecks.cs'
+      - 'testsrc/WorldGen.PowerLawChecks/**'
+      - '.github/workflows/powerlaw-checks.yml'
+permissions:
+  contents: read
+concurrency:
+  group: powerlaw-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Compile actual Core and test nonlinear forces and transport
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.PowerLawChecks/WorldGen.PowerLawChecks.csproj -c Release -- .local/powerlaw-checks
+          if ($LASTEXITCODE -ne 0) { throw 'Nonlinear C# checks failed.' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: powerlaw-checks-${{ matrix.os }}-${{ github.sha }}
+          path: .local/powerlaw-checks/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30

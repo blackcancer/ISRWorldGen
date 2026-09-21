@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Text.Json.Serialization;
 
 namespace ISRWorldGen.Core.Geology.Evolution;
 
@@ -8,17 +9,28 @@ public sealed record SheetRheologyOptions
     public int MechanicalSide { get; }
     public double UpdateInterval { get; }
     public bool HomogeneousControl { get; }
-    public SheetRheologyOptions(int mechanicalSide = 128, double updateInterval = 1, bool homogeneousControl = false)
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PowerLawSheetOptions? PowerLaw { get; }
+    public SheetRheologyOptions(int mechanicalSide = 128, double updateInterval = 1, bool homogeneousControl = false,
+        PowerLawSheetOptions? powerLaw = null)
     {
         if (mechanicalSide < 16 || mechanicalSide > 128 || (mechanicalSide & (mechanicalSide - 1)) != 0 ||
             !double.IsFinite(updateInterval) || updateInterval < .125 || updateInterval > 2)
             throw new ArgumentException("Unsupported reduced sheet resolution or mechanical interval.");
-        MechanicalSide = mechanicalSide; UpdateInterval = updateInterval; HomogeneousControl = homogeneousControl;
+        MechanicalSide = mechanicalSide; UpdateInterval = updateInterval; HomogeneousControl = homogeneousControl; PowerLaw = powerLaw;
     }
 }
 
 public sealed record SheetSolveReceipt(double Time, int MechanicalSide, int Iterations, double RelativeResidual,
-    double Work, double Dissipation, double MeanVelocityError, double MinimumViscosity, double MaximumViscosity);
+    double Work, double Dissipation, double MeanVelocityError, double MinimumViscosity, double MaximumViscosity)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int NonlinearIterations { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public double InitialEnergy { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public double FinalEnergy { get; init; }
+}
 
 public sealed class MaterialDeformationFrame
 {
@@ -29,11 +41,12 @@ public sealed class MaterialDeformationFrame
     public ReadOnlyCollection<double> South { get; }
     public ReadOnlyCollection<double> Divergence { get; }
     public ReadOnlyCollection<double> EngineeringShear { get; }
+    public PowerLawSheetSolution? Nonlinear { get; }
     internal readonly double[] EastData, SouthData, DivergenceData;
     internal MaterialDeformationFrame(int side, ThinSheetSolution solution, ReadOnlyCollection<double> viscosity,
-        double[] east, double[] south, double[] divergence, double[] shear)
+        double[] east, double[] south, double[] divergence, double[] shear, PowerLawSheetSolution? nonlinear = null)
     {
-        MechanicalSide = side; Solution = solution; RelativeViscosity = viscosity;
+        MechanicalSide = side; Solution = solution; RelativeViscosity = viscosity; Nonlinear = nonlinear;
         EastData = east; SouthData = south; DivergenceData = divergence;
         East = Array.AsReadOnly(east); South = Array.AsReadOnly(south);
         Divergence = Array.AsReadOnly(divergence); EngineeringShear = Array.AsReadOnly(shear);
@@ -93,7 +106,10 @@ public static class MaterialRheology
             east[i] = .5 * (px[i] + px[z * m + (x + 1) % m]);
             south[i] = .5 * (pz[i] + pz[((z + 1) % m) * m + x]);
         }
-        ThinSheetSolution solved = ThinSheetDeformation.Solve(east, south, viscosity, m, dx * ratio, dz * ratio, couplingLength, warmStart: warmStart);
+        PowerLawSheetSolution? nonlinear = options.PowerLaw is null ? null : PowerLawSheetDeformation.Solve(
+            east, south, viscosity, m, dx * ratio, dz * ratio, couplingLength, options.PowerLaw, warmStart);
+        ThinSheetSolution solved = nonlinear?.Solution ?? ThinSheetDeformation.Solve(
+            east, south, viscosity, m, dx * ratio, dz * ratio, couplingLength, warmStart: warmStart);
         double[] fe = new double[n * n], fs = new double[n * n], divergence = new double[n * n], shear = new double[n * n];
         for (int z = 0; z < n; z++) for (int x = 0; x < n; x++)
         {
@@ -110,7 +126,7 @@ public static class MaterialRheology
             divergence[i] = (fe[i] - fe[w]) / dx + (fs[i] - fs[no]) / dz;
             shear[i] = (fe[s] - fe[i]) / dz + (fs[e] - fs[i]) / dx;
         }
-        return new(m, solved, Array.AsReadOnly(viscosity), fe, fs, divergence, shear);
+        return new(m, solved, nonlinear?.EffectiveViscosity ?? Array.AsReadOnly(viscosity), fe, fs, divergence, shear, nonlinear);
         double Sample(IReadOnlyList<double> a, double x, double z)
         {
             int ix = (int)Math.Floor(x), iz = (int)Math.Floor(z); double tx = x - ix, tz = z - iz;
