@@ -8,6 +8,7 @@ on:
       - 'testsrc/WorldGen.Tests/L03B/L03BTestSupport.cs'
       - 'testsrc/WorldGen.ClimateHydrology.Tests/**'
       - 'tools/export_spatial_png.py'
+      - 'tools/audit_spatial_quality.py'
       - '.github/workflows/spatial-diagnostics.yml'
       - 'global.json'
       - 'Directory.Build.props'
@@ -51,6 +52,11 @@ jobs:
         run: |
           python tools/export_spatial_png.py --self-test --root .local/spatial-diagnostics
           if ($LASTEXITCODE -ne 0) { throw 'PNG export or numeric validation failed.' }
+      - name: Measure geographic limitations without changing the generated fields
+        shell: pwsh
+        run: |
+          python tools/audit_spatial_quality.py --self-test --root .local/spatial-diagnostics
+          if ($LASTEXITCODE -ne 0) { throw 'Spatial quality measurements or topographic export failed.' }
       - name: Publish PNGs, raw data, legends and test evidence
         if: always()
         uses: actions/upload-artifact@v4
