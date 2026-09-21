@@ -1,0 +1,66 @@
+name: Tectonic material history and full-world scale
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/**'
+      - 'src/WorldGen.Core/Foundation/**'
+      - 'testsrc/WorldGen.TectonicEvolution/**'
+      - 'tools/export_tectonic_history.py'
+      - 'tools/export_spatial_png.py'
+      - '.github/workflows/tectonic-history.yml'
+      - 'global.json'
+      - 'Directory.Build.props'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tectonic-material-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  history:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile real Core, run causal checks and evolve three entire atlases
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.TectonicEvolution/WorldGen.TectonicEvolution.csproj -c Release -- .local/tectonic-history 512
+          if ($LASTEXITCODE -ne 0) { throw 'Tectonic state computation or its invariants failed.' }
+      - name: Verify exact heights and export unmasked PNG16
+        shell: pwsh
+        run: |
+          python tools/export_tectonic_history.py --root .local/tectonic-history
+          if ($LASTEXITCODE -ne 0) { throw 'Heightmap encoding failed.' }
+      - name: Retain exact candidate source
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .local/tectonic-history/source -Force | Out-Null
+          git archive --format=zip --output=.local/tectonic-history/source/source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source snapshot failed.' }
+      - name: Publish material fields, histories and PNGs (never a geographic PASS)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tectonic-history-${{ matrix.os }}-${{ github.sha }}
+          path: .local/tectonic-history/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
