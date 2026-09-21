@@ -19,7 +19,7 @@ public readonly record struct RawReliefSample(double HeightBlocks, double Signed
 /// </summary>
 public sealed class RawReliefModel
 {
-    public const string AlgorithmId = "raw-structural-relief-v5-irregular-spurs-supported-shoulders";
+    public const string AlgorithmId = "raw-structural-relief-v6-broad-supported-orogens";
     private readonly int seed;
     private readonly WorldBounds bounds;
     private readonly Feature[] features;
@@ -96,7 +96,7 @@ public sealed class RawReliefModel
             double total = group.Sum(c => c.Length), age = group.Sum(c => c.Length * c.Age) / total;
             double intensity = group.Sum(c => c.Length * c.Intensity) / total;
             StableId stream = StableId.Derive(RandomDomain.Geology, group.Key.First, group.Key.Second.High ^ group.Key.Second.Low);
-            double width = (2600 + 2200 * age) * (.85 + .3 * Unit(stream, 400)) * scale;
+            double width = (6000 + 5000 * age) * (.85 + .3 * Unit(stream, 400)) * scale;
             belts.Add(new Belt(group.Select(c => c.Segment).ToArray(), width,
                 1 - Math.Exp(-6 * intensity), group.Key.Kind, false));
         }
@@ -117,7 +117,7 @@ public sealed class RawReliefModel
                 var a = At(-.82 + i * 1.64 / 20); var z = At(-.82 + (i + 1) * 1.64 / 20);
                 segments.Add(new Segment(a.X, a.Z, z.X, z.Z));
             }
-            belts.Add(new Belt(segments.ToArray(), (2600 + 2200 * Unit(feature.Id, 602)) * scale,
+            belts.Add(new Belt(segments.ToArray(), (5500 + 4500 * Unit(feature.Id, 602)) * scale,
                 .40 + .30 * Unit(feature.Id, 603), PlateBoundaryKind.Collision, true));
         }
         return new RawReliefModel(basis, atlas, plates, continents, features, belts.ToArray());
@@ -137,6 +137,8 @@ public sealed class RawReliefModel
             double u = (f.Cos * dx + f.Sin * dz) / f.Rx, v = (-f.Sin * dx + f.Cos * dz) / f.Rz;
             double theta = Math.Atan2(v, u), radius = Math.Sqrt(u * u + v * v);
             double perturbation = Smooth(.15, .65, radius) * (.12 * Math.Sin(3 * theta + f.Phase1) + .07 * Math.Sin(7 * theta + f.Phase2));
+            // Approximate metric distance normal to the crust envelope, not an
+            // altitude. Small islands must not receive continent-sized shelves.
             double distance = (1 - radius + perturbation) * Math.Min(f.Rx, f.Rz);
             signedMarginDistance = SmoothMax(signedMarginDistance, distance, 1800 * scale);
         }
@@ -164,7 +166,9 @@ public sealed class RawReliefModel
         double shelfWidth = scale * (1800 + 3000 * (.5 + .5 * F(px, pz, 28000, 22))) * (1 - .7 * compression);
         double slopeWidth = scale * (3200 + 2200 * (.5 + .5 * F(px, pz, 16000, 23)));
         double slope = Smooth(shelfWidth, shelfWidth + slopeWidth, offshore);
-        // Bounded distance-age prior, not a simulated history or elapsed time.
+        // A bounded distance-age proxy is a structural prior, not elapsed plate
+        // history: it gives broad ocean basins different depths away from ridges.
+        // The continental shelf still uses a separate metric distance to crust.
         double thermalAge = 1 - Math.Exp(-ridgeDistance / (21000 * scale));
         double basementAge = .5 + .5 * F(px, pz, 42000, 33);
         double deepLevel = -.48 - .20 * Math.Sqrt(thermalAge) - .10 * basementAge;
@@ -172,19 +176,27 @@ public sealed class RawReliefModel
         double marineFabric = F(px, pz, 3800, 32);
         marine += .010 * (1 - slope) * marineFabric;
         marine += slope * (.035 * marineFabric + .028 * F(px, pz, 13000, 36));
+        // Inherited basement provinces interrupt a featureless coastal-to-centre
+        // ramp. Support is regional; fine relief remains concentrated in uplands.
         double province = Smooth(-.24, .32, F(px, pz, 23000, 34));
-        double uplands = Mountain(seed, px, pz, 6200 * scale, 35);
+        double uplands = .5 + .5 * F(px, pz, 6200, 35);
         double inlandSupport = Smooth(-900 * scale, 4100 * scale, signedMarginDistance);
         double continentalBase = (.020 + .055 * province + .10 * province * uplands) * inlandSupport;
         continentalBase += .012 * F(px, pz, 2100, 38) * land;
+        // Reference sea level never caps the solid surface. Rifts can extend
+        // through a continent into a gulf instead of stopping at its coastline.
         continentalBase -= .11 * extension * land;
         double initial = marine * (1 - land) + continentalBase * land;
         double crests = ridges.Sample(wx, wz);
-        double broad = .10 * (1 - (1 - compression) * (1 - inherited));
-        double crags = .97 + .03 * F(px, pz, 900, 41);
+        double broad = .19 * (1 - (1 - compression) * (1 - inherited));
+        double crags = .55 + .45 * Mountain(seed, px, pz, 3800 * scale, 41);
         double deformation = 1 - (1 - broad) * (1 - crests * crags);
-        double value = initial + (.98 - initial) * deformation * (.22 + .78 * land);
+        double value = initial + (.98 - initial) * deformation * land;
+        // Marine convergence changes the broad basement, not a submerged copy of
+        // terrestrial branching spurs. Ridge/trench terms are applied separately.
+        value += .035 * compression * (1 - land);
         double deepOcean = (1 - land) * slope;
+        // Local ridge crest and narrow axial rift sit on the broad thermal swell.
         value += (-.34 - value) * extension * .45 * deepOcean;
         value += (-.97 - value) * axial * .065 * deepOcean;
         value += (-.98 - value) * compression * .19 * (1 - land);
