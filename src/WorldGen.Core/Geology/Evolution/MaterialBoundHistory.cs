@@ -32,20 +32,25 @@ public sealed class MaterialBoundHistory
     public string FinalMaterialChecksum { get; }
     public string Checksum { get; }
     public string InitialAssemblageChecksum { get; }
+    public SheetRheologyOptions? Rheology { get; }
+    public ReadOnlyCollection<SheetSolveReceipt> MechanicalSolves { get; }
+    public MaterialDeformationFrame? FinalDeformation { get; }
 
     private MaterialBoundHistory(int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings,
         MaterialBoundSnapshot initial, MaterialBoundSnapshot final, TectonicPlate[] plates,
-        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum)
+        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum, SheetRheologyOptions? rheology, List<SheetSolveReceipt> mechanicalSolves, MaterialDeformationFrame? finalDeformation)
     {
         Seed = seed; ReferenceWidth = scale.ReferenceWidth; ReferenceLength = scale.ReferenceLength; Settings = settings;
         Initial = initial; Final = final; Plates = Array.AsReadOnly(plates); Ledger = ledger.AsReadOnly();
         InitialContinentalByOrigin = Array.AsReadOnly(firstOrigin); FinalContinentalByOrigin = Array.AsReadOnly(lastOrigin);
         FinalOwnerFraction = Array.AsReadOnly(ownerFraction); UnresolvedInterfaceFaces = unresolved;
         InitialMaterialChecksum = initialMaterialChecksum; FinalMaterialChecksum = finalMaterialChecksum;
+        Rheology = rheology; MechanicalSolves = mechanicalSolves.AsReadOnly(); FinalDeformation = finalDeformation;
         InitialAssemblageChecksum = assemblageChecksum ?? "LEGACY_EQUAL_QUOTA_INITIALIZATION";
         string canonical = JsonSerializer.Serialize(new { AlgorithmId, seed, ReferenceWidth, ReferenceLength, settings,
             initial = initial.Checksum, final = final.Checksum, plates, ledger, firstOrigin, lastOrigin, ownerFraction, unresolved, initialMaterialChecksum, finalMaterialChecksum });
         if (assemblageChecksum is not null) canonical += "|initial-assemblage=" + assemblageChecksum;
+        if (rheology is not null) canonical += "|mechanics=" + SheetRheologyOptions.AlgorithmId + "|" + ThinSheetDeformation.AlgorithmId + "|" + JsonSerializer.Serialize(new { rheology, mechanicalSolves });
         Checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
@@ -62,8 +67,18 @@ public sealed class MaterialBoundHistory
         return GenerateCore(seed, scale, settings, assemblage);
     }
 
+    /// <summary>Opt-in material-dependent thin-sheet equilibrium; no change to either legacy entry point.</summary>
+    public static MaterialBoundHistory GenerateWithRheology(int seed, TectonicScalePlan scale,
+        TectonicEvolutionSettings settings, ContinentalAssemblage assemblage, SheetRheologyOptions rheology)
+    {
+        ArgumentNullException.ThrowIfNull(assemblage); ArgumentNullException.ThrowIfNull(rheology);
+        ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
+        assemblage.RequireCompatible(seed, scale, settings.Side);
+        return GenerateCore(seed, scale, settings, assemblage, rheology);
+    }
+
     private static MaterialBoundHistory GenerateCore(int seed, TectonicScalePlan scale,
-        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage)
+        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage, SheetRheologyOptions? rheology = null)
     {
         ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
         if (settings.Side > 512 || settings.PlateCount > 16 || settings.DeformationWidth > .25 * Math.Min(scale.ReferenceWidth, scale.ReferenceLength))
@@ -96,11 +111,25 @@ public sealed class MaterialBoundHistory
         if (settings.LowerCrustMobility > 0)
             maxDt = Math.Min(maxDt, .40 / (settings.LowerCrustMobility * (2 / (dx * dx) + 2 / (dz * dz))));
         if (Math.Ceiling(settings.Duration / maxDt) > 4096) throw new ArgumentException("Material history exceeds 4096-step budget.");
+        MaterialDeformationFrame? deformation = null;
+        var mechanicalSolves = new List<SheetSolveReceipt>();
+        double nextMechanicalTime = 0;
         while (time < settings.Duration)
         {
             double dt = Math.Min(maxDt, settings.Duration - time);
             MaterialMotion motion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
             var faces = motion.Faces();
+            if (rheology is not null)
+            {
+                if (deformation is null || time >= nextMechanicalTime)
+                {
+                    deformation = SolveAtCurrentTime();
+                    nextMechanicalTime = time + rheology.UpdateInterval;
+                }
+                faces = (deformation.EastData, deformation.SouthData, deformation.DivergenceData);
+                dt = Math.Min(dt, Math.Min(nextMechanicalTime - time, MaterialRheology.StableStep(faces.East, faces.South, n, dx, dz)));
+            }
+            if (!(dt > 0) || time + dt == time || ledger.Count > 4096) throw new ArithmeticException("History exceeded actual step budget or made no progress.");
             int[] lower = Enumerable.Repeat(-1, count).ToArray();
             double[] priority = new double[count]; int collisions = 0, subductions = 0;
             BuildSinks(state, motion, plates, lower, priority, dx, dz, settings.DeformationWidth, ref collisions, ref subductions, ref unresolved);
@@ -110,7 +139,8 @@ public sealed class MaterialBoundHistory
                 extension[i] += Math.Max(faces.Divergence[i], 0) * dt;
                 int x = i % n, z = i / n, e = z * n + (x + 1) % n, w = z * n + (x + n - 1) % n;
                 int s = ((z + 1) % n) * n + x, north = ((z + n - 1) % n) * n + x;
-                shear[i] += Math.Abs((motion.X[s] - motion.X[north]) / (2 * dz) + (motion.Z[e] - motion.Z[w]) / (2 * dx)) * dt / 2;
+                if (deformation is not null) shear[i] += .5 * Math.Abs(deformation.EngineeringShear[i]) * dt;
+                else shear[i] += Math.Abs((motion.X[s] - motion.X[north]) / (2 * dz) + (motion.Z[e] - motion.Z[w]) / (2 * dx)) * dt / 2;
             }
             double expectedAge = CrustTransport.Sum(fields[2]) + dt * CrustTransport.Sum(fields[1]);
             MaterialPlateCohorts moved = state.Advect(faces.East, faces.South, dx, dz, dt).Age(dt);
@@ -140,9 +170,18 @@ public sealed class MaterialBoundHistory
             ledger.Add(new(time, CrustTransport.Sum(fields[0]) * area, CrustTransport.Sum(fields[1]) * area,
                 created * area, recycled * area, CrustTransport.Sum(fields[2]) * area, fields[0].Max(), collisions, subductions));
         }
+        if (rheology is not null) deformation = SolveAtCurrentTime();
         MaterialMotion finalMotion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
         var final = new MaterialBoundSnapshot(n, time, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, finalMotion.Owners.ToArray());
-        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum);
+        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum, rheology, mechanicalSolves, deformation);
+        MaterialDeformationFrame SolveAtCurrentTime()
+        {
+            var frame = MaterialRheology.Solve(state, plates, dx, dz, settings.DeformationWidth, rheology!, deformation?.Solution);
+            var sol = frame.Solution;
+            mechanicalSolves.Add(new(time, frame.MechanicalSide, sol.Iterations, sol.RelativeResidual, sol.Work, sol.Dissipation,
+                sol.MeanVelocityError, frame.RelativeViscosity.Min(), frame.RelativeViscosity.Max()));
+            return frame;
+        }
     }
 
     private static void BuildSinks(MaterialPlateCohorts state, MaterialMotion motion, TectonicPlate[] plates,
