@@ -1,0 +1,64 @@
+name: Spatial diagnostic PNGs
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/WorldGen.Core/**'
+      - 'testsrc/WorldGen.Tests/L05A/SpatialDiagnosticExportTests.cs'
+      - 'testsrc/WorldGen.Tests/L03B/L03BTestSupport.cs'
+      - 'testsrc/WorldGen.ClimateHydrology.Tests/**'
+      - 'tools/export_spatial_png.py'
+      - '.github/workflows/spatial-diagnostics.yml'
+      - 'global.json'
+      - 'Directory.Build.props'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: spatial-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  maps:
+    name: ${{ matrix.os }} / Release PNGs
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_UI_LANGUAGE: en-US
+      ISR_SPATIAL_DIAGNOSTICS_ROOT: ${{ github.workspace }}/.local/spatial-diagnostics
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compute actual Core fields and run numerical assertions
+        shell: pwsh
+        run: |
+          dotnet test testsrc/WorldGen.ClimateHydrology.Tests/WorldGen.ClimateHydrology.Tests.csproj -c Release --filter FullyQualifiedName~SpatialDiagnosticExportTests --logger 'trx;LogFileName=spatial.trx' --results-directory .local/spatial-test-results
+          if ($LASTEXITCODE -ne 0) { throw 'Spatial Core fixture failed; no PNG publication accepted.' }
+      - name: Verify source hashes and export lossless PNGs
+        shell: pwsh
+        run: |
+          python tools/export_spatial_png.py --self-test --root .local/spatial-diagnostics
+          if ($LASTEXITCODE -ne 0) { throw 'PNG export or numeric validation failed.' }
+      - name: Publish PNGs, raw data, legends and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spatial-diagnostics-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            .local/spatial-diagnostics/
+            .local/spatial-test-results/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

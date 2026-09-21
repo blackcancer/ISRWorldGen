@@ -10,6 +10,8 @@
     <ProjectReference Include="../../src/WorldGen.Core/WorldGen.Core.csproj" />
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <Compile Include="TestAssembly.cs" />
+    <!-- Existing fixture factory only: no blind review or native evidence producer. -->
+    <Compile Include="../WorldGen.Tests/L03B/L03BTestSupport.cs" Link="L03B/L03BTestSupport.cs" />
     <!-- Compile the existing climate/drainage tests, not reimplementations or game stubs. -->
     <Compile Include="../WorldGen.Tests/L04A/*.cs" Link="L04A/%(Filename)%(Extension)" />
     <Compile Include="../WorldGen.Tests/L04B/*.cs" Link="L04B/%(Filename)%(Extension)" />
