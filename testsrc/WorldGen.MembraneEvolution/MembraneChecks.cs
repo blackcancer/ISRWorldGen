@@ -106,6 +106,27 @@ internal static class MembraneChecks
             Require(shearA>1.2*shearB,"weak belt not expressed in deformation");
             Console.WriteLine($"WEAK_BELT_SHEAR_RATIO={shearA/shearB:R}");
         });
+        Case("declared compression width has the exact reference-column Fourier response", () =>
+        {
+            double width = 2.5;
+            double coefficient = MembraneCoupling.CoefficientLengthForCompressionWidth(width);
+            double reference = LithosphereMembrane.MaterialResistance(35, 0, 0);
+            Near(4 * coefficient * coefficient * reference, width * width, 1e-13);
+            double[] wave = Enumerable.Range(0, count).Select(i => Math.Sin(Math.Tau * (i % n) / n)).ToArray();
+            var solution = LithosphereMembrane.Solve(n, 1, 1, coefficient,
+                Enumerable.Repeat(reference, count).ToArray(), wave, zero);
+            double eigen = 1 + 4 * width * width * Math.Pow(Math.Sin(Math.PI / n), 2);
+            for (int i = 0; i < count; i++) Near(solution.East[i], wave[i] / eigen, 1e-10);
+        });
+        Case("compression-scale conversion is metric, finite and does not change materials", () =>
+        {
+            Near(MembraneCoupling.CoefficientLengthForCompressionWidth(0), 0, 0);
+            Near(MembraneCoupling.CoefficientLengthForCompressionWidth(22000) * 1000,
+                MembraneCoupling.CoefficientLengthForCompressionWidth(22000000), 1e-8);
+            Refuse(() => MembraneCoupling.CoefficientLengthForCompressionWidth(-1));
+            Refuse(() => MembraneCoupling.CoefficientLengthForCompressionWidth(double.NaN));
+            Refuse(() => MembraneCoupling.CoefficientLengthForCompressionWidth(double.PositiveInfinity));
+        });
         Case("material resistance follows thickness and ocean age, not a random plate mass", () =>
         {
             Require(LithosphereMembrane.MaterialResistance(35,0,0)>LithosphereMembrane.MaterialResistance(20,0,0),"continental thickness unused");

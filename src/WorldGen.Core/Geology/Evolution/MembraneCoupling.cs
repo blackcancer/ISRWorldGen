@@ -8,7 +8,16 @@ namespace ISRWorldGen.Core.Geology.Evolution;
 /// material on its own grid, never upscaled from a coarse heightmap.</summary>
 public sealed class MembraneCoupling
 {
-    public const string AlgorithmId = "material-resistance-membrane-coupling-v1";
+    public const string AlgorithmId = "material-resistance-membrane-reference-compression-width-v2";
+    /// <summary>Map a declared longitudinal attenuation length to the coefficient
+    /// sqrt(mu/drag). In a uniform 35-km continental reference, the longitudinal
+    /// equation is u-4*mu/drag*u_xx=u0, hence W=2*sqrt(mu/drag).
+    /// This internal scale convention is not a measured Earth calibration.</summary>
+    public static double CoefficientLengthForCompressionWidth(double width)
+    {
+        if (!double.IsFinite(width) || width < 0) throw new ArgumentOutOfRangeException(nameof(width));
+        return width / (2 * Math.Sqrt(LithosphereMembrane.MaterialResistance(35, 0, 0)));
+    }
     public int MaterialSide { get; }
     public int SolveSide { get; }
     public double CouplingLength { get; }
@@ -66,7 +75,11 @@ public sealed class MembraneCoupling
             int i = row * coarse + col, e = row * coarse + (col + 1) % coarse, s = ((row + 1) % coarse) * coarse + col;
             targetEast[i] = .5 * (u[i] + u[e]); targetSouth[i] = .5 * (v[i] + v[s]);
         }
-        MembraneSolution solved = LithosphereMembrane.Solve(coarse, dx * factor, dz * factor, length, strength, targetEast, targetSouth);
+        // Do not reuse a geometric deformation width as sqrt(mu/drag):
+        // tensor coupling and the reference resistance change its physical reach.
+        double coefficientLength = CoefficientLengthForCompressionWidth(length);
+        MembraneSolution solved = LithosphereMembrane.Solve(coarse, dx * factor, dz * factor,
+            coefficientLength, strength, targetEast, targetSouth);
         var east = new double[n * n]; var south = new double[n * n];
         for (int row = 0; row < n; row++) for (int col = 0; col < n; col++)
         {
