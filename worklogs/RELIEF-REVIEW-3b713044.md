@@ -58,4 +58,6 @@ Les six cartes de cette campagne ne contiennent aucune érosion, eau de surface 
 
 Aucun appel Vintage Story ou dépendance supplémentaire ; aucune partie personnelle, aucun registre ni format de sauvegarde modifié. Jeu, MCP Visual Studio, compilation complète avec les DLL natives et revue indépendante du code : **NOT_RUN** pour cette reprise. La revue géographique est celle de l'assistant, non une revue d'un second agent.
 
-Une archive de livraison contenant les six champs, PNG, comparaisons visuelles, références, galerie et vérifications a été assemblée hors Git : `ISRWorldGen_Reliefs_3b713044.zip`, SHA-256 `d2f20d3632b358b03a45a22ef9eaa85b692040facae141bc2c5a099b5191d97e`. Les fichiers volumineux ne sont pas ajoutés à l'historique du dépôt.
+La galerie autonome contient les six comparaisons avant/après, leurs téléchargements PNG16 et les trois références. Sa syntaxe JavaScript a été vérifiée avec `node --check`. Le mode grand résultat ne masque pas les références ; aucun champ numérique n'est modifié par les contrôles d'affichage.
+
+Archive finale assemblée hors Git : `ISRWorldGen_Reliefs_3b713044.zip`, **103976513 octets**, SHA-256 `62973ddee255aaf802c0080c2620e2e6330e34509aece87615f213e47ca85856`. Elle contient les six champs, PNG, comparaisons visuelles, références, galerie et vérifications. Les fichiers volumineux ne sont pas ajoutés à l'historique du dépôt.
