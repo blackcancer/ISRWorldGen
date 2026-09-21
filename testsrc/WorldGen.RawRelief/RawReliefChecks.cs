@@ -38,6 +38,24 @@ internal static class RawReliefChecks
             Check(m == Mountain(73, x, z, 4200, 41), "Stateless detail changed");
         }
         Check(Mountain(73, 1771, 3677, 4200, 41) != Mountain(74, 1771, 3677, 4200, 41), "Seed-blind detail");
+        var network = new RawRidgeNetwork(73, [new RawRidgeNetwork.Source(whole, 200, .7)], 1);
+        var subdivided = new RawRidgeNetwork(73, [new RawRidgeNetwork.Source(split.Reverse().ToArray(), 200, .7)], 1);
+        for (int i = -100; i <= 200; i++)
+        {
+            double value = network.Sample(i, i % 13 - 6);
+            Check(value >= 0 && value <= .7 && double.IsFinite(value), "Ridge field out of envelope");
+            Check(Math.Abs(value - subdivided.Sample(i, i % 13 - 6)) < 1e-12, "Ridge stations changed with subdivision");
+        }
+        Check(network.Sample(10000, 10000) == 0, "Compact support leaked beyond spatial index");
+        var longChain = new RawRidgeNetwork(73, [new RawRidgeNetwork.Source([new(0, 0, 12000, 0)], 1600, .8)], 1);
+        var splitChain = new RawRidgeNetwork(73, [new RawRidgeNetwork.Source([new(7500, 0, 12000, 0), new(4000, 0, 7500, 0), new(0, 0, 4000, 0)], 1600, .8)], 1);
+        Check(longChain.SegmentCount > 10, "Branched test did not create spurs");
+        Check(longChain.SegmentCount == splitChain.SegmentCount, "Subdivision changed ridge count");
+        for (int i = 0; i < 256; i++)
+        {
+            double x = (i * 719L) % 18000 - 3000, z = (i * 431L) % 10000 - 5000;
+            Check(Math.Abs(longChain.Sample(x, z) - splitChain.Sample(x, z)) < 1e-10, "Branched field changed under contact subdivision");
+        }
         Console.WriteLine($"RAW_STRUCTURE_CHECKS={checks}; geometry only, not geographic acceptance");
         return checks;
         void Check(bool ok, string why)
