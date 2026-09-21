@@ -3,11 +3,13 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using ISRWorldGen.Core.Geology.Evolution;
 
-if (args.Length != 3 || !int.TryParse(args[1], out int side) || side is < 64 or > 512 || (side & (side - 1)) != 0 || !int.TryParse(args[2], out int selectedSeed))
-    throw new ArgumentException("Usage: WorldGen.Rheology <new-output-directory> <side64..512> <seed>");
+if (args.Length is < 3 or > 4 || !int.TryParse(args[1], out int side) || side is < 64 or > 512 || (side & (side - 1)) != 0 || !int.TryParse(args[2], out int selectedSeed))
+    throw new ArgumentException("Usage: WorldGen.Rheology <new-output-directory> <side64..512> <seed> [homogeneous|heterogeneous|powerlaw]");
+string mode = args.Length == 4 ? args[3] : "heterogeneous";
+if (mode is not ("homogeneous" or "heterogeneous" or "powerlaw")) throw new ArgumentException("Unknown comparison mode.");
 string root = Path.GetFullPath(args[0]);
 if (Directory.Exists(root) || File.Exists(root)) throw new IOException("Evidence directory exists; never overwrite an earlier campaign.");
-string[] checks = TectonicChecks.Run().Concat(PolarityRegressionChecks.Run()).Concat(MaterialCohortChecks.Run()).Concat(OceanCarrierChecks.Run()).Concat(AssemblageChecks.Run()).Concat(DeformationChecks.Run()).ToArray();
+string[] checks = TectonicChecks.Run().Concat(PolarityRegressionChecks.Run()).Concat(MaterialCohortChecks.Run()).Concat(OceanCarrierChecks.Run()).Concat(AssemblageChecks.Run()).Concat(DeformationChecks.Run()).Concat(PowerLawChecks.Run()).ToArray();
 Directory.CreateDirectory(root);
 var json = new JsonSerializerOptions { WriteIndented = true };
 var reports = new List<object>();
@@ -19,7 +21,8 @@ foreach (int seed in new[] { selectedSeed })
     var oldInitial = MaterialBoundHistory.Generate(seed, reference, new TectonicEvolutionSettings(side: side, duration: 0));
     double initialBudget = CrustTransport.Sum(oldInitial.Initial.ContinentalKm) / (side * side);
     var assemblage = ContinentalAssemblage.Generate(seed, reference, side, initialBudget);
-    var rheology = new SheetRheologyOptions();
+    var rheology = new SheetRheologyOptions(homogeneousControl: mode == "homogeneous",
+        powerLaw: mode == "powerlaw" ? new PowerLawSheetOptions() : null);
     MaterialBoundHistory history = MaterialBoundHistory.GenerateWithRheology(seed, reference, settings, assemblage, rheology);
     MaterialDeformationFrame finalMechanics = history.FinalDeformation!;
     int components = CountLargeLandComponents(history.Final.ElevationKm, side);
@@ -65,7 +68,7 @@ foreach (int seed in new[] { selectedSeed })
     if (solid.Any(v => !double.IsFinite(v) || v < 0 || v > 383)) throw new InvalidOperationException("Explicit vertical conversion out of budget; refuse, never clamp.");
     var summary = new
     {
-        seed, algorithm = "rheology-history-v1/" + MaterialBoundHistory.AlgorithmId, commit = Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "UNVERIFIED_WORKTREE",
+        seed, mode, algorithm = "rheology-comparison-v2/" + MaterialBoundHistory.AlgorithmId, commit = Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "UNVERIFIED_WORKTREE",
         initialAssemblage = new { algorithm = ContinentalAssemblage.AlgorithmId, assemblage.Checksum, assemblage.Provinces,
             assemblage.MeanContinentalKm, assemblage.MarginWidthReferenceUnits, assemblage.ThicknessBudgetMultiplier,
             basis = "explicit heterogeneous initial-state prior, NOT a simulated Earth assembly history", matchedContinentalVolume = true },
@@ -77,11 +80,13 @@ foreach (int seed in new[] { selectedSeed })
         worldWidthBlocks = 1_000_000, worldLengthBlocks = 1_000_000, history.ReferenceWidth, history.ReferenceLength,
         referenceKmPerUnit = MaterialBoundHistory.ReferenceKmPerUnit, worldHeightBlocks = 384, seaLevelReferenceBlocks = 168,
         blocksPerModelKm = 12, width = side, height = side, settings, scaleChecks, fields,
-        rheology, mechanicalSide = mechSide, mechanicalStepReferenceUnits = history.ReferenceWidth / mechSide,
-        mechanicalPolicy = SheetRheologyOptions.AlgorithmId, equilibriumOperator = ThinSheetDeformation.AlgorithmId,
+        rheology, plates = history.Plates, mechanicalSide = mechSide, mechanicalStepReferenceUnits = history.ReferenceWidth / mechSide,
+        mechanicalPolicy = SheetRheologyOptions.AlgorithmId, equilibriumOperator = rheology.PowerLaw is null ? ThinSheetDeformation.AlgorithmId : PowerLawSheetDeformation.AlgorithmId,
         mechanicalSolves = history.MechanicalSolves, maxForceResidual = history.MechanicalSolves.Max(s => s.RelativeResidual),
         forceInterpretation = "v-div(2mu(eps+trace(eps)I))=preferred material velocity; constant normalized basal drag; length=DeformationWidth",
-        viscosityPrior = "harmonic mixture, continental 2+2C/(C+35); oceanic .25+1.75age/(age+40); NOT calibrated Earth rheology",
+        viscosityPrior = "mu0: homogeneous=1 or harmonic material/age mixture; powerlaw=mu0*(1+Q/(2*(L*rate0)^2))^(-(1-1/n)/2), rate0 per MODEL time; NOT calibrated Earth rheology",
+        causalComparison = "same initial materials, prescribed plate velocities, L=DeformationWidth, grids and mechanical schedule; subsequent forcing follows each evolving material state",
+        maximumNewtonIterations = history.MechanicalSolves.Max(s => s.NonlinearIterations),
         physicalLimitations = "No GPE forcing, slab pull, mantle heat equation, damage, rigid-plate torques or new fragmentation law; existing subduction polarity unchanged",
         history.InitialMaterialChecksum, history.FinalMaterialChecksum, history.UnresolvedInterfaceFaces, history.InitialContinentalByOrigin, history.FinalContinentalByOrigin,
         waterSurfacePresent = false, seabedMasked = false, perImageAutoContrast = false,
@@ -114,7 +119,7 @@ foreach (int seed in new[] { selectedSeed })
 }
 File.WriteAllText(Path.Combine(root, "verification-" + selectedSeed.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".json"), JsonSerializer.Serialize(new
 {
-    status = "PASS_NUMERICAL_ONLY", algorithm = SheetRheologyOptions.AlgorithmId, checksPassed = checks.Length, checks,
+    mode, status = "PASS_NUMERICAL_ONLY", algorithm = SheetRheologyOptions.AlgorithmId, checksPassed = checks.Length, checks,
     context = "complete reference atlas at 1000000 units mapped without cropping to 131072, 262144 and 1000000 blocks",
     geographicAcceptance = "NOT_ACCEPTED", erosion = "NOT_RUN", nativeGame = "NOT_RUN", reports
 }, json));

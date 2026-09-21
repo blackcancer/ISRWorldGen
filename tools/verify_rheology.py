@@ -22,7 +22,24 @@ def verify(linux, windows):
                 raise ValueError('A small world is only a crop')
             if m['mechanicalPolicy'] != 'transported-composition-age-viscous-sheet-v1' or not m['mechanicalSolves']:
                 raise ValueError('Mechanical provenance missing')
+            mode = m.get('mode')
+            if mode not in ('homogeneous', 'heterogeneous', 'powerlaw'):
+                raise ValueError('Unknown comparison mode')
+            if m['rheology']['HomogeneousControl'] != (mode == 'homogeneous'):
+                raise ValueError('Homogeneous control was not applied')
+            if (m['rheology'].get('PowerLaw') is not None) != (mode == 'powerlaw'):
+                raise ValueError('Wrong constitutive mode')
+            expected_operator = 'energy-consistent-mac-regularized-power-law-newton-v1' if mode == 'powerlaw' else 'mac-viscous-sheet-basal-drag-v1'
+            if m['equilibriumOperator'] != expected_operator:
+                raise ValueError('Wrong recorded equilibrium operator')
             for solve in m['mechanicalSolves']:
+                if mode == 'powerlaw':
+                    # New receipt members omit exactly zero to preserve legacy serialization.
+                    first, last = solve.get('InitialEnergy', 0.0), solve.get('FinalEnergy', 0.0)
+                    if not all(math.isfinite(v) and v >= 0 for v in (first, last)) or last > first + 1e-10 * max(1, abs(first)):
+                        raise ValueError('Nonlinear energy increased or is invalid')
+                    if first == 0 and (solve['Dissipation'] != 0 or solve['Work'] != 0):
+                        raise ValueError('Missing nonlinear energy for a dissipative solve')
                 if not math.isfinite(solve['RelativeResidual']) or solve['RelativeResidual'] > 1e-12:
                     raise ValueError('Force equilibrium not converged')
                 if solve['Dissipation'] < 0 or abs(solve['Work']-solve['Dissipation']) > max(1,solve['Dissipation'])*1e-8:

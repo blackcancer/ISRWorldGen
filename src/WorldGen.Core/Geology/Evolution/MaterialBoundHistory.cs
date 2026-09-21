@@ -50,7 +50,7 @@ public sealed class MaterialBoundHistory
         string canonical = JsonSerializer.Serialize(new { AlgorithmId, seed, ReferenceWidth, ReferenceLength, settings,
             initial = initial.Checksum, final = final.Checksum, plates, ledger, firstOrigin, lastOrigin, ownerFraction, unresolved, initialMaterialChecksum, finalMaterialChecksum });
         if (assemblageChecksum is not null) canonical += "|initial-assemblage=" + assemblageChecksum;
-        if (rheology is not null) canonical += "|mechanics=" + SheetRheologyOptions.AlgorithmId + "|" + ThinSheetDeformation.AlgorithmId + "|" + JsonSerializer.Serialize(new { rheology, mechanicalSolves });
+        if (rheology is not null) canonical += "|mechanics=" + SheetRheologyOptions.AlgorithmId + "|" + (rheology.PowerLaw is null ? ThinSheetDeformation.AlgorithmId : PowerLawSheetDeformation.AlgorithmId) + "|" + JsonSerializer.Serialize(new { rheology, mechanicalSolves });
         Checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
@@ -179,7 +179,12 @@ public sealed class MaterialBoundHistory
             var frame = MaterialRheology.Solve(state, plates, dx, dz, settings.DeformationWidth, rheology!, deformation?.Solution);
             var sol = frame.Solution;
             mechanicalSolves.Add(new(time, frame.MechanicalSide, sol.Iterations, sol.RelativeResidual, sol.Work, sol.Dissipation,
-                sol.MeanVelocityError, frame.RelativeViscosity.Min(), frame.RelativeViscosity.Max()));
+                sol.MeanVelocityError, frame.RelativeViscosity.Min(), frame.RelativeViscosity.Max())
+            {
+                NonlinearIterations = frame.Nonlinear?.NewtonIterations ?? 0,
+                InitialEnergy = frame.Nonlinear?.InitialEnergy ?? 0,
+                FinalEnergy = frame.Nonlinear?.FinalEnergy ?? 0
+            });
             return frame;
         }
     }

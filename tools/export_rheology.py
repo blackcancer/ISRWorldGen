@@ -4,7 +4,7 @@ import argparse, json
 from pathlib import Path
 import export_tectonic_history as base
 
-ALGORITHM = 'rheology-history-v1/material-bound-history-v3-carrier-resolved-origin-fluxes'
+ALGORITHM = 'rheology-comparison-v2/material-bound-history-v3-carrier-resolved-origin-fluxes'
 
 def export(root):
     directories = sorted(root.glob('seed-*'))
@@ -17,7 +17,7 @@ def export(root):
         if m['seabedMasked'] or m['waterSurfacePresent']:
             raise ValueError('A water surface is not a heightmap')
     base.RANGES.update({'owner-fraction': (0, 1), 'legacy-initial-height': (0, 383),
-                        'initial-continental-thickness': (0, 65), 'initial-provinces': (-1, 5), 'relative-viscosity': (.25, 4), 'velocity-east': (-4000, 4000), 'velocity-south': (-4000, 4000), 'instant-divergence': (-.25, .25)})
+                        'initial-continental-thickness': (0, 65), 'initial-provinces': (-1, 5), 'relative-viscosity': (0, 4), 'velocity-east': (-4000, 4000), 'velocity-south': (-4000, 4000), 'instant-divergence': (-.25, .25)})
     base.export(root)
     page = root / 'index.html'
     text = page.read_text(encoding='utf-8').replace('cinématique imposée,', 'tractions motrices paramétrées et équilibre visqueux réduit,')
