@@ -1,0 +1,98 @@
+name: Material resistance and viscous membrane relief
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, codex/material-membrane-20260921]
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/**'
+      - 'src/WorldGen.Core/Foundation/**'
+      - 'testsrc/WorldGen.MembraneEvolution/**'
+      - 'testsrc/WorldGen.MaterialBoundEvolution/**'
+      - 'tools/export_membrane_history.py'
+      - 'tools/verify_membrane_platforms.py'
+      - 'tools/export_tectonic_history.py'
+      - 'tools/verify_material_bound_platforms.py'
+      - 'tools/verify_tectonic_platforms.py'
+      - 'tools/export_spatial_png.py'
+      - '.github/workflows/membrane-evolution.yml'
+      - 'global.json'
+      - 'Directory.Build.props'
+permissions:
+  contents: read
+concurrency:
+  group: material-membrane-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  world:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        seed: ['-437287116', '73', '20260906']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile real Core and evolve one complete million-unit atlas
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.MembraneEvolution/WorldGen.MembraneEvolution.csproj -c Release -- .local/membrane 512 '${{ matrix.seed }}'
+          if ($LASTEXITCODE -ne 0) { throw 'C# checks or whole-world evolution failed.' }
+          python tools/export_membrane_history.py --root .local/membrane
+          if ($LASTEXITCODE -ne 0) { throw 'Actual height encoding failed.' }
+      - name: Capture exact source even after rejection
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .local/membrane/source -Force | Out-Null
+          git archive --format=zip --output=.local/membrane/source/source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source capture failed.' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: membrane-${{ matrix.os }}-${{ matrix.seed }}-${{ github.sha }}
+          path: .local/membrane/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  platforms:
+    needs: world
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: membrane-ubuntu-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/linux
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: membrane-windows-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/windows
+      - name: Compare all true height pixels, material fields and per-origin inventories
+        run: python tools/verify_membrane_platforms.py .local/linux .local/windows .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: membrane-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          if-no-files-found: warn
+          retention-days: 30

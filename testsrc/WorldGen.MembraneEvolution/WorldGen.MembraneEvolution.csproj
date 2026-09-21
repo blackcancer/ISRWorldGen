@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><IsPackable>false</IsPackable></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/WorldGen.Core/WorldGen.Core.csproj" />
+    <Compile Include="../WorldGen.TectonicEvolution/TectonicChecks.cs" Link="Baseline/TectonicChecks.cs" />
+    <Compile Include="../WorldGen.TectonicEvolution/PolarityRegressionChecks.cs" Link="Baseline/PolarityRegressionChecks.cs" />
+    <Compile Include="../WorldGen.MaterialBoundEvolution/MaterialCohortChecks.cs" Link="Baseline/MaterialCohortChecks.cs" />
+    <Compile Include="../WorldGen.MaterialBoundEvolution/OceanCarrierChecks.cs" Link="Baseline/OceanCarrierChecks.cs" />
+      <Compile Include="../WorldGen.ContinentalAssembly/AssemblageChecks.cs" Link="Baseline/AssemblageChecks.cs" />
+  </ItemGroup>
+</Project>

@@ -32,10 +32,12 @@ public sealed class MaterialBoundHistory
     public string FinalMaterialChecksum { get; }
     public string Checksum { get; }
     public string InitialAssemblageChecksum { get; }
+    public MembraneCoupling? FinalMembrane { get; }
+    public ReadOnlyCollection<MembraneStep> MembraneLedger { get; }
 
     private MaterialBoundHistory(int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings,
         MaterialBoundSnapshot initial, MaterialBoundSnapshot final, TectonicPlate[] plates,
-        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum)
+        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum, MembraneCoupling? finalMembrane, List<MembraneStep> membraneLedger)
     {
         Seed = seed; ReferenceWidth = scale.ReferenceWidth; ReferenceLength = scale.ReferenceLength; Settings = settings;
         Initial = initial; Final = final; Plates = Array.AsReadOnly(plates); Ledger = ledger.AsReadOnly();
@@ -43,9 +45,13 @@ public sealed class MaterialBoundHistory
         FinalOwnerFraction = Array.AsReadOnly(ownerFraction); UnresolvedInterfaceFaces = unresolved;
         InitialMaterialChecksum = initialMaterialChecksum; FinalMaterialChecksum = finalMaterialChecksum;
         InitialAssemblageChecksum = assemblageChecksum ?? "LEGACY_EQUAL_QUOTA_INITIALIZATION";
+        FinalMembrane = finalMembrane; MembraneLedger = membraneLedger.AsReadOnly();
         string canonical = JsonSerializer.Serialize(new { AlgorithmId, seed, ReferenceWidth, ReferenceLength, settings,
             initial = initial.Checksum, final = final.Checksum, plates, ledger, firstOrigin, lastOrigin, ownerFraction, unresolved, initialMaterialChecksum, finalMaterialChecksum });
         if (assemblageChecksum is not null) canonical += "|initial-assemblage=" + assemblageChecksum;
+        if (finalMembrane is not null) canonical += "|mechanics=" + JsonSerializer.Serialize(new {
+            algorithm = MembraneCoupling.AlgorithmId, solver = LithosphereMembrane.AlgorithmId,
+            finalMembrane.SolveSide, finalMembrane.CouplingLength, membraneLedger });
         Checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
@@ -62,8 +68,21 @@ public sealed class MaterialBoundHistory
         return GenerateCore(seed, scale, settings, assemblage);
     }
 
+    /// <summary>Opt-in material-dependent viscous sheet response. Neither the
+    /// legacy generator nor GenerateWithAssemblage changes its default behavior.</summary>
+    public static MaterialBoundHistory GenerateWithMembrane(int seed, TectonicScalePlan scale,
+        TectonicEvolutionSettings settings, ContinentalAssemblage assemblage, int maximumSolveSide = 128)
+    {
+        ArgumentNullException.ThrowIfNull(assemblage); ArgumentNullException.ThrowIfNull(scale);
+        ArgumentNullException.ThrowIfNull(settings);
+        assemblage.RequireCompatible(seed, scale, settings.Side);
+        if (maximumSolveSide is < 4 or > 512 || settings.Side % Math.Min(settings.Side, maximumSolveSide) != 0)
+            throw new ArgumentException("Mechanical grid must divide the material grid.");
+        return GenerateCore(seed, scale, settings, assemblage, maximumSolveSide);
+    }
+
     private static MaterialBoundHistory GenerateCore(int seed, TectonicScalePlan scale,
-        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage)
+        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage, int? mechanicalSide = null)
     {
         ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
         if (settings.Side > 512 || settings.PlateCount > 16 || settings.DeformationWidth > .25 * Math.Min(scale.ReferenceWidth, scale.ReferenceLength))
@@ -90,6 +109,8 @@ public sealed class MaterialBoundHistory
         double[] firstOrigin = state.ContinentalInventories();
         double initialC = CrustTransport.Sum(fields[0]), initialO = CrustTransport.Sum(fields[1]);
         double time = 0, created = 0, recycled = 0; long unresolved = 0;
+        MembraneCoupling? mechanical = null;
+        var membraneLedger = new List<MembraneStep>();
         var ledger = new List<TectonicLedger> { new(0, initialC * area, initialO * area, 0, 0, CrustTransport.Sum(fields[2]) * area, c.Max(), 0, 0) };
         double speed = plates.Max(p => Math.Max(Math.Abs(p.Vx), Math.Abs(p.Vz)));
         double maxDt = Math.Min(1, speed > 0 ? .35 / (speed / dx + speed / dz) : 1);
@@ -101,6 +122,20 @@ public sealed class MaterialBoundHistory
             double dt = Math.Min(maxDt, settings.Duration - time);
             MaterialMotion motion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
             var faces = motion.Faces();
+            IReadOnlyList<double> velocityX = motion.X, velocityZ = motion.Z;
+            if (mechanicalSide is int solveSide)
+            {
+                mechanical = MembraneCoupling.Evaluate(state, plates, dx, dz, settings.DeformationWidth, solveSide);
+                faces = (mechanical.East.ToArray(), mechanical.South.ToArray(), mechanical.Divergence.ToArray());
+                velocityX = mechanical.CenterX; velocityZ = mechanical.CenterZ;
+                // Solved velocities are not assumed to stay in the envelope of
+                // prescribed velocities: CFL uses their ACTUAL outgoing fluxes.
+                if (mechanical.MaximumOutgoingRate > 0) dt = Math.Min(dt, .35 / mechanical.MaximumOutgoingRate);
+                if (ledger.Count > 4096 || time + dt <= time) throw new ArithmeticException("Mechanical history step budget exhausted.");
+                var solution = mechanical.Solution;
+                membraneLedger.Add(new(time, solution.Iterations, solution.RelativeForceResidual,
+                    solution.DrivingWork, solution.DragDissipation, solution.ViscousDissipation, mechanical.MaximumOutgoingRate));
+            }
             int[] lower = Enumerable.Repeat(-1, count).ToArray();
             double[] priority = new double[count]; int collisions = 0, subductions = 0;
             BuildSinks(state, motion, plates, lower, priority, dx, dz, settings.DeformationWidth, ref collisions, ref subductions, ref unresolved);
@@ -110,7 +145,7 @@ public sealed class MaterialBoundHistory
                 extension[i] += Math.Max(faces.Divergence[i], 0) * dt;
                 int x = i % n, z = i / n, e = z * n + (x + 1) % n, w = z * n + (x + n - 1) % n;
                 int s = ((z + 1) % n) * n + x, north = ((z + n - 1) % n) * n + x;
-                shear[i] += Math.Abs((motion.X[s] - motion.X[north]) / (2 * dz) + (motion.Z[e] - motion.Z[w]) / (2 * dx)) * dt / 2;
+                shear[i] += Math.Abs((velocityX[s] - velocityX[north]) / (2 * dz) + (velocityZ[e] - velocityZ[w]) / (2 * dx)) * dt / 2;
             }
             double expectedAge = CrustTransport.Sum(fields[2]) + dt * CrustTransport.Sum(fields[1]);
             MaterialPlateCohorts moved = state.Advect(faces.East, faces.South, dx, dz, dt).Age(dt);
@@ -140,9 +175,11 @@ public sealed class MaterialBoundHistory
             ledger.Add(new(time, CrustTransport.Sum(fields[0]) * area, CrustTransport.Sum(fields[1]) * area,
                 created * area, recycled * area, CrustTransport.Sum(fields[2]) * area, fields[0].Max(), collisions, subductions));
         }
+        if (mechanicalSide is int finalSolveSide)
+            mechanical = MembraneCoupling.Evaluate(state, plates, dx, dz, settings.DeformationWidth, finalSolveSide);
         MaterialMotion finalMotion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
         var final = new MaterialBoundSnapshot(n, time, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, finalMotion.Owners.ToArray());
-        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum);
+        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum, mechanical, membraneLedger);
     }
 
     private static void BuildSinks(MaterialPlateCohorts state, MaterialMotion motion, TectonicPlate[] plates,
