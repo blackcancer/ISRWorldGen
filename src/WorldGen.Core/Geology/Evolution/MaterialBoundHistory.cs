@@ -31,22 +31,39 @@ public sealed class MaterialBoundHistory
     public string InitialMaterialChecksum { get; }
     public string FinalMaterialChecksum { get; }
     public string Checksum { get; }
+    public string InitialAssemblageChecksum { get; }
 
     private MaterialBoundHistory(int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings,
         MaterialBoundSnapshot initial, MaterialBoundSnapshot final, TectonicPlate[] plates,
-        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum)
+        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum)
     {
         Seed = seed; ReferenceWidth = scale.ReferenceWidth; ReferenceLength = scale.ReferenceLength; Settings = settings;
         Initial = initial; Final = final; Plates = Array.AsReadOnly(plates); Ledger = ledger.AsReadOnly();
         InitialContinentalByOrigin = Array.AsReadOnly(firstOrigin); FinalContinentalByOrigin = Array.AsReadOnly(lastOrigin);
         FinalOwnerFraction = Array.AsReadOnly(ownerFraction); UnresolvedInterfaceFaces = unresolved;
         InitialMaterialChecksum = initialMaterialChecksum; FinalMaterialChecksum = finalMaterialChecksum;
+        InitialAssemblageChecksum = assemblageChecksum ?? "LEGACY_EQUAL_QUOTA_INITIALIZATION";
         string canonical = JsonSerializer.Serialize(new { AlgorithmId, seed, ReferenceWidth, ReferenceLength, settings,
             initial = initial.Checksum, final = final.Checksum, plates, ledger, firstOrigin, lastOrigin, ownerFraction, unresolved, initialMaterialChecksum, finalMaterialChecksum });
+        if (assemblageChecksum is not null) canonical += "|initial-assemblage=" + assemblageChecksum;
         Checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
     public static MaterialBoundHistory Generate(int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings)
+        => GenerateCore(seed, scale, settings, null);
+
+    /// <summary>Explicit alternative initial MATERIALS; the qualified transport and legacy default stay unchanged.</summary>
+    public static MaterialBoundHistory GenerateWithAssemblage(int seed, TectonicScalePlan scale,
+        TectonicEvolutionSettings settings, ContinentalAssemblage assemblage)
+    {
+        ArgumentNullException.ThrowIfNull(assemblage);
+        ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
+        assemblage.RequireCompatible(seed, scale, settings.Side);
+        return GenerateCore(seed, scale, settings, assemblage);
+    }
+
+    private static MaterialBoundHistory GenerateCore(int seed, TectonicScalePlan scale,
+        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage)
     {
         ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
         if (settings.Side > 512 || settings.PlateCount > 16 || settings.DeformationWidth > .25 * Math.Min(scale.ReferenceWidth, scale.ReferenceLength))
@@ -62,7 +79,8 @@ public sealed class MaterialBoundHistory
             deformationWidth: settings.DeformationWidth, lowerCrustMobility: settings.LowerCrustMobility,
             initialOceanAge: settings.InitialOceanAge, motionSign: settings.MotionSign));
         TectonicPlate[] plates = initialHistory.Plates.ToArray();
-        double[] c = initialHistory.Initial.ContinentalKm.ToArray(), o = initialHistory.Initial.OceanicKm.ToArray();
+        double[] c = (assemblage?.ContinentalKm ?? initialHistory.Initial.ContinentalKm).ToArray();
+        double[] o = (assemblage?.OceanicKm ?? initialHistory.Initial.OceanicKm).ToArray();
         int[] initialOwners = initialHistory.Initial.PlateIds.ToArray();
         var state = MaterialPlateCohorts.Create(n, plates.Length, initialOwners, c, o, o.Select(v => v * settings.InitialOceanAge).ToArray(), o);
         double[] compression = new double[count], extension = new double[count], shear = new double[count];
@@ -124,7 +142,7 @@ public sealed class MaterialBoundHistory
         }
         MaterialMotion finalMotion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
         var final = new MaterialBoundSnapshot(n, time, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, finalMotion.Owners.ToArray());
-        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum());
+        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum);
     }
 
     private static void BuildSinks(MaterialPlateCohorts state, MaterialMotion motion, TectonicPlate[] plates,
