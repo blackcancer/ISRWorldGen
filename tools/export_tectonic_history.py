@@ -6,7 +6,7 @@ from export_spatial_png import png, read_pixels
 
 RANGES = {"height": (0, 383), "initial-height": (0, 383), "continental-thickness": (0, 150),
           "oceanic-thickness": (0, 60), "ocean-age": (0, 150), "new-ocean-fraction": (0, 1),
-          "compression": (0, 5), "extension": (0, 5), "shear": (0, 5), "plates": (0, 31)}
+          "compression": (0, 5), "extension": (0, 5), "shear": (0, 5), "plates": (0, 31), "plate-confidence": (0, 1), "carrier-density": (0, 8)}
 
 def export(root):
     cards, reports = [], []

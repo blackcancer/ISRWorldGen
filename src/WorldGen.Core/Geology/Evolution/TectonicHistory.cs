@@ -26,12 +26,15 @@ public sealed class TectonicMaterialSnapshot
     public ReadOnlyCollection<double> AccumulatedExtension { get; }
     public ReadOnlyCollection<double> AccumulatedShear { get; }
     public ReadOnlyCollection<int> PlateIds { get; }
+    public ReadOnlyCollection<double> PlateConfidence { get; }
+    public ReadOnlyCollection<double> CarrierDensity { get; }
     public string Checksum { get; }
 
     internal TectonicMaterialSnapshot(int side, double time, double[] continental, double[] oceanic,
-        double[] ageMoment, double[] inherited, double[] compression, double[] extension, double[] shear, int[] plateIds)
+        double[] ageMoment, double[] inherited, double[] compression, double[] extension, double[] shear, int[] plateIds, double[] confidence, double[] density)
     {
         Side = side; Time = time;
+        PlateConfidence = Array.AsReadOnly((double[])confidence.Clone()); CarrierDensity = Array.AsReadOnly((double[])density.Clone());
         ContinentalKm = Array.AsReadOnly((double[])continental.Clone()); OceanicKm = Array.AsReadOnly((double[])oceanic.Clone());
         InheritedOceanicKm = Array.AsReadOnly((double[])inherited.Clone());
         AccumulatedCompression = Array.AsReadOnly((double[])compression.Clone()); AccumulatedExtension = Array.AsReadOnly((double[])extension.Clone());
@@ -47,7 +50,7 @@ public sealed class TectonicMaterialSnapshot
         Span<byte> buffer = stackalloc byte[8];
         BinaryPrimitives.WriteDoubleLittleEndian(buffer, time); hash.AppendData(buffer);
         foreach (var field in new[] { ContinentalKm, OceanicKm, OceanAge, InheritedOceanicKm, ElevationKm,
-            AccumulatedCompression, AccumulatedExtension, AccumulatedShear })
+            AccumulatedCompression, AccumulatedExtension, AccumulatedShear, PlateConfidence, CarrierDensity })
             foreach (double value in field) { BinaryPrimitives.WriteDoubleLittleEndian(buffer, value); hash.AppendData(buffer); }
         foreach (int value in plateIds) { BinaryPrimitives.WriteInt64LittleEndian(buffer, value); hash.AppendData(buffer); }
         Checksum = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
@@ -56,14 +59,15 @@ public sealed class TectonicMaterialSnapshot
 
 /// <summary>
 /// Experimental reduced kinematic thin-sheet history, NOT a force-balanced
-/// mantle/Stokes solver. Moving periodic Voronoi steering domains prescribe
-/// velocities. Crust material is transported conservatively, can thicken or thin,
+/// mantle/Stokes solver. Plate speeds are prescribed; the explicit domain mode
+/// selects transported coordinates or moving Voronoi reference domains. Crust
+/// material is transported conservatively, can thicken or thin,
 /// and oceanic mass is created/recycled with an explicit ledger and ageing.
 /// Domain boundaries are a model closure, not native player teleportation.
 /// </summary>
 public sealed class TectonicHistory
 {
-    public const string AlgorithmId = "tectonic-material-history-v1-full-reference-atlas";
+    public const string AlgorithmId = "tectonic-material-history-v2-advected-domain-option";
     public const double ReferenceKmPerUnit = .01;
     public int Seed { get; }
     public double ReferenceWidth { get; }
@@ -73,16 +77,19 @@ public sealed class TectonicHistory
     public TectonicMaterialSnapshot Final { get; }
     public ReadOnlyCollection<TectonicPlate> Plates { get; }
     public ReadOnlyCollection<TectonicLedger> Ledger { get; }
+    public ReadOnlyCollection<double> InitialCarrierInventory { get; }
+    public ReadOnlyCollection<double> FinalCarrierInventory { get; }
     public string Checksum { get; }
 
     private TectonicHistory(int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings,
-        TectonicMaterialSnapshot initial, TectonicMaterialSnapshot final, TectonicPlate[] plates, List<TectonicLedger> ledger)
+        TectonicMaterialSnapshot initial, TectonicMaterialSnapshot final, TectonicPlate[] plates, List<TectonicLedger> ledger, double[] initialCarrierInventory, double[] finalCarrierInventory)
     {
         Seed = seed; ReferenceWidth = scale.ReferenceWidth; ReferenceLength = scale.ReferenceLength; Settings = settings;
         Initial = initial; Final = final; Plates = Array.AsReadOnly(plates); Ledger = ledger.AsReadOnly();
         string canonical = JsonSerializer.Serialize(new { AlgorithmId, seed, ReferenceWidth, ReferenceLength, settings,
-            initial = initial.Checksum, final = final.Checksum, plates, ledger });
+            initial = initial.Checksum, final = final.Checksum, plates, ledger, initialCarrierInventory, finalCarrierInventory });
         Checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+        InitialCarrierInventory = Array.AsReadOnly(initialCarrierInventory); FinalCarrierInventory = Array.AsReadOnly(finalCarrierInventory);
     }
 
     public static TectonicHistory Generate(int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings)
@@ -96,8 +103,11 @@ public sealed class TectonicHistory
         double[] o = c.Select(value => 7 * (1 - value / 35)).ToArray();
         double[] moment = o.Select(value => value * settings.InitialOceanAge).ToArray(), inherited = (double[])o.Clone();
         var compression = new double[count]; var extension = new double[count]; var shear = new double[count];
-        var velocity = Velocities(plates, n, width, length, settings.DeformationWidth, 0);
-        var initial = new TectonicMaterialSnapshot(n, 0, c, o, moment, inherited, compression, extension, shear, velocity.Owner);
+        AdvectedPlateDomains? domains = settings.AdvectPlateDomains
+            ? AdvectedPlateDomains.FromVoronoi(plates, n, width, length, settings.DeformationWidth) : null;
+        double[] initialCarrierInventory = domains?.Inventory.ToArray() ?? [];
+        var velocity = domains is null ? Velocities(plates, n, width, length, settings.DeformationWidth, 0) : MaterialVelocities(domains);
+        var initial = new TectonicMaterialSnapshot(n, 0, c, o, moment, inherited, compression, extension, shear, velocity.Owner, velocity.Confidence, velocity.Density);
         var ledger = new List<TectonicLedger> { new(0, CrustTransport.Sum(c) * area, CrustTransport.Sum(o) * area,
             0, 0, CrustTransport.Sum(moment) * area, c.Max(), 0, 0) };
         double initialC = CrustTransport.Sum(c), initialO = CrustTransport.Sum(o), created = 0, recycled = 0, time = 0;
@@ -108,7 +118,8 @@ public sealed class TectonicHistory
         while (time < settings.Duration)
         {
             double dt = Math.Min(maxDt, settings.Duration - time);
-            velocity = Velocities(plates, n, width, length, settings.DeformationWidth, time + dt / 2);
+            velocity = domains is null ? Velocities(plates, n, width, length, settings.DeformationWidth, time + dt / 2)
+                : MaterialVelocities(domains);
             double[] east = new double[count], south = new double[count], divergence = new double[count];
             for (int z = 0; z < n; z++)
             for (int x = 0; x < n; x++)
@@ -134,7 +145,7 @@ public sealed class TectonicHistory
             for (int i = 0; i < count; i++) nm[i] += no[i] * dt;
             int collisionFaces = 0, subductionFaces = 0;
             bool[] sinks = SubductionMask(plates, velocity.Owner, c, o, moment, n, dx, dz,
-                settings.DeformationWidth, width, length, time + dt / 2, ref collisionFaces, ref subductionFaces);
+                settings.DeformationWidth, width, length, time + dt / 2, domains, ref collisionFaces, ref subductionFaces);
             double[] born = new double[count], removed = new double[count], removedAge = new double[count];
             for (int i = 0; i < count; i++)
             {
@@ -159,13 +170,19 @@ public sealed class TectonicHistory
             CrustTransport.RequireBalance(initialO + created - recycled, CrustTransport.Sum(no), "oceanic history inventory");
             CrustTransport.RequireBalance(ageExpected - CrustTransport.Sum(removedAge), CrustTransport.Sum(nm), "ocean-age moment");
             if (nc.Any(v => v > 150)) throw new ArithmeticException("Crust thicker than the experimental rheology domain; do not clamp heights.");
+            // The same face fluxes move the in-plane plate coordinates. There
+            // is deliberately no reevaluation of a moving nearest-site label.
+            domains = domains?.Advect(east, south, dt);
+            if (domains is not null)
+                for (int k = 0; k < domains.PlateCount; k++)
+                    CrustTransport.RequireBalance(initialCarrierInventory[k], domains.Inventory[k], "plate carrier " + k);
             c = nc; o = no; moment = nm; inherited = ni; time += dt;
             ledger.Add(new TectonicLedger(time, CrustTransport.Sum(c) * area, CrustTransport.Sum(o) * area,
                 created * area, recycled * area, CrustTransport.Sum(moment) * area, c.Max(), collisionFaces, subductionFaces));
         }
-        velocity = Velocities(plates, n, width, length, settings.DeformationWidth, time);
-        var final = new TectonicMaterialSnapshot(n, time, c, o, moment, inherited, compression, extension, shear, velocity.Owner);
-        return new TectonicHistory(seed, scale, settings, initial, final, plates, ledger);
+        velocity = domains is null ? Velocities(plates, n, width, length, settings.DeformationWidth, time) : MaterialVelocities(domains);
+        var final = new TectonicMaterialSnapshot(n, time, c, o, moment, inherited, compression, extension, shear, velocity.Owner, velocity.Confidence, velocity.Density);
+        return new TectonicHistory(seed, scale, settings, initial, final, plates, ledger, initialCarrierInventory, domains?.Inventory.ToArray() ?? []);
     }
 
     /// <summary>Declared bilinear sampling of the frozen material-height raster, not invented fine detail.</summary>
@@ -182,10 +199,23 @@ public sealed class TectonicHistory
             + tz * ((1 - tx) * Final.ElevationKm[z1 * n + x0] + tx * Final.ElevationKm[z1 * n + x1]);
     }
 
-    private sealed record VelocityField(double[] X, double[] Z, int[] Owner);
+    private sealed record VelocityField(double[] X, double[] Z, int[] Owner, double[] Confidence, double[] Density);
+    private static VelocityField MaterialVelocities(AdvectedPlateDomains domains)
+    {
+        int count = domains.Side * domains.Side;
+        var x = new double[count]; var z = new double[count]; var owner = new int[count];
+        var confidence = new double[count]; var density = new double[count];
+        for (int i = 0; i < count; i++)
+        {
+            (x[i], z[i]) = domains.Velocity(i); owner[i] = domains.Owner(i);
+            confidence[i] = domains.Confidence(i); density[i] = domains.Density(i);
+        }
+        return new VelocityField(x, z, owner, confidence, density);
+    }
     private static VelocityField Velocities(TectonicPlate[] plates, int n, double width, double length, double blendWidth, double time)
     {
         int count = n * n; var vx = new double[count]; var vz = new double[count]; var owner = new int[count];
+        var confidence = new double[count]; var density = Enumerable.Repeat(1d, count).ToArray();
         double[] distances = new double[plates.Length];
         var positions = plates.Select(p => (X: Wrap(p.X + p.Vx * time, width), Z: Wrap(p.Z + p.Vz * time, length))).ToArray();
         for (int z = 0; z < n; z++)
@@ -205,13 +235,13 @@ public sealed class TectonicHistory
                 double w = Math.Exp(-(distances[k] - nearest) / blendWidth);
                 vx[i] += w * plates[k].Vx; vz[i] += w * plates[k].Vz; weight += w;
             }
-            vx[i] /= weight; vz[i] /= weight;
+            vx[i] /= weight; vz[i] /= weight; confidence[i] = 1 / weight;
         }
-        return new VelocityField(vx, vz, owner);
+        return new VelocityField(vx, vz, owner, confidence, density);
     }
 
     private static bool[] SubductionMask(TectonicPlate[] plates, int[] owners, double[] c, double[] o, double[] moment,
-        int n, double dx, double dz, double width, double domainWidth, double domainLength, double time, ref int collisions, ref int subductions)
+        int n, double dx, double dz, double width, double domainWidth, double domainLength, double time, AdvectedPlateDomains? domains, ref int collisions, ref int subductions)
     {
         var mask = new bool[n * n];
         int radiusX = (int)Math.Ceiling(width / dx), radiusZ = (int)Math.Ceiling(width / dz);
@@ -225,7 +255,7 @@ public sealed class TectonicHistory
                 int a = owners[i], b = owners[j]; if (a == b) continue;
                 double faceX = (x + (axis == 0 ? 1d : .5)) * dx;
                 double faceZ = (z + (axis == 1 ? 1d : .5)) * dz;
-                double closure = CrustResponse.ClosingSpeed(plates[a], plates[b], faceX, faceZ, domainWidth, domainLength, time);
+                double closure = domains?.ClosingSpeedAtFace(i, axis) ?? CrustResponse.ClosingSpeed(plates[a], plates[b], faceX, faceZ, domainWidth, domainLength, time);
                 if (closure <= 0) continue;
                 var choice = CrustResponse.Choose(a, c[i], o[i], o[i] > 0 ? moment[i] / o[i] : 0,
                     b, c[j], o[j], o[j] > 0 ? moment[j] / o[j] : 0);

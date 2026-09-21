@@ -24,6 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        mode: [reference, material]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     env:
@@ -42,7 +43,7 @@ jobs:
       - name: Compile real Core, run causal checks and evolve three entire atlases
         shell: pwsh
         run: |
-          dotnet run --project testsrc/WorldGen.TectonicEvolution/WorldGen.TectonicEvolution.csproj -c Release -- .local/tectonic-history 512
+          dotnet run --project testsrc/WorldGen.TectonicEvolution/WorldGen.TectonicEvolution.csproj -c Release -- .local/tectonic-history 512 ${{ matrix.mode }}
           if ($LASTEXITCODE -ne 0) { throw 'Tectonic state computation or its invariants failed.' }
       - name: Verify exact heights and export unmasked PNG16
         shell: pwsh
@@ -60,13 +61,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tectonic-history-${{ matrix.os }}-${{ github.sha }}
+          name: tectonic-history-${{ matrix.os }}-${{ matrix.mode }}-${{ github.sha }}
           path: .local/tectonic-history/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
   platforms:
     needs: history
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [reference, material]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -78,17 +83,17 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: tectonic-history-ubuntu-latest-${{ github.sha }}
+          name: tectonic-history-ubuntu-latest-${{ matrix.mode }}-${{ github.sha }}
           path: .local/linux
       - uses: actions/download-artifact@v4
         with:
-          name: tectonic-history-windows-latest-${{ github.sha }}
+          name: tectonic-history-windows-latest-${{ matrix.mode }}-${{ github.sha }}
           path: .local/windows
       - name: Compare the actual heights, material fields and PNG16 across platforms
         run: python tools/verify_tectonic_platforms.py .local/linux .local/windows .local/platforms.json
       - uses: actions/upload-artifact@v4
         with:
-          name: tectonic-platform-comparison-${{ github.sha }}
+          name: tectonic-platform-comparison-${{ matrix.mode }}-${{ github.sha }}
           path: .local/platforms.json
           include-hidden-files: true
           if-no-files-found: error

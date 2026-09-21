@@ -3,19 +3,21 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using ISRWorldGen.Core.Geology.Evolution;
 
-if (args.Length is < 1 or > 2 || (args.Length == 2 && (!int.TryParse(args[1], out int parsed) || parsed is < 64 or > 512 || (parsed & (parsed - 1)) != 0)))
-    throw new ArgumentException("Usage: WorldGen.TectonicEvolution <new-output-directory> [side=256; 64..512 power of two]");
-int side = args.Length == 2 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 256;
+if (args.Length is < 1 or > 3 || (args.Length >= 2 && (!int.TryParse(args[1], out int parsed) || parsed is < 64 or > 512 || (parsed & (parsed - 1)) != 0))
+    || (args.Length == 3 && args[2] is not ("material" or "reference")))
+    throw new ArgumentException("Usage: WorldGen.TectonicEvolution <new-directory> [side=256] [material|reference]");
+int side = args.Length >= 2 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 256;
+bool material = args.Length < 3 || args[2] == "material";
 string root = Path.GetFullPath(args[0]);
 if (Directory.Exists(root) || File.Exists(root)) throw new IOException("Evidence directory exists; never overwrite an earlier campaign.");
-string[] checks = TectonicChecks.Run().Concat(PolarityRegressionChecks.Run()).ToArray();
+string[] checks = TectonicChecks.Run().Concat(PolarityRegressionChecks.Run()).Concat(MaterialDomainChecks.Run()).ToArray();
 Directory.CreateDirectory(root);
 var json = new JsonSerializerOptions { WriteIndented = true };
 var reports = new List<object>();
 foreach (int seed in new[] { -437287116, 73, 20260906 })
 {
     var reference = new TectonicScalePlan(1_000_000, 1_000_000);
-    var settings = new TectonicEvolutionSettings(side: side);
+    var settings = new TectonicEvolutionSettings(side: side, advectPlateDomains: material);
     TectonicHistory history = TectonicHistory.Generate(seed, reference, settings);
     int components = CountLargeLandComponents(history.Final.ElevationKm, side);
     string seedRoot = Path.Combine(root, "seed-" + seed.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -30,7 +32,9 @@ foreach (int seed in new[] { -437287116, 73, 20260906 })
     WriteField("compression", history.Final.AccumulatedCompression, "accumulated negative divergence; Eulerian diagnostic");
     WriteField("extension", history.Final.AccumulatedExtension, "accumulated positive divergence; Eulerian diagnostic");
     WriteField("shear", history.Final.AccumulatedShear, "accumulated shear strain; Eulerian diagnostic");
-    WriteField("plates", history.Final.PlateIds.Select(v => (double)v).ToArray(), "moving Voronoi steering-domain identifier, not material provenance");
+    WriteField("plates", history.Final.PlateIds.Select(v => (double)v).ToArray(), material ? "advected in-plane carrier identifier; not surviving crust provenance" : "moving Voronoi reference-domain identifier");
+    WriteField("plate-confidence", history.Final.PlateConfidence, "dominant in-plane carrier fraction; not certainty of physical reconstruction");
+    WriteField("carrier-density", history.Final.CarrierDensity, material ? "conservative reference-area measure per current area" : "reference mode sentinel = 1; no carrier evolved");
     var scaleChecks = new List<object>();
     foreach (long size in new long[] { 131072, 262144, 1_000_000 })
     {
@@ -58,12 +62,13 @@ foreach (int seed in new[] { -437287116, 73, 20260906 })
         worldWidthBlocks = 1_000_000, worldLengthBlocks = 1_000_000, history.ReferenceWidth, history.ReferenceLength,
         referenceKmPerUnit = TectonicHistory.ReferenceKmPerUnit, worldHeightBlocks = 384, seaLevelReferenceBlocks = 168,
         blocksPerModelKm = 12, width = side, height = side, settings, scaleChecks, fields,
+        history.InitialCarrierInventory, history.FinalCarrierInventory,
         waterSurfacePresent = false, seabedMasked = false, perImageAutoContrast = false,
         steps = history.Ledger.Count - 1, initial = history.Ledger[0], final = history.Ledger[^1],
         solidMin = solid.Min(), solidMax = solid.Max(), largeLandComponents = components,
         landFraction = history.Final.ElevationKm.Count(v => v >= 0) / (double)(side * side),
         solverNotes = new[] { "First-order donor-cell numerical diffusion remains measurable.",
-            "Steering domains move; they are not a rigid Lagrangian plate reconstruction.",
+            material ? "Plate coordinates follow the crust face velocities; prescribed plate speeds are not a force balance." : "Moving Voronoi reference; material assignment is not advected.",
             "Subduction recycles volume on selected lower sides, but flexural trench/arc mechanics are not implemented.",
             "No tectonic phase is hidden in a coloured rendering. No Earth data is copied into the generated height field." }
     };

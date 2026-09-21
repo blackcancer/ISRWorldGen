@@ -47,11 +47,13 @@ public sealed record TectonicEvolutionSettings
     public double LowerCrustMobility { get; }
     public double InitialOceanAge { get; }
     public int MotionSign { get; }
+    public bool AdvectPlateDomains { get; }
+    public string DomainMotionPolicy => AdvectPlateDomains ? AdvectedPlateDomains.AlgorithmId : "moving-voronoi-reference-v1";
     public string MaterialContactPolicy => CrustResponse.PolarityPolicy;
 
     public TectonicEvolutionSettings(int side = 256, int plateCount = 12, int cratonCount = 4,
         double duration = 36, double speedReferenceUnitsPerTime = 1800,
-        double deformationWidth = 22000, double lowerCrustMobility = 2_000_000, double initialOceanAge = 50, int motionSign = 1)
+        double deformationWidth = 22000, double lowerCrustMobility = 2_000_000, double initialOceanAge = 50, int motionSign = 1, bool advectPlateDomains = false)
     {
         if (motionSign is not (-1 or 1) || side is < 32 or > 512 || (side & (side - 1)) != 0 || plateCount is < 2 or > 32 || cratonCount is < 2 or > 6 ||
             !double.IsFinite(duration) || duration is < 0 or > 100 ||
@@ -62,6 +64,6 @@ public sealed record TectonicEvolutionSettings
             throw new ArgumentOutOfRangeException(nameof(side), "Unsupported bounded tectonic campaign settings.");
         Side = side; PlateCount = plateCount; CratonCount = cratonCount;
         Duration = duration; SpeedReferenceUnitsPerTime = speedReferenceUnitsPerTime;
-        DeformationWidth = deformationWidth; LowerCrustMobility = lowerCrustMobility; InitialOceanAge = initialOceanAge; MotionSign = motionSign;
+        DeformationWidth = deformationWidth; LowerCrustMobility = lowerCrustMobility; InitialOceanAge = initialOceanAge; MotionSign = motionSign; AdvectPlateDomains = advectPlateDomains;
     }
 }
