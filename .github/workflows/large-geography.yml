@@ -1,0 +1,73 @@
+name: Large geographic domains
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/WorldGen.Core/**'
+      - 'testsrc/WorldGen.LargeGeography.Tests/**'
+      - 'testsrc/WorldGen.Tests/L05A/SpatialDiagnosticExportTests.cs'
+      - 'testsrc/WorldGen.Tests/L03B/L03BTestSupport.cs'
+      - 'tools/review_large_geography.py'
+      - 'tools/audit_spatial_quality.py'
+      - 'tools/export_spatial_png.py'
+      - '.github/workflows/large-geography.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: large-geography-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  world:
+    name: ${{ matrix.profile }} / ${{ matrix.seed }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - {os: ubuntu-latest, profile: wide-analysis, seed: '-437287116'}
+          - {os: ubuntu-latest, profile: wide-analysis, seed: '73'}
+          - {os: ubuntu-latest, profile: wide-analysis, seed: '20260906'}
+          - {os: ubuntu-latest, profile: vast-expeditions, seed: '-437287116'}
+          - {os: ubuntu-latest, profile: vast-expeditions, seed: '73'}
+          - {os: ubuntu-latest, profile: vast-expeditions, seed: '20260906'}
+          - {os: windows-latest, profile: wide-analysis, seed: '-437287116'}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      ISR_LARGE_PROFILE: ${{ matrix.profile }}
+      ISR_LARGE_SEED: ${{ matrix.seed }}
+      ISR_SPATIAL_DIAGNOSTICS_ROOT: ${{ github.workspace }}/.local/large-geography
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compute the entire finite world with the actual Core
+        shell: pwsh
+        run: |
+          dotnet test testsrc/WorldGen.LargeGeography.Tests/WorldGen.LargeGeography.Tests.csproj -c Release --filter FullyQualifiedName~LargeExtentDiagnosticTests --logger 'trx;LogFileName=large.trx' --results-directory .local/large-results
+          if ($LASTEXITCODE -ne 0) { throw 'Large-domain computation failed; no geographic acceptance inferred.' }
+      - name: Verify fields and render complete domains and major catchments
+        shell: pwsh
+        run: |
+          python tools/review_large_geography.py --self-test --root .local/large-geography
+          if ($LASTEXITCODE -ne 0) { throw 'Large-domain evidence export failed.' }
+      - name: Retain raw fields, complete PNGs and numerical evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: large-${{ matrix.profile }}-${{ matrix.seed }}-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            .local/large-geography/
+            .local/large-results/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
