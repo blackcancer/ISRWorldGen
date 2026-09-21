@@ -1,0 +1,72 @@
+name: Raw relief and Earth references
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/WorldGen.Core/**'
+      - 'testsrc/WorldGen.RawRelief/**'
+      - 'tools/export_raw_relief.py'
+      - 'tools/compare_earth_relief.py'
+      - 'tools/export_spatial_png.py'
+      - '.github/workflows/raw-relief.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: raw-relief-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  raw:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preserve exact source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .local/raw-source | Out-Null
+          git archive --format=zip --output=.local/raw-source/source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source snapshot failed.' }
+      - name: Generate actual unmasked raw height fields and verify core invariants
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.RawRelief/WorldGen.RawRelief.csproj -c Release -- .local/raw-relief 1024
+          if ($LASTEXITCODE -ne 0) { throw 'Raw relief computation or numeric tests failed.' }
+      - name: Export true sixteen-bit heightmaps
+        shell: pwsh
+        run: |
+          python tools/export_raw_relief.py --root .local/raw-relief
+          if ($LASTEXITCODE -ne 0) { throw 'Unmasked height export failed.' }
+      - name: Acquire measured Earth references, do not self-approve terrain
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          python tools/compare_earth_relief.py --root .local/raw-relief --references .local/earth-references
+          if ($LASTEXITCODE -ne 0) { throw 'Observed reference comparison is incomplete; inspect retained report.' }
+      - name: Preserve exact heights, reference sources, PNGs and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-relief-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            .local/raw-relief/
+            .local/earth-references/
+            .local/raw-source/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
