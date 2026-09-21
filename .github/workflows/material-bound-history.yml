@@ -12,6 +12,7 @@ on:
       - 'src/WorldGen.Core/Foundation/**'
       - 'tools/export_tectonic_history.py'
       - 'tools/verify_tectonic_platforms.py'
+      - 'tools/export_spatial_png.py'
       - 'global.json'
       - 'Directory.Build.props'
 permissions:
@@ -40,7 +41,7 @@ jobs:
       - name: Build real Core, keep baseline checks, run candidate and export full worlds
         shell: pwsh
         run: |
-          dotnet run --project testsrc/WorldGen.MaterialBoundEvolution/WorldGen.MaterialBoundEvolution.csproj -c Release -- .local/material-bound 256
+          dotnet run --project testsrc/WorldGen.MaterialBoundEvolution/WorldGen.MaterialBoundEvolution.csproj -c Release -- .local/material-bound 512
           if ($LASTEXITCODE -ne 0) { throw 'Material-bound C# checks or candidate generation failed.' }
           python tools/export_material_bound_history.py --root .local/material-bound
           if ($LASTEXITCODE -ne 0) { throw 'Actual field encoding failed.' }
