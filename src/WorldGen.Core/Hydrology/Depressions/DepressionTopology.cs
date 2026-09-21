@@ -27,6 +27,8 @@ public sealed record DrainageWaterState(long CellId, long TerminalCellId, long? 
 /// </summary>
 public sealed record DrainageCell
 {
+    private readonly long[] orderedNeighbours;
+
     public DrainageCell(
         long id,
         double physicalElevation,
@@ -38,7 +40,8 @@ public sealed record DrainageCell
         ArgumentNullException.ThrowIfNull(neighbours);
         Id = id;
         PhysicalElevation = physicalElevation;
-        Neighbours = Array.AsReadOnly(neighbours.Distinct().OrderBy(value => value).ToArray());
+        orderedNeighbours = neighbours.Distinct().OrderBy(value => value).ToArray();
+        Neighbours = Array.AsReadOnly(orderedNeighbours);
         Terminal = terminal;
         IsMarineBoundary = isMarineBoundary;
     }
@@ -48,6 +51,10 @@ public sealed record DrainageCell
     public ReadOnlyCollection<long> Neighbours { get; }
     public DrainageTerminalKind? Terminal { get; }
     public bool IsMarineBoundary { get; }
+
+    // Use the same immutable array, without allocating a second adjacency index.
+    // The default Int64 comparer does not subtract IDs and cannot overflow.
+    internal bool HasNeighbour(long id) => Array.BinarySearch(orderedNeighbours, id) >= 0;
 }
 
 public sealed record RoutedCell(long Id, double PhysicalElevation, double RoutingElevation, long? ReceiverId, DrainageTerminalKind? Terminal);
@@ -115,7 +122,7 @@ public static class DepressionTopologyBuilder
                 throw new ArgumentException("An ocean terminal must be declared on a marine boundary.", nameof(source));
             foreach (long neighbour in cell.Neighbours)
             {
-                if (neighbour == cell.Id || !byId.ContainsKey(neighbour) || !byId[neighbour].Neighbours.Contains(cell.Id))
+                if (neighbour == cell.Id || !byId.ContainsKey(neighbour) || !byId[neighbour].HasNeighbour(cell.Id))
                     throw new ArgumentException("Drainage adjacency must be symmetric and refer only to distinct known cells.", nameof(source));
             }
         }
@@ -154,10 +161,16 @@ public static class DepressionTopologyBuilder
             }
         }
 
-        // Each disconnected component is a specified dry terminal, never a silent null.
+        // Sort unresolved candidates once, not once per disconnected component.
+        // Skipping an already visited candidate preserves the old (elevation, ID)
+        // selection exactly, including ties and implicitly selected dry terminals.
+        DrainageCell[] fallbackOrder = visited.Count == cells.Length ? [] :
+            cells.OrderBy(cell => cell.PhysicalElevation).ThenBy(cell => cell.Id).ToArray();
+        int fallbackIndex = 0;
         while (visited.Count != cells.Length)
         {
-            DrainageCell dry = cells.Where(cell => !visited.Contains(cell.Id)).OrderBy(cell => cell.PhysicalElevation).ThenBy(cell => cell.Id).First();
+            while (visited.Contains(fallbackOrder[fallbackIndex].Id)) fallbackIndex++;
+            DrainageCell dry = fallbackOrder[fallbackIndex++];
             visited.Add(dry.Id); routing[dry.Id] = dry.PhysicalElevation; receivers[dry.Id] = null;
             byId[dry.Id] = new DrainageCell(dry.Id, dry.PhysicalElevation, dry.Neighbours, DrainageTerminalKind.DryBasin);
             queue.Enqueue(dry.Id, (dry.PhysicalElevation, dry.Id));
@@ -251,9 +264,12 @@ public static class DepressionTopologyBuilder
         Dictionary<long, RoutedCell> routing = routed.ToDictionary(cell => cell.Id);
         var candidates = new HashSet<long>(routed.Where(cell => cell.RoutingElevation > cell.PhysicalElevation).Select(cell => cell.Id));
         long nextId = 0;
-        while (candidates.Count > 0)
+        // The input is already canonical, but sort explicitly so this private
+        // helper remains independent of a future caller's enumeration order.
+        foreach (RoutedCell candidate in routed.OrderBy(cell => cell.Id))
         {
-            long start = candidates.Min(); candidates.Remove(start);
+            long start = candidate.Id;
+            if (!candidates.Remove(start)) continue;
             var component = new List<long>(); var pending = new Queue<long>(); pending.Enqueue(start);
             while (pending.Count > 0)
             {
@@ -301,14 +317,17 @@ public static class DepressionTopologyBuilder
         IReadOnlyCollection<long> component,
         IReadOnlyDictionary<long, DrainageCell> original)
     {
-        var unseen = new HashSet<long>(component);
-        while (unseen.Count > 0)
+        // Membership is fixed while 'unseen' shrinks. Never enumerate the hash
+        // sets to assign IDs or accumulate floating-point capacities.
+        var membership = new HashSet<long>(component);
+        var unseen = new HashSet<long>(membership);
+        foreach (long start in component.OrderBy(id => id))
         {
-            long start = unseen.Min();
+            if (!unseen.Remove(start)) continue;
             double elevation = original[start].PhysicalElevation;
             var plateau = new List<long>();
             var pending = new Queue<long>();
-            unseen.Remove(start); pending.Enqueue(start);
+            pending.Enqueue(start);
             while (pending.Count > 0)
             {
                 long id = pending.Dequeue(); plateau.Add(id);
@@ -320,7 +339,7 @@ public static class DepressionTopologyBuilder
             }
 
             plateau.Sort();
-            if (plateau.All(id => original[id].Neighbours.Where(component.Contains)
+            if (plateau.All(id => original[id].Neighbours.Where(membership.Contains)
                 .All(neighbour => original[neighbour].PhysicalElevation >= elevation)))
             {
                 yield return plateau.ToArray();

@@ -12,6 +12,7 @@ on:
       - 'testsrc/WorldGen.Tests/L05C/**'
       - 'testsrc/WorldGen.ClimateHydrology.Tests/**'
       - 'tools/test_climate_hydrology.py'
+      - 'tools/test_drainage_scaling.py'
       - 'registry/fixtures.json'
       - 'global.json'
       - 'Directory.Build.props'
@@ -23,6 +24,7 @@ on:
       - 'testsrc/WorldGen.Tests/L05*/**'
       - 'testsrc/WorldGen.ClimateHydrology.Tests/**'
       - 'tools/test_climate_hydrology.py'
+      - 'tools/test_drainage_scaling.py'
       - '.github/workflows/climate-hydrology.yml'
       - 'global.json'
       - 'Directory.Build.props'
@@ -63,6 +65,11 @@ jobs:
         run: |
           python tools/test_climate_hydrology.py --configuration $env:CONFIGURATION --disposable-checkout
           if ($LASTEXITCODE -ne 0) { throw 'Climate/hydrology regression failed.' }
+      - name: Compare routing and discharge to the pinned pre-optimization source
+        shell: pwsh
+        run: |
+          python tools/test_drainage_scaling.py --configuration $env:CONFIGURATION --disposable-checkout
+          if ($LASTEXITCODE -ne 0) { throw 'Drainage equivalence/scaling regression failed.' }
       - name: Retain numerical witnesses, original-test results and maps
         if: always()
         uses: actions/upload-artifact@v4

@@ -107,14 +107,17 @@ public static class DischargeAccumulator
         TransferTotals transferTotals = ValidateAndAggregateTransfers(waterBudget.Transfers, reservoirs);
 
         var states = new Dictionary<long, MutableReach>(cells.Length);
-        foreach (WaterBudgetCell cell in cells)
+        // ValidateCells proves the canonical arrays have exactly matching IDs.
+        // Zip by index instead of searching every routed cell for every budget.
+        for (int index = 0; index < cells.Length; index++)
         {
+            WaterBudgetCell cell = cells[index];
             DischargeAdjustment adjustment = byAdjustment.GetValueOrDefault(cell.CellId);
             double runoff = MultiplyFinite(cell.RunoffModelLengthPerYear, cell.AreaModelSquareLength, nameof(waterBudget));
             double recharge = cell.RechargeModelVolumePerYear;
             double retainedRecharge = SubtractFinite(recharge, transferTotals.OutgoingByReservoir.GetValueOrDefault(cell.ReservoirId), nameof(waterBudget));
             double incomingTransfer = transferTotals.IncomingByReservoir.GetValueOrDefault(cell.ReservoirId);
-            states.Add(cell.CellId, new MutableReach(routed.Single(route => route.Id == cell.CellId), runoff, retainedRecharge, incomingTransfer, adjustment));
+            states.Add(cell.CellId, new MutableReach(routed[index], runoff, retainedRecharge, incomingTransfer, adjustment));
         }
 
         Dictionary<long, List<long>> upstream = cells.ToDictionary(cell => cell.CellId, _ => new List<long>());
@@ -164,8 +167,9 @@ public static class DischargeAccumulator
 
     private static void ValidateCells(IReadOnlyList<WaterBudgetCell> budgets, IReadOnlyList<RoutedCell> routes)
     {
+        var routeIds = routes.Select(route => route.Id).ToHashSet();
         if (budgets.Count == 0 || budgets.Select(cell => cell.CellId).Distinct().Count() != budgets.Count || budgets.Select(cell => cell.ReservoirId).Distinct().Count() != budgets.Count ||
-            routes.Select(route => route.Id).Distinct().Count() != routes.Count || !budgets.Select(cell => cell.CellId).SequenceEqual(routes.Select(route => route.Id)))
+            routeIds.Count != routes.Count || !budgets.Select(cell => cell.CellId).SequenceEqual(routes.Select(route => route.Id)))
             throw new ArgumentException("Water-budget and drainage cell IDs must be unique and exactly identical.");
         foreach (WaterBudgetCell cell in budgets)
             if (!double.IsFinite(cell.AreaModelSquareLength) || cell.AreaModelSquareLength <= 0d ||
@@ -177,7 +181,7 @@ public static class DischargeAccumulator
                 !double.IsFinite(cell.RechargeModelVolumePerYear) || cell.RechargeModelVolumePerYear < 0d)
                 throw new ArgumentOutOfRangeException(nameof(budgets), "Water-budget terms, soil state, and areas must be finite and within their declared bounds.");
         foreach (RoutedCell route in routes)
-            if (route.ReceiverId is long receiver && !routes.Any(candidate => candidate.Id == receiver))
+            if (route.ReceiverId is long receiver && !routeIds.Contains(receiver))
                 throw new ArgumentException("Every routed receiver must be a known cell.", nameof(routes));
     }
 
