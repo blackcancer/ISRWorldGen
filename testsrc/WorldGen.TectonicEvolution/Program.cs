@@ -8,7 +8,7 @@ if (args.Length is < 1 or > 2 || (args.Length == 2 && (!int.TryParse(args[1], ou
 int side = args.Length == 2 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 256;
 string root = Path.GetFullPath(args[0]);
 if (Directory.Exists(root) || File.Exists(root)) throw new IOException("Evidence directory exists; never overwrite an earlier campaign.");
-string[] checks = TectonicChecks.Run();
+string[] checks = TectonicChecks.Run().Concat(PolarityRegressionChecks.Run()).ToArray();
 Directory.CreateDirectory(root);
 var json = new JsonSerializerOptions { WriteIndented = true };
 var reports = new List<object>();

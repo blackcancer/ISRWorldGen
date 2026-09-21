@@ -47,6 +47,7 @@ public sealed record TectonicEvolutionSettings
     public double LowerCrustMobility { get; }
     public double InitialOceanAge { get; }
     public int MotionSign { get; }
+    public string MaterialContactPolicy => CrustResponse.PolarityPolicy;
 
     public TectonicEvolutionSettings(int side = 256, int plateCount = 12, int cratonCount = 4,
         double duration = 36, double speedReferenceUnitsPerTime = 1800,

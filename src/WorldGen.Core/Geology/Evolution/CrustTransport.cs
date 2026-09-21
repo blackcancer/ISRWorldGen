@@ -84,15 +84,21 @@ public readonly record struct SubductionChoice(TectonicContactKind Kind, int Sub
 /// <summary>Material-dependent polarity. Identical ocean columns use stable plate IDs only as a documented tie-break.</summary>
 public static class CrustResponse
 {
+    public const string PolarityPolicy = "resolved-material-1e-9km-age-1e-6Myr-v1";
     public static SubductionChoice Choose(int plateA, double continentalA, double oceanicA, double ageA,
         int plateB, double continentalB, double oceanicB, double ageB)
     {
         if (plateA == plateB || plateA < 0 || plateB < 0 ||
             new[] { continentalA, oceanicA, ageA, continentalB, oceanicB, ageB }.Any(v => !double.IsFinite(v) || v < 0) ||
             continentalA + oceanicA == 0 || continentalB + oceanicB == 0) throw new ArgumentException("Invalid contact columns.");
-        bool ca = continentalA > oceanicA, cb = continentalB > oceanicB;
+        // A decision must not amplify round-off in a transported ratio into
+        // choosing the opposite slab. These are declared model resolutions,
+        // not a tolerance added to exact Voronoi topology or to conserved mass.
+        bool ca = Math.Round(continentalA, 9, MidpointRounding.ToEven) > Math.Round(oceanicA, 9, MidpointRounding.ToEven);
+        bool cb = Math.Round(continentalB, 9, MidpointRounding.ToEven) > Math.Round(oceanicB, 9, MidpointRounding.ToEven);
+        double resolvedA = Math.Round(ageA, 6, MidpointRounding.ToEven), resolvedB = Math.Round(ageB, 6, MidpointRounding.ToEven);
         if (ca && cb) return new SubductionChoice(TectonicContactKind.ContinentalCollision, -1, -1);
-        int lower = ca ? plateB : cb ? plateA : ageA > ageB ? plateA : ageB > ageA ? plateB : Math.Max(plateA, plateB);
+        int lower = ca ? plateB : cb ? plateA : resolvedA > resolvedB ? plateA : resolvedB > resolvedA ? plateB : Math.Max(plateA, plateB);
         return new SubductionChoice(TectonicContactKind.Subduction, lower, lower == plateA ? plateB : plateA);
     }
 

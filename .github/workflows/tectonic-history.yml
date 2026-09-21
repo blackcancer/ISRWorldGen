@@ -7,6 +7,7 @@ on:
       - 'src/WorldGen.Core/Foundation/**'
       - 'testsrc/WorldGen.TectonicEvolution/**'
       - 'tools/export_tectonic_history.py'
+      - 'tools/verify_tectonic_platforms.py'
       - 'tools/export_spatial_png.py'
       - '.github/workflows/tectonic-history.yml'
       - 'global.json'
@@ -61,6 +62,34 @@ jobs:
         with:
           name: tectonic-history-${{ matrix.os }}-${{ github.sha }}
           path: .local/tectonic-history/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  platforms:
+    needs: history
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: tectonic-history-ubuntu-latest-${{ github.sha }}
+          path: .local/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: tectonic-history-windows-latest-${{ github.sha }}
+          path: .local/windows
+      - name: Compare the actual heights, material fields and PNG16 across platforms
+        run: python tools/verify_tectonic_platforms.py .local/linux .local/windows .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tectonic-platform-comparison-${{ github.sha }}
+          path: .local/platforms.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
