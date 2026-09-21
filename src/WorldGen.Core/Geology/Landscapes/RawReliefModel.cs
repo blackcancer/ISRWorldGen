@@ -19,7 +19,7 @@ public readonly record struct RawReliefSample(double HeightBlocks, double Signed
 /// </summary>
 public sealed class RawReliefModel
 {
-    public const string AlgorithmId = "raw-structural-relief-v2-metric-margins-contact-unions";
+    public const string AlgorithmId = "raw-structural-relief-v3-basement-provinces-marine-age";
     private readonly int seed;
     private readonly WorldBounds bounds;
     private readonly Feature[] features;
@@ -114,7 +114,7 @@ public sealed class RawReliefModel
                 segments.Add(new Segment(a.X, a.Z, z.X, z.Z));
             }
             belts.Add(new Belt(segments.ToArray(), (2600 + 2200 * Unit(feature.Id, 602)) * scale,
-                .30 + .25 * Unit(feature.Id, 603), PlateBoundaryKind.Collision, true));
+                .40 + .30 * Unit(feature.Id, 603), PlateBoundaryKind.Collision, true));
         }
         return new RawReliefModel(basis, atlas, plates, continents, features, belts.ToArray());
         double Unit(StableId id, ulong counter) => (StatelessRandomV1.NextUInt64(seed, RandomDomain.Geology, id, counter) >> 11) / 9007199254740992d;
@@ -141,9 +141,12 @@ public sealed class RawReliefModel
         signedMarginDistance += 1150 * scale * F(px, pz, 6700, 21);
         double land = Smooth(-700 * scale, 1400 * scale, signedMarginDistance);
         double compression = 0, extension = 0, axial = 0, inherited = 0;
+        double ridgeDistance = double.PositiveInfinity;
         foreach (Belt belt in belts)
         {
-            double distance2 = DistanceSquared(wx, wz, belt.Segments) / (belt.Width * belt.Width);
+            double metricDistance2 = DistanceSquared(wx, wz, belt.Segments);
+            if (belt.Kind == PlateBoundaryKind.Divergence) ridgeDistance = Math.Min(ridgeDistance, Math.Sqrt(metricDistance2));
+            double distance2 = metricDistance2 / (belt.Width * belt.Width);
             if (distance2 >= 49) continue;
             double taper = 1 - distance2 / 49;
             double envelope = Math.Exp(-.5 * distance2) * taper * taper * belt.Strength;
@@ -159,23 +162,38 @@ public sealed class RawReliefModel
         double shelfWidth = scale * (1800 + 3000 * (.5 + .5 * F(px, pz, 28000, 22))) * (1 - .7 * compression);
         double slopeWidth = scale * (3200 + 2200 * (.5 + .5 * F(px, pz, 16000, 23)));
         double slope = Smooth(shelfWidth, shelfWidth + slopeWidth, offshore);
-        double marine = -.055 * (1 - Math.Exp(-offshore / (900 * scale))) - .64 * slope;
-        marine += (.014 + .025 * slope) * F(px, pz, 12000, 32);
-        marine += .027 * slope * F(px, pz, 42000, 33);
-        double continentalBase = (.052 + .055 * F(px, pz, 24000, 34)) * Smooth(0, 4200 * scale, signedMarginDistance);
-        continentalBase += .025 * F(px, pz, 5800, 35) * land;
-        // The reference coastline is not a cap or a change of physical surface.
+        // A bounded distance-age proxy is a structural prior, not elapsed plate
+        // history: it gives broad ocean basins different depths away from ridges.
+        // The continental shelf still uses a separate metric distance to crust.
+        double thermalAge = 1 - Math.Exp(-ridgeDistance / (21000 * scale));
+        double basementAge = .5 + .5 * F(px, pz, 42000, 33);
+        double deepLevel = -.48 - .20 * Math.Sqrt(thermalAge) - .10 * basementAge;
+        double marine = -.055 * (1 - Math.Exp(-offshore / (900 * scale))) + deepLevel * slope;
+        double marineFabric = F(px, pz, 3800, 32);
+        marine += .010 * (1 - slope) * marineFabric;
+        marine += slope * (.035 * marineFabric + .028 * F(px, pz, 13000, 36));
+        // Inherited basement provinces interrupt a featureless coastal-to-centre
+        // ramp. Support is regional; fine relief remains concentrated in uplands.
+        double province = Smooth(-.24, .32, F(px, pz, 23000, 34));
+        double uplands = Mountain(seed, px, pz, 6200 * scale, 35);
+        double inlandSupport = Smooth(-900 * scale, 4100 * scale, signedMarginDistance);
+        double continentalBase = (.020 + .055 * province + .10 * province * uplands) * inlandSupport;
+        continentalBase += .012 * F(px, pz, 2100, 38) * land;
+        // Reference sea level never caps the solid surface. Rifts can extend
+        // through a continent into a gulf instead of stopping at its coastline.
+        continentalBase -= .11 * extension * land;
         double initial = marine * (1 - land) + continentalBase * land;
-        double mountains = Mountain(seed, px, pz, 5200 * scale, 41);
-        double variation = .86 + .14 * (.5 + .5 * F(px, pz, 18000, 42));
-        double active = Math.Pow(compression, .72) * (.24 + .76 * mountains) * variation;
-        double old = inherited * (.20 + .80 * Mountain(seed, px, pz, 9000 * scale, 51));
+        double mountains = Mountain(seed, px, pz, 4200 * scale, 41);
+        double variation = .84 + .16 * (.5 + .5 * F(px, pz, 16000, 42));
+        double active = Math.Pow(compression, .76) * (.16 + .84 * mountains) * variation;
+        double old = inherited * (.12 + .88 * Mountain(seed, px, pz, 6800 * scale, 51));
         double deformation = 1 - (1 - active) * (1 - old);
-        double value = initial + (.98 - initial) * deformation * (.30 + .70 * land);
+        double value = initial + (.98 - initial) * deformation * (.22 + .78 * land);
         double deepOcean = (1 - land) * slope;
-        value += (-.35 - value) * extension * .60 * deepOcean;
-        value += (-.96 - value) * axial * .055 * deepOcean;
-        value += (-.98 - value) * compression * .16 * (1 - land);
+        // Local ridge crest and narrow axial rift sit on the broad thermal swell.
+        value += (-.34 - value) * extension * .45 * deepOcean;
+        value += (-.97 - value) * axial * .065 * deepOcean;
+        value += (-.98 - value) * compression * .19 * (1 - land);
         if (!double.IsFinite(value) || value <= -1 || value >= 1)
             throw new InvalidOperationException("Unclamped raw relief exceeded its vertical envelope.");
         double height = VerticalPlan.Transform.MapModelAltitudeToBlocks(value);

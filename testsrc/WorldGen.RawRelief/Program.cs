@@ -9,15 +9,18 @@ using ISRWorldGen.Core.Geology.Landscapes;
 using ISRWorldGen.Core.Geology.Plates;
 
 // Explicit opt-in campaign: no climate, water, incision, erosion, game or saves.
-if (args.Length != 2 || !int.TryParse(args[1], out int side) || side is < 64 or > 2048 || (side & (side - 1)) != 0)
-    throw new ArgumentException("Usage: WorldGen.RawRelief <new-output-directory> <power-of-two-side 64..2048>");
+if (args.Length is < 2 or > 3 || !int.TryParse(args[1], out int side) || side is < 64 or > 2048 || (side & (side - 1)) != 0)
+    throw new ArgumentException("Usage: WorldGen.RawRelief <new-output-directory> <power-of-two-side 64..2048> [balanced|regional-262k]");
+string context = args.Length == 3 ? args[2] : "balanced";
+if (context is not ("balanced" or "regional-262k")) throw new ArgumentException("Unknown explicit context.");
+int geometryChecks = RawReliefChecks.Run();
 string root = Path.GetFullPath(args[0]);
 if (Directory.Exists(root) || File.Exists(root)) throw new IOException("Output exists; evidence is never overwritten.");
 Directory.CreateDirectory(root);
 var reports = new List<object>();
 foreach (int seed in new[] { -437287116, 73, 20260906 })
 {
-    var f = Build(seed); var model = f.Model;
+    var f = Build(seed, context); var model = f.Model;
     int checks = 0;
     var points = Enumerable.Range(0, 256).Select(i => new WorldBlockPosition((i * 65537L + 63) % f.Width, (i * 98317L + 91) % f.Length)).ToArray();
     var expected = points.Select(p => model.Sample(p.X, p.Z)).ToArray();
@@ -25,7 +28,7 @@ foreach (int seed in new[] { -437287116, 73, 20260906 })
     Parallel.For(0, points.Length, i =>
     { if (expected[i] != model.Sample(points[i].X, points[i].Z)) throw new InvalidOperationException("Concurrent sampling differs"); });
     Refuse(() => model.Sample(-1, 0)); Refuse(() => model.Sample(f.Width, 0));
-    var other = Build(seed == 73 ? 74 : 73);
+    var other = Build(seed == 73 ? 74 : 73, context);
     Refuse(() => RawReliefModel.Build(f.Basis, other.Atlas, f.Plates, f.Continents));
     Check(model.ContentChecksum != other.Model.ContentChecksum, "Seed-blind model identity");
     var repeated = RawReliefModel.Build(f.Basis, f.Atlas, f.Plates, f.Continents);
@@ -73,8 +76,8 @@ foreach (int seed in new[] { -437287116, 73, 20260906 })
         encoding = "float64 little-endian; row-major; actual solid Y; X right, positive Z down",
         fieldsSha256 = Hash(raw), byteLength = raw.Length, seabedMasked = false, waterSurfacePresent = false,
         verticalBudget = new { maximumOceanDepth = 80, minimumCavernInteriorHeight = 48, maximumReliefAboveSea = 184 },
-        fixture = "balanced; L03B analytical constraints, not a new native audit; 64 sites, 7 plates; 5 macro + 18 regional crust envelopes",
-        checks, model.CollisionBelts, model.DivergentBelts,
+        fixture = $"{context}; analytical constraints, not a native audit; {(context == "balanced" ? 64 : 128)} sites, 7 plates; 5 macro + 18 regional crust envelopes",
+        checks, geometryChecks, model.CollisionBelts, model.DivergentBelts, model.InheritedBelts,
         statistics = new { minimum = sorted[0], maximum = sorted[^1], p01 = sorted[count / 100], p50 = sorted[count / 2], p99 = sorted[99 * count / 100],
             belowReferenceSea = below.Length, aboveReferenceSea = above.Length, seafloorMinimum = below.Min(), seafloorMaximum = below.Max(),
             landMaximumAboveSea = above.Max() - f.Sea },
@@ -93,9 +96,15 @@ foreach (int seed in new[] { -437287116, 73, 20260906 })
 }
 File.WriteAllBytes(Path.Combine(root, "campaign.json"), JsonSerializer.SerializeToUtf8Bytes(reports, new JsonSerializerOptions { WriteIndented = true }));
 
-static Fixture Build(int seed)
+static Fixture Build(int seed, string context)
 {
     var definition = ScaleProfileCatalog.Proposals.Single(p => p.Id == "balanced");
+    if (context == "regional-262k") definition = definition with
+    {
+        Id = "raw-regional-262k", WidthBlocks = 262144, LengthBlocks = 262144,
+        RequestedSiteCount = 128, SiteQuota = 256, AtlasResolutionBlocks = 23552,
+        AtlasMemoryBudgetBytes = 2L * 1024 * 1024 * 1024
+    };
     var profile = Success(ScaleProfileValidator.ValidateAndFreeze(definition,
         new NativeWorldConstraints("l03b-qualified-native-v1", 1, [256, 384, 512], 4096, 1_024_000, 512)));
     var identity = new GenerationIdentity(seed, GenerationIdentity.SupportedAlgorithmVersion, GenerationIdentity.SupportedSchemaVersion,

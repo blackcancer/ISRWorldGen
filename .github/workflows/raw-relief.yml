@@ -21,6 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        context: [balanced, regional-262k]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
@@ -45,7 +46,7 @@ jobs:
       - name: Generate actual unmasked raw height fields and verify core invariants
         shell: pwsh
         run: |
-          dotnet run --project testsrc/WorldGen.RawRelief/WorldGen.RawRelief.csproj -c Release -- .local/raw-relief 1024
+          dotnet run --project testsrc/WorldGen.RawRelief/WorldGen.RawRelief.csproj -c Release -- .local/raw-relief 1024 ${{ matrix.context }}
           if ($LASTEXITCODE -ne 0) { throw 'Raw relief computation or numeric tests failed.' }
       - name: Export true sixteen-bit heightmaps
         shell: pwsh
@@ -62,7 +63,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: raw-relief-${{ matrix.os }}-${{ github.sha }}
+          name: raw-relief-${{ matrix.os }}-${{ matrix.context }}-${{ github.sha }}
           path: |
             .local/raw-relief/
             .local/earth-references/
