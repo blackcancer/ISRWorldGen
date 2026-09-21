@@ -32,3 +32,9 @@ La liste est indicative : une tâche ne produit que les cartes nécessaires à s
 ## Revue et conservation
 
 Les images de la même seed/configuration sont comparées quand le champ est déterministe. Une revue humaine contrôle les motifs évidents (pavage, bandes de bord, valeurs manquantes, inversion d’axe, palette trompeuse) à l’échelle carte ; elle complète les mesures et ne les remplace pas. Les artefacts volumineux restent hors Git, mais leurs manifestes, hashes, chemin local et verdict sont référencés dans le worklog et la passation. Les captures du jeu restent requises pour la matérialisation, l’ergonomie ou le rendu réel.
+
+## Protocole spécialisé — relief continu RCV-1.0
+
+Pour les sorties d'altitude solide, appliquer [RELIEF-CONTINU-PROTOCOLE.md](RELIEF-CONTINU-PROTOCOLE.md) en complément de cette règle générale et de [RELIEF-VALIDATION-GATE.md](RELIEF-VALIDATION-GATE.md). Le champ de référence couvre terres et fonds marins sans masque d'eau, avec une échelle globale gelée ; le niveau marin reste un calque désactivé par défaut. Les profils continus, les différences avant/après, la traçabilité des résolutions et les tests TRCV-01..12 empêchent de confondre affichage et génération.
+
+Ce protocole est une spécification de recette, pas une déclaration d'implémentation ou de réussite. Réexporter d'abord les données float64 existantes sans les modifier. L'acceptation géographique reste séparée des tests d'encodage, et l'érosion demeure suspendue jusqu'à une revue étayée du relief brut. Les autres domaines de cette fiche conservent leurs contrats et leurs exigences.
