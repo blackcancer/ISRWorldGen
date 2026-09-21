@@ -84,21 +84,21 @@ public readonly record struct SubductionChoice(TectonicContactKind Kind, int Sub
 /// <summary>Material-dependent polarity. Identical ocean columns use stable plate IDs only as a documented tie-break.</summary>
 public static class CrustResponse
 {
-    public const string PolarityPolicy = "resolved-material-1e-9km-age-1e-6Myr-v1";
+    public const string PolarityPolicy = "pairwise-material-age-deadband-v2";
     public static SubductionChoice Choose(int plateA, double continentalA, double oceanicA, double ageA,
         int plateB, double continentalB, double oceanicB, double ageB)
     {
         if (plateA == plateB || plateA < 0 || plateB < 0 ||
             new[] { continentalA, oceanicA, ageA, continentalB, oceanicB, ageB }.Any(v => !double.IsFinite(v) || v < 0) ||
             continentalA + oceanicA == 0 || continentalB + oceanicB == 0) throw new ArgumentException("Invalid contact columns.");
-        // A decision must not amplify round-off in a transported ratio into
-        // choosing the opposite slab. These are declared model resolutions,
-        // not a tolerance added to exact Voronoi topology or to conserved mass.
-        bool ca = Math.Round(continentalA, 9, MidpointRounding.ToEven) > Math.Round(oceanicA, 9, MidpointRounding.ToEven);
-        bool cb = Math.Round(continentalB, 9, MidpointRounding.ToEven) > Math.Round(oceanicB, 9, MidpointRounding.ToEven);
-        double resolvedA = Math.Round(ageA, 6, MidpointRounding.ToEven), resolvedB = Math.Round(ageB, 6, MidpointRounding.ToEven);
+        // Compare the CONTRAST, not two independently rounded values. Two equal
+        // cohorts can straddle the same half-quantum (74.4140625 Myr was observed)
+        // after transport; independent rounding then invents an age contrast.
+        // Deadbands are model decision resolutions, never edits to mass/moments.
+        bool ca = continentalA - oceanicA > 1e-9, cb = continentalB - oceanicB > 1e-9;
         if (ca && cb) return new SubductionChoice(TectonicContactKind.ContinentalCollision, -1, -1);
-        int lower = ca ? plateB : cb ? plateA : resolvedA > resolvedB ? plateA : resolvedB > resolvedA ? plateB : Math.Max(plateA, plateB);
+        double ageContrast = ageA - ageB;
+        int lower = ca ? plateB : cb ? plateA : ageContrast > 1e-6 ? plateA : ageContrast < -1e-6 ? plateB : Math.Max(plateA, plateB);
         return new SubductionChoice(TectonicContactKind.Subduction, lower, lower == plateA ? plateB : plateA);
     }
 
