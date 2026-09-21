@@ -95,6 +95,37 @@ internal static class MaterialDomainChecks
         });
         Case("concurrent carrier reads have no shared mutable state", () =>
             Parallel.For(0, 256, i => { Near(d.Density(i), 1, 1e-14); Require(d.Owner(i) == d.Owner(i), "owner changed"); }));
+        Case("metric coupling preserves common translation and zero forcing", () =>
+        {
+            foreach (double value in new[] { 0d, 2.5, -3d })
+            {
+                var result = PlateVelocityCoherence.Apply(Enumerable.Repeat(value, 256).ToArray(), 16, 2, 3, 4.25);
+                foreach (double v in result) Near(v, value, 1e-13);
+            }
+        });
+        Case("grid-scale velocity shocks are attenuated without changing the mean", () =>
+        {
+            double[] signal = Enumerable.Range(0, 256).Select(i => i % 2 == 0 ? 1d : -1d).ToArray();
+            var result = PlateVelocityCoherence.Apply(signal, 16, 1, 1, 2);
+            Require(result.Max(v => Math.Abs(v)) < .1, "unresolved shock retained");
+            Near(CrustTransport.Sum(result), 0, 1e-12);
+            Require(signal[0] == 1 && signal[1] == -1, "forcing input changed");
+        });
+        Case("metric coupling commutes with periodic translation and bounds velocities", () =>
+        {
+            double[] signal = Enumerable.Range(0, 256).Select(i => Math.Sin(i * .37)).ToArray();
+            double[] shifted = Enumerable.Range(0, 256).Select(i => signal[(i / 16) * 16 + (i % 16 + 15) % 16]).ToArray();
+            var r = PlateVelocityCoherence.Apply(signal, 16, 2, 3, 5.25);
+            var t = PlateVelocityCoherence.Apply(shifted, 16, 2, 3, 5.25);
+            for (int i = 0; i < 256; i++) Near(t[i], r[(i / 16) * 16 + (i % 16 + 15) % 16], 1e-12);
+            Require(r.Min() >= signal.Min() - 1e-12 && r.Max() <= signal.Max() + 1e-12, "forcing overshoot");
+        });
+        Case("invalid metric coupling cannot silently filter terrain", () =>
+        {
+            Refuse(() => PlateVelocityCoherence.Apply(new double[256], 16, 0, 1, 2));
+            Refuse(() => PlateVelocityCoherence.Apply(new double[256], 16, 1, 1, double.NaN));
+            Refuse(() => PlateVelocityCoherence.Apply(new double[255], 16, 1, 1, 2));
+        });
         var settings = new TectonicEvolutionSettings(side: 64, duration: 8, advectPlateDomains: true);
         var scale = new TectonicScalePlan(1_000_000, 1_000_000);
         TectonicHistory? material = null;

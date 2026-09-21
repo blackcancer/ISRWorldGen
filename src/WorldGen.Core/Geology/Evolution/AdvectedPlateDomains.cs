@@ -12,12 +12,14 @@ namespace ISRWorldGen.Core.Geology.Evolution;
 /// </summary>
 public sealed class AdvectedPlateDomains
 {
-    public const string AlgorithmId = "advected-plate-coordinates-donor-v1";
+    public const string AlgorithmId = "advected-plate-coordinates-metric-velocity-coherence-2w-v2";
     private const double OwnerResolution = 1e-12;
     private readonly TectonicPlate[] plates;
     private readonly double[][] carrier;
     private readonly double[] totals;
     private readonly int[] owners;
+    private readonly double transitionWidth;
+    private readonly double[] velocityX, velocityZ;
     public int Side { get; }
     public double Width { get; }
     public double Length { get; }
@@ -25,9 +27,9 @@ public sealed class AdvectedPlateDomains
     public ReadOnlyCollection<double> Inventory { get; }
 
     private AdvectedPlateDomains(TectonicPlate[] plates, double[][] carrier,
-        int side, double width, double length)
+        int side, double width, double length, double transitionWidth)
     {
-        this.plates = plates; this.carrier = carrier; Side = side; Width = width; Length = length;
+        this.plates = plates; this.carrier = carrier; this.transitionWidth = transitionWidth; Side = side; Width = width; Length = length;
         int count = side * side;
         totals = new double[count]; owners = new int[count];
         for (int i = 0; i < count; i++)
@@ -47,6 +49,20 @@ public sealed class AdvectedPlateDomains
                 if ((maximum - carrier[k][i]) / totals[i] <= OwnerResolution) { owners[i] = k; break; }
         }
         Inventory = Array.AsReadOnly(carrier.Select(CrustTransport.Sum).ToArray());
+        var rawX = new double[count]; var rawZ = new double[count];
+        for (int i = 0; i < count; i++)
+        {
+            for (int k = 0; k < plates.Length; k++)
+            { rawX[i] += carrier[k][i] * plates[k].Vx; rawZ[i] += carrier[k][i] * plates[k].Vz; }
+            rawX[i] /= totals[i]; rawZ[i] /= totals[i];
+        }
+        // Local carrier feedback alone collapses converging fronts to the grid
+        // scale and overthickens crust (full 512-square regression). Retain a
+        // resolved deformation zone on BOTH sides of a material contact. This
+        // nonlocal closure filters forcing, never the height or the conserved q.
+        double coupling = Math.Min(2 * transitionWidth, Math.Min(width, length));
+        velocityX = PlateVelocityCoherence.Apply(rawX, side, width / side, length / side, coupling);
+        velocityZ = PlateVelocityCoherence.Apply(rawZ, side, width / side, length / side, coupling);
     }
 
     public static AdvectedPlateDomains FromVoronoi(IReadOnlyList<TectonicPlate> source,
@@ -85,7 +101,7 @@ public sealed class AdvectedPlateDomains
             for (int k = 0; k < plates.Length; k++) { q[k][i] = Math.Exp(-(distances[k] - nearest) / transitionWidth); total += q[k][i]; }
             for (int k = 0; k < plates.Length; k++) q[k][i] /= total;
         }
-        return new AdvectedPlateDomains(plates, q, side, width, length);
+        return new AdvectedPlateDomains(plates, q, side, width, length, transitionWidth);
     }
 
     /// <summary>Immutable step. No clocks, moved sites, relabelling or per-cell renormalization of the conserved measures.</summary>
@@ -93,7 +109,7 @@ public sealed class AdvectedPlateDomains
     {
         double[][] moved = carrier.Select(q => CrustTransport.Advect(q, eastVelocity, southVelocity,
             Side, Width / Side, Length / Side, dt)).ToArray();
-        return new AdvectedPlateDomains(plates, moved, Side, Width, Length);
+        return new AdvectedPlateDomains(plates, moved, Side, Width, Length, transitionWidth);
     }
 
     public double Fraction(int plate, int cell)
@@ -107,9 +123,7 @@ public sealed class AdvectedPlateDomains
     public double Confidence(int cell) { CheckCell(cell); return Fraction(owners[cell], cell); }
     public (double X, double Z) Velocity(int cell)
     {
-        CheckCell(cell); double x = 0, z = 0;
-        for (int k = 0; k < plates.Length; k++) { x += carrier[k][cell] * plates[k].Vx; z += carrier[k][cell] * plates[k].Vz; }
-        return (x / totals[cell], z / totals[cell]);
+        CheckCell(cell); return (velocityX[cell], velocityZ[cell]);
     }
 
     /// <summary>
