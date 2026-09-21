@@ -6,6 +6,7 @@ using ISRWorldGen.Core.Climate.WaterBudget;
 using ISRWorldGen.Core.Foundation;
 using ISRWorldGen.Core.Geology.Landscapes;
 using ISRWorldGen.Core.Geology.Materials;
+using ISRWorldGen.Core.Geology.Plates;
 using ISRWorldGen.Core.Hydrology.Depressions;
 using ISRWorldGen.Core.Hydrology.Discharge;
 using ISRWorldGen.Tests.L03B;
@@ -13,9 +14,8 @@ using ISRWorldGen.Tests.L03B;
 namespace ISRWorldGen.Tests.L05A;
 
 /// <summary>
-/// A diagnostic integration fixture of the current Core, not the final worldgen
-/// pipeline. Actual L03-B relief, L04 climate and L05 routing are exported without
-/// erosion, voxelization, native seasons or a claim of in-game qualification.
+/// Paired diagnostic integration of actual Core algorithms, not native world
+/// qualification. The bounded incision experiment is not the full L06 solver.
 /// </summary>
 [TestClass]
 public sealed class SpatialDiagnosticExportTests
@@ -42,7 +42,9 @@ public sealed class SpatialDiagnosticExportTests
         var (atlas, plates) = L03BTestSupport.PlateFixture(seed, profile);
         LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates,
             profile, new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.25)));
-        TectonicReliefModel? tectonic = reworked ? TectonicReliefModel.Build(model, atlas, plates, new(400, .96, 512, 12)) : null;
+        ContinentalFieldModel continents = L03BTestSupport.Success(ContinentalFieldModel.Create(identity, atlas.Bounds,
+            new ContinentalFieldSettings(5, 18, 64, 1_000_000)));
+        TectonicReliefModel? tectonic = reworked ? TectonicReliefModel.Build(model, atlas, plates, new(400, .96, 512, 12), continents) : null;
         int count = Side * Side;
         long stepX = profile.WidthBlocks / Side, stepZ = profile.LengthBlocks / Side;
         double sea = model.VerticalPlan.Transform.SeaLevelBlocks;
@@ -67,8 +69,6 @@ public sealed class SpatialDiagnosticExportTests
             if (i % 1024 == 0) Assert.AreEqual(samples[i], model.Sample(positions[i].X, positions[i].Z));
         }
 
-        // Saline ocean requires sub-sea connectivity to a world edge. An enclosed
-        // sub-sea basin must not become ocean merely because its altitude is low.
         bool[] ocean = OceanMask(height, sea);
         int[] coastDistance = DistanceFromOcean(ocean);
         var axis = new LatitudeAxis(new WorldBlockPosition(profile.WidthBlocks / 2, profile.LengthBlocks / 2),
@@ -82,8 +82,6 @@ public sealed class SpatialDiagnosticExportTests
             evaluations[i] = TemperatureField.Evaluate(axis, temperatureSettings,
                 new TemperatureInput(positions[i], height[i] - sea, Math.Min(1d, coastDistance[i] / 32d)));
             precipitationCells[i] = new PrecipitationCell(i, i % Side, i / Side, positions[i], height[i], ocean[i], evaluations[i]);
-            // Connected marine cells are explicit sinks in this diagnostic grid.
-            // This is a declared fixture boundary, not a native ocean placement pass.
             drainageCells[i] = new DrainageCell(i, height[i], Neighbours(i, true),
                 ocean[i] ? DrainageTerminalKind.Ocean : null, ocean[i]);
         }
@@ -115,6 +113,48 @@ public sealed class SpatialDiagnosticExportTests
             Assert.IsGreaterThanOrEqualTo(0d, discharge.Reaches[i].DischargeModelVolumePerYear);
         }
 
+        double[] initialHeight = (double[])height.Clone();
+        const int incisionSteps = 12;
+        DrainageIncisionSettings incisionSettings = new(.12, 1_000, 100_000);
+        double exportedSediment = 0d;
+        var metricPositions = Enumerable.Range(0, count).ToDictionary(i => (long)i, i => positions[i]);
+        if (reworked)
+        {
+            // Initial climate supplies this bounded detachment-only relaxation.
+            // Final climate and discharge are recalculated on the changed relief.
+            for (int iteration = 0; iteration < incisionSteps; iteration++)
+            {
+                DrainageIncisionSnapshot step = DrainageReliefCoupling.Step(topology, discharge, metricPositions,
+                    (double)stepX * stepZ, sea, incisionSettings);
+                exportedSediment += step.ExportedSedimentModelVolume;
+                for (int i = 0; i < count; i++)
+                {
+                    height[i] = step.Samples[i].After;
+                    drainageCells[i] = new DrainageCell(i, height[i], Neighbours(i, true),
+                        ocean[i] ? DrainageTerminalKind.Ocean : null, ocean[i]);
+                }
+                topology = MetricDrainageBuilder.Build(drainageCells, metricPositions, sea);
+                discharge = DischargeAccumulator.Accumulate(water, topology, Array.Empty<DischargeAdjustment>(),
+                    new DischargeClassificationSettings(stepX * (double)stepZ, 8d * stepX * stepZ, 8d * stepX * stepZ));
+            }
+            for (int i = 0; i < count; i++)
+            {
+                evaluations[i] = TemperatureField.Evaluate(axis, temperatureSettings,
+                    new TemperatureInput(positions[i], height[i] - sea, Math.Min(1d, coastDistance[i] / 32d)));
+                precipitationCells[i] = new PrecipitationCell(i, i % Side, i / Side, positions[i], height[i], ocean[i], evaluations[i]);
+                inputs[i] = new WaterBudgetInput(i, new StableId(0, (ulong)i), (double)stepX * stepZ, .25, .3, material, evaluations[i]);
+                Assert.IsLessThanOrEqualTo(initialHeight[i], height[i]);
+                Assert.AreEqual(height[i], topology.Cells[i].PhysicalElevation);
+            }
+            rain = DistancePrecipitationSolver.Solve(precipitationCells, stepX, stepZ, annualWinds, distanceSettings);
+            water = WaterBudgetSolver.Solve(inputs, rain, new WaterBudgetSettings(.5, .25, 2), Array.Empty<GroundwaterTransfer>(), 0);
+            discharge = DischargeAccumulator.Accumulate(water, topology, Array.Empty<DischargeAdjustment>(),
+                new DischargeClassificationSettings(stepX * (double)stepZ, 8d * stepX * stepZ, 8d * stepX * stepZ));
+            Assert.IsLessThanOrEqualTo(1e-9 + 1e-6 * discharge.Balance.ReferenceFlowModelVolumePerYear,
+                Math.Abs(discharge.Balance.ResidualModelVolumePerYear));
+            double removed = Enumerable.Range(0, count).Sum(i => (initialHeight[i] - height[i]) * stepX * stepZ);
+            Assert.AreEqual(removed, exportedSediment, 1e-6 + 1e-10 * removed);
+        }
         if (reworked)
         {
             foreach (RoutedCell cell in topology.Cells.Where(cell => cell.ReceiverId is not null))
@@ -157,6 +197,8 @@ public sealed class SpatialDiagnosticExportTests
         if (Directory.Exists(output)) throw new IOException("Diagnostic output already exists; previous evidence is not overwritten.");
         Directory.CreateDirectory(output);
         WriteNew(Path.Combine(output, "fields.json"), raw);
+        byte[] beforeIncision = JsonSerializer.SerializeToUtf8Bytes(initialHeight);
+        if (reworked) WriteNew(Path.Combine(output, "tectonic-initial-height.json"), beforeIncision);
         string? windowHash = null;
         if (tectonic is not null)
         {
@@ -173,7 +215,7 @@ public sealed class SpatialDiagnosticExportTests
             }
             byte[] window = JsonSerializer.SerializeToUtf8Bytes(new { width = Side, height = Side, step = 64,
                 minX, minZ, seaLevel = sea, before = oldWindow, after = newWindow,
-                selection = "16,384-block window centred on the sampled global maximum; no clipping of samples or interpolation; initial relief only" });
+                selection = "16,384-block window centred on the final global maximum; both samplers BEFORE the raster incision stage; no interpolation" });
             windowHash = Hash(window);
             WriteNew(Path.Combine(output, "mountain-window.json"), window);
         }
@@ -192,14 +234,19 @@ public sealed class SpatialDiagnosticExportTests
             geographicRevision = reworked ? "L03-L05-geometric-rework" : "legacy-reference",
             algorithms = new { relief = reworked ? TectonicReliefModel.AlgorithmId : "legacy-landscape-v7",
                 precipitation = reworked ? DistancePrecipitationSolver.AlgorithmId : "legacy-precipitation-v1",
-                drainage = reworked ? MetricDrainageBuilder.AlgorithmId : "legacy-priority-flood-parent" },
+                drainage = reworked ? MetricDrainageBuilder.AlgorithmId : "legacy-priority-flood-parent",
+                incision = reworked ? DrainageReliefCoupling.AlgorithmId : "none" },
+            tectonicInitialHeightSha256 = reworked ? Hash(beforeIncision) : null,
+            incision = new { steps = reworked ? incisionSteps : 0, settings = incisionSettings, exportedSediment,
+                sedimentPolicy = "detachment only; removed sediment is exported and counted, not deposited; full L06 NOT qualified",
+                climatePolicy = "initial climate during 12 bounded steps; final climate and discharge recalculated on final relief" },
             mountainWindowSha256 = windowHash,
             tectonicBelts = tectonic?.Belts,
             atmosphere = (rain as DistancePrecipitationSnapshot)?.Balance,
             annualWinds = reworked ? annualWinds : [new WeightedWind(1, 0, 1)],
             distanceTransport = reworked ? distanceSettings : null,
             familyMeaning = "Foundational L03-B allocation; added continuous tectonic belts do not rewrite the Voronoi family catalogue",
-            nativeGame = "NOT_RUN", finalErosion = "NOT_IMPLEMENTED_IN_THIS_FIXTURE",
+            nativeGame = "NOT_RUN", finalErosion = "FULL_L06_NOT_QUALIFIED; bounded detachment-only coupling on reworked raster",
             nativeStrataSoilsOresVegetationSnow = "NOT_REPRESENTED",
             units = new { height = "blocks", temperature = "model Celsius", rain = "L/Ymod", runoff = "L/Ymod",
                 recharge = "L/Ymod", discharge = "L^3/Ymod", drainage_area = "L^2", soil_moisture = "fraction, not fertility" },
@@ -215,7 +262,7 @@ public sealed class SpatialDiagnosticExportTests
                 plate = plateIndex[cell.PlateId], plateId = cell.PlateId.ToString(), family = cell.Family.ToString(),
                 familyCode = (int)cell.Family }).ToArray(),
             basinTerminals = terminalIds,
-            oracle = new { finiteHeight = true, repeatedSamples = true, physicalReliefUnmodified = true,
+            oracle = new { finiteHeight = true, repeatedSamples = true, physicalReliefUnmodifiedByRouting = true,
                 receiverRoutingNonAscending = true, waterConservation = true, cells = count,
                 oceanCells = ocean.Count(value => value), balance = discharge.Balance }
         }, new JsonSerializerOptions { WriteIndented = true });
@@ -248,10 +295,8 @@ public sealed class SpatialDiagnosticExportTests
         var result = new bool[height.Length];
         var queue = new Queue<int>();
         for (int i = 0; i < height.Length; i++)
-            if ((i % Side == 0 || i % Side == Side - 1 || i / Side == Side - 1) && height[i] < sea)
+            if ((i % Side == 0 || i % Side == Side - 1 || i / Side == 0 || i / Side == Side - 1) && height[i] < sea)
             { result[i] = true; queue.Enqueue(i); }
-        for (int i = 0; i < Side; i++)
-            if (!result[i] && height[i] < sea) { result[i] = true; queue.Enqueue(i); }
         while (queue.TryDequeue(out int id))
             foreach (long neighbour in Neighbours(id, false))
                 if (!result[(int)neighbour] && height[(int)neighbour] < sea)

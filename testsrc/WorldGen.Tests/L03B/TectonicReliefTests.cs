@@ -64,6 +64,34 @@ public sealed class TectonicReliefTests
         Assert.ThrowsExactly<ArgumentException>(() => TectonicReliefModel.Build(fixture.Basis, other.Atlas, fixture.Plates, new(400, .96, 512, 12)));
     }
 
+    [TestMethod]
+    public void ContinuousDatumSamplesTheSealedContinentalFieldInsteadOfTheCellCentre()
+    {
+        var fixture = Fixture(73);
+        ContinentalFieldModel continents = L03BTestSupport.Success(ContinentalFieldModel.Create(fixture.Plates.Identity,
+            fixture.Atlas.Bounds, new ContinentalFieldSettings(5, 18, 64, 1_000_000)));
+        TectonicReliefModel model = TectonicReliefModel.Build(fixture.Basis, fixture.Atlas, fixture.Plates,
+            new(400, .96, 512, 12), continents);
+        int tested = 0;
+        for (long z = 2_048; z < 131_072; z += 4_096)
+        for (long x = 2_048; x < 131_072; x += 4_096)
+        {
+            TectonicReliefSample sample = model.Sample(x, z);
+            if (sample.UpliftWeight != 0d) continue;
+            double c = continents.SampleHeightPpm(x, z) / 1_000_000d;
+            double expected = (c >= 0d ? .34d : .58d) * Math.Tanh(2.8d * c) + .65d *
+                (sample.Foundation.PrimaryResidualContributionNormalized + sample.Foundation.ForeignResidualContributionNormalized);
+            Assert.AreEqual(expected, sample.ModelAltitudeNormalized);
+            tested++;
+        }
+        Assert.IsGreaterThan(100, tested);
+        var other = Fixture(74);
+        ContinentalFieldModel wrong = L03BTestSupport.Success(ContinentalFieldModel.Create(other.Plates.Identity,
+            other.Atlas.Bounds, new ContinentalFieldSettings(5, 18, 64, 1_000_000)));
+        Assert.ThrowsExactly<ArgumentException>(() => TectonicReliefModel.Build(fixture.Basis, fixture.Atlas, fixture.Plates,
+            new(400, .96, 512, 12), wrong));
+    }
+
     private static (LandscapeModel Basis, AtlasMesh Atlas, PlateAtlasSnapshot Plates) Fixture(int seed)
     {
         var profile = L03BTestSupport.FrozenProfile("balanced");

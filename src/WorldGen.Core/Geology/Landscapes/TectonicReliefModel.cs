@@ -44,18 +44,21 @@ public readonly record struct TectonicReliefSample(double AltitudeBlocks, double
 /// </summary>
 public sealed class TectonicReliefModel
 {
-    public const string AlgorithmId = "tectonic-relief-v1-global-curved-belts";
+    public const string AlgorithmId = "tectonic-relief-v2-continuous-continent-and-belts";
     private readonly LandscapeModel foundation;
     private readonly TectonicReliefSettings settings;
     private readonly RidgeBelt[] belts;
+    private readonly ContinentalFieldModel? continents;
 
-    private TectonicReliefModel(LandscapeModel foundation, TectonicReliefSettings settings, RidgeBelt[] belts)
+    private TectonicReliefModel(LandscapeModel foundation, TectonicReliefSettings settings, RidgeBelt[] belts, ContinentalFieldModel? continents)
     {
         this.foundation = foundation;
         this.settings = settings;
         this.belts = belts;
+        this.continents = continents;
         Belts = Array.AsReadOnly(belts);
-        var text = new StringBuilder(AlgorithmId).Append('|').Append(foundation.ContentChecksum);
+        var text = new StringBuilder(AlgorithmId).Append('|').Append(foundation.ContentChecksum)
+            .Append('|').Append(continents?.ContentChecksum.ToString() ?? "legacy-cell-datum");
         Append(settings.YoungRidgeWidthBlocks); Append(settings.MaximumNormalizedCrest);
         text.Append('|').Append(settings.MaximumBelts.ToString(CultureInfo.InvariantCulture));
         text.Append('|').Append(settings.SamplesPerBelt.ToString(CultureInfo.InvariantCulture));
@@ -74,7 +77,7 @@ public sealed class TectonicReliefModel
     public ReliefVerticalPlan VerticalPlan => foundation.VerticalPlan;
 
     public static TectonicReliefModel Build(LandscapeModel foundation, AtlasMesh atlas,
-        PlateAtlasSnapshot plates, TectonicReliefSettings settings)
+        PlateAtlasSnapshot plates, TectonicReliefSettings settings, ContinentalFieldModel? continents = null)
     {
         ArgumentNullException.ThrowIfNull(foundation); ArgumentNullException.ThrowIfNull(atlas);
         ArgumentNullException.ThrowIfNull(plates); ArgumentNullException.ThrowIfNull(settings);
@@ -82,6 +85,9 @@ public sealed class TectonicReliefModel
             foundation.AtlasContentChecksum != plates.AtlasContentChecksum ||
             PlateAtlasProvenance.ComputeAtlasContentChecksum(atlas) != plates.AtlasContentChecksum)
             throw new ArgumentException("Tectonic relief requires the exact sealed foundation, atlas and plate snapshot.");
+        if (continents is not null && (continents.ContentChecksum != plates.ContinentalModelChecksum ||
+            continents.Bounds != atlas.Bounds))
+            throw new ArgumentException("Continuous relief requires the exact continental field sealed into the plate atlas.", nameof(continents));
         PlateBoundaryRecord[] forcing = plates.Boundaries.Where(boundary => boundary.Kind == PlateBoundaryKind.Collision && boundary.UpliftNormalized > 0d)
             .OrderBy(boundary => boundary.CellA.High).ThenBy(boundary => boundary.CellA.Low)
             .ThenBy(boundary => boundary.CellB.High).ThenBy(boundary => boundary.CellB.Low).ToArray();
@@ -97,7 +103,7 @@ public sealed class TectonicReliefModel
             // become continental ranges; island-arc morphology is a separate job.
             if (a.ContinentalHeightPpm < -150_000 && b.ContinentalHeightPpm < -150_000) continue;
             ExactPoint[] shared = polygons[boundary.CellA].Vertices.Intersect(polygons[boundary.CellB].Vertices).Order().ToArray();
-            if (shared.Length < 2) continue; // zero-length or clipped dual edge
+            if (shared.Length < 2) continue;
             ExactPoint first = shared[0], last = shared[^1];
             double ax = first.X.ToDouble(), az = first.Z.ToDouble(), bx = last.X.ToDouble(), bz = last.Z.ToDouble();
             double dx = bx - ax, dz = bz - az, length = Math.Sqrt(dx * dx + dz * dz);
@@ -129,12 +135,12 @@ public sealed class TectonicReliefModel
             double Random(ulong counter) => (StatelessRandomV1.NextUInt64(plates.Identity.NativeSeed,
                 RandomDomain.Geology, stream, counter) >> 11) * (1d / 9007199254740992d);
         }
-        return new TectonicReliefModel(foundation, settings, result.ToArray());
+        return new TectonicReliefModel(foundation, settings, result.ToArray(), continents);
     }
 
     public TectonicReliefSample Sample(long x, long z)
     {
-        LandscapeSample basis = foundation.Sample(x, z); // validates world domain
+        LandscapeSample basis = foundation.Sample(x, z);
         double remaining = 1d;
         foreach (RidgeBelt belt in belts)
         {
@@ -143,11 +149,21 @@ public sealed class TectonicReliefModel
                 weight = Math.Max(weight, SegmentWeight(belt.Spine[i - 1], belt.Spine[i], x, z));
             for (int i = 0; i < belt.SpurRoots.Count; i++)
                 weight = Math.Max(weight, SegmentWeight(belt.SpurRoots[i], belt.SpurEnds[i], x, z));
-            // Bounded union: overlapping chains cannot exhaust the vertical budget.
             remaining *= 1d - weight;
         }
         double uplift = 1d - remaining;
-        double normalized = basis.ModelAltitudeNormalized + (settings.MaximumNormalizedCrest - basis.ModelAltitudeNormalized) * uplift;
+        // A continuous continental datum replaces the old region-centre land/ocean
+        // jump when the exact sealed continental model is explicitly supplied.
+        // No per-image normalization or output altitude clamp is involved.
+        double initial = basis.ModelAltitudeNormalized;
+        if (continents is not null)
+        {
+            double c = continents.SampleHeightPpm(x, z) / 1_000_000d;
+            double datum = (c >= 0d ? .34d : .58d) * Math.Tanh(2.8d * c);
+            double residual = basis.PrimaryResidualContributionNormalized + basis.ForeignResidualContributionNormalized;
+            initial = datum + .65d * residual;
+        }
+        double normalized = initial + (settings.MaximumNormalizedCrest - initial) * uplift;
         if (!double.IsFinite(normalized) || normalized is < -1 or > 1)
             throw new InvalidOperationException("Tectonic relief violated its analytical vertical envelope.");
         double altitude = VerticalPlan.Transform.MapModelAltitudeToBlocks(normalized);
@@ -164,8 +180,6 @@ public sealed class TectonicReliefModel
         double width = a.WidthBlocks + smooth * (b.WidthBlocks - a.WidthBlocks);
         double d2 = (px * px + pz * pz) / (width * width);
         if (d2 >= 36d) return 0d;
-        // Narrow ridge plus wider foothills, with exact compact support. The
-        // clamp above projects onto a segment; it does not clamp output altitude.
         double taper = 1d - d2 / 36d;
         double shape = (.82d * Math.Exp(-.5d * d2) + .18d * Math.Exp(-d2 / 12d)) * taper * taper;
         return shape * (a.Strength + smooth * (b.Strength - a.Strength));
