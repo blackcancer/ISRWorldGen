@@ -25,13 +25,24 @@ public sealed class SpatialDiagnosticExportTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
-    public void ExportActualCoreReliefRegionsClimateAndDrainageFields()
+    public void ExportActualCoreReliefRegionsClimateAndDrainageFields() => Export(Seed, false);
+
+    [TestMethod]
+    [DataRow(-437287116, true)]
+    [DataRow(73, false)]
+    [DataRow(73, true)]
+    [DataRow(20260906, false)]
+    [DataRow(20260906, true)]
+    public void ExportPairedGeographicRework(int seed, bool reworked) => Export(seed, reworked);
+
+    private void Export(int seed, bool reworked)
     {
         var profile = L03BTestSupport.FrozenProfile("balanced");
-        var identity = L03BTestSupport.Identity(Seed, profile);
-        var (atlas, plates) = L03BTestSupport.PlateFixture(Seed, profile);
+        var identity = L03BTestSupport.Identity(seed, profile);
+        var (atlas, plates) = L03BTestSupport.PlateFixture(seed, profile);
         LandscapeModel model = L03BTestSupport.Success(LandscapeModelBuilder.Build(identity, atlas, plates,
             profile, new LandscapeGenerationSettings(new ReliefBudgetRequest(64, 48, 128), profile.SiteQuota, 1.25)));
+        TectonicReliefModel? tectonic = reworked ? TectonicReliefModel.Build(model, atlas, plates, new(400, .96, 512, 12)) : null;
         int count = Side * Side;
         long stepX = profile.WidthBlocks / Side, stepZ = profile.LengthBlocks / Side;
         double sea = model.VerticalPlan.Transform.SeaLevelBlocks;
@@ -48,7 +59,7 @@ public sealed class SpatialDiagnosticExportTests
             int i = z * Side + x;
             positions[i] = new WorldBlockPosition(x * stepX + stepX / 2, z * stepZ + stepZ / 2);
             samples[i] = model.Sample(positions[i].X, positions[i].Z);
-            height[i] = samples[i].AltitudeBlocks;
+            height[i] = tectonic?.Sample(positions[i].X, positions[i].Z).AltitudeBlocks ?? samples[i].AltitudeBlocks;
             Assert.IsTrue(double.IsFinite(height[i]) && height[i] >= 0 && height[i] < profile.HeightBlocks);
             regions[i] = cellIndex[samples[i].DominantCellId];
             plate[i] = plateIndex[model.Cells[regions[i]].PlateId];
@@ -76,14 +87,20 @@ public sealed class SpatialDiagnosticExportTests
             drainageCells[i] = new DrainageCell(i, height[i], Neighbours(i, true),
                 ocean[i] ? DrainageTerminalKind.Ocean : null, ocean[i]);
         }
-        PrecipitationSnapshot rain = PrecipitationSolver.Solve(precipitationCells, new WindVector(1, 0),
-            MoistureBoundaryCondition.Closed, 0, Array.Empty<long>(), new PrecipitationSettings(1, 0.12, 0.025));
+        WeightedWind[] annualWinds = [new(1, 0, .55), new(-1, 0, .25), new(0, 1, .12), new(0, -1, .08)];
+        DistancePrecipitationSettings distanceSettings = new(1.6, 35_000, 160, 18);
+        IPrecipitationFieldSource rain = reworked
+            ? DistancePrecipitationSolver.Solve(precipitationCells, stepX, stepZ, annualWinds, distanceSettings)
+            : PrecipitationSolver.Solve(precipitationCells, new WindVector(1, 0),
+                MoistureBoundaryCondition.Closed, 0, Array.Empty<long>(), new PrecipitationSettings(1, 0.12, 0.025));
         var material = new MaterialProperties(0, 0, 0.35);
         WaterBudgetInput[] inputs = Enumerable.Range(0, count).Select(i => new WaterBudgetInput(i,
             new StableId(0, (ulong)i), (double)stepX * stepZ, 0.25, 0.3, material, evaluations[i])).ToArray();
         WaterBudgetSnapshot water = WaterBudgetSolver.Solve(inputs, rain, new WaterBudgetSettings(0.5, 0.25, 2),
             Array.Empty<GroundwaterTransfer>(), 0);
-        DrainageTopology topology = DepressionTopologyBuilder.Build(drainageCells, sea);
+        DrainageTopology topology = reworked
+            ? MetricDrainageBuilder.Build(drainageCells, Enumerable.Range(0, count).ToDictionary(i => (long)i, i => positions[i]), sea)
+            : DepressionTopologyBuilder.Build(drainageCells, sea);
         DischargeSnapshot discharge = DischargeAccumulator.Accumulate(water, topology, Array.Empty<DischargeAdjustment>(),
             new DischargeClassificationSettings(stepX * (double)stepZ, 8d * stepX * stepZ, 8d * stepX * stepZ));
         Assert.HasCount(count, topology.Cells);
@@ -96,6 +113,23 @@ public sealed class SpatialDiagnosticExportTests
             if (topology.Cells[i].ReceiverId is long receiver)
                 Assert.IsLessThanOrEqualTo(topology.Cells[i].RoutingElevation, topology.Cells[(int)receiver].RoutingElevation);
             Assert.IsGreaterThanOrEqualTo(0d, discharge.Reaches[i].DischargeModelVolumePerYear);
+        }
+
+        if (reworked)
+        {
+            foreach (RoutedCell cell in topology.Cells.Where(cell => cell.ReceiverId is not null))
+            {
+                int id = (int)cell.Id, receiver = (int)cell.ReceiverId!.Value;
+                double chosen = Slope(id, receiver);
+                double best = Neighbours(id, true).Max(other => Slope(id, (int)other));
+                if (best > 0d) Assert.AreEqual(best, chosen, 1e-12, "Metric drainage must select an actual steepest neighbour.");
+            }
+        }
+        double Slope(int from, int to)
+        {
+            double dx = (from % Side - to % Side) * (double)stepX;
+            double dz = (from / Side - to / Side) * (double)stepZ;
+            return (topology.Cells[from].RoutingElevation - topology.Cells[to].RoutingElevation) / Math.Sqrt(dx * dx + dz * dz);
         }
 
         long[] terminalIds = topology.Connectivity.Select(item => item.TerminalCellId).Distinct().Order().ToArray();
@@ -119,26 +153,57 @@ public sealed class SpatialDiagnosticExportTests
         string sourceHash = Hash(raw);
         string parent = Environment.GetEnvironmentVariable("ISR_SPATIAL_DIAGNOSTICS_ROOT") ??
             Path.Combine(L03BTestSupport.FindRepositoryRoot(), ".local", "spatial-diagnostics", Guid.NewGuid().ToString("N"));
-        string output = Path.Combine(parent, "balanced-seed-" + Seed.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        string output = Path.Combine(parent, (reworked ? "balanced-rework-seed-" : "balanced-seed-") + seed.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (Directory.Exists(output)) throw new IOException("Diagnostic output already exists; previous evidence is not overwritten.");
         Directory.CreateDirectory(output);
         WriteNew(Path.Combine(output, "fields.json"), raw);
+        string? windowHash = null;
+        if (tectonic is not null)
+        {
+            int maximum = Enumerable.Range(0, count).MaxBy(i => height[i]);
+            long minX = Math.Clamp(positions[maximum].X - 8_192, 0, profile.WidthBlocks - 16_384);
+            long minZ = Math.Clamp(positions[maximum].Z - 8_192, 0, profile.LengthBlocks - 16_384);
+            double[] oldWindow = new double[count], newWindow = new double[count];
+            for (int z = 0; z < Side; z++) for (int x = 0; x < Side; x++)
+            {
+                long px = minX + x * 64 + 32, pz = minZ + z * 64 + 32;
+                TectonicReliefSample sampled = tectonic.Sample(px, pz);
+                oldWindow[z * Side + x] = sampled.Foundation.AltitudeBlocks;
+                newWindow[z * Side + x] = sampled.AltitudeBlocks;
+            }
+            byte[] window = JsonSerializer.SerializeToUtf8Bytes(new { width = Side, height = Side, step = 64,
+                minX, minZ, seaLevel = sea, before = oldWindow, after = newWindow,
+                selection = "16,384-block window centred on the sampled global maximum; no clipping of samples or interpolation; initial relief only" });
+            windowHash = Hash(window);
+            WriteNew(Path.Combine(output, "mountain-window.json"), window);
+        }
         string commit = Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "WORKING_TREE_UNVERIFIED";
         byte[] metadata = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schemaVersion = 1, scope = "CORE_SPATIAL_DIAGNOSTIC_NOT_FINAL_WORLD", status = "PASS",
-            test = nameof(ExportActualCoreReliefRegionsClimateAndDrainageFields), commit, seed = Seed,
+            test = reworked ? nameof(ExportPairedGeographicRework) : nameof(ExportActualCoreReliefRegionsClimateAndDrainageFields), commit, seed,
             profile = profile.Id, width = Side, height = Side, stepX, stepZ,
             extent = new { minX = 0, minZ = 0, maxXExclusive = profile.WidthBlocks, maxZExclusive = profile.LengthBlocks },
             sampling = "cell centres; row-major; X right, positive Z down; no interpolation",
             seaLevel = sea, worldHeight = profile.HeightBlocks,
             fieldsSha256 = sourceHash, coreAssemblySha256 = Hash(File.ReadAllBytes(typeof(LandscapeModel).Assembly.Location)),
-            atlasChecksum = model.AtlasContentChecksum.ToString(), landscapeChecksum = model.ContentChecksum.ToString(),
+            atlasChecksum = model.AtlasContentChecksum.ToString(), landscapeChecksum = tectonic?.ContentChecksum.ToString() ?? model.ContentChecksum.ToString(),
+            foundationalLandscapeChecksum = model.ContentChecksum.ToString(),
+            geographicRevision = reworked ? "L03-L05-geometric-rework" : "legacy-reference",
+            algorithms = new { relief = reworked ? TectonicReliefModel.AlgorithmId : "legacy-landscape-v7",
+                precipitation = reworked ? DistancePrecipitationSolver.AlgorithmId : "legacy-precipitation-v1",
+                drainage = reworked ? MetricDrainageBuilder.AlgorithmId : "legacy-priority-flood-parent" },
+            mountainWindowSha256 = windowHash,
+            tectonicBelts = tectonic?.Belts,
+            atmosphere = (rain as DistancePrecipitationSnapshot)?.Balance,
+            annualWinds = reworked ? annualWinds : [new WeightedWind(1, 0, 1)],
+            distanceTransport = reworked ? distanceSettings : null,
+            familyMeaning = "Foundational L03-B allocation; added continuous tectonic belts do not rewrite the Voronoi family catalogue",
             nativeGame = "NOT_RUN", finalErosion = "NOT_IMPLEMENTED_IN_THIS_FIXTURE",
             nativeStrataSoilsOresVegetationSnow = "NOT_REPRESENTED",
             units = new { height = "blocks", temperature = "model Celsius", rain = "L/Ymod", runoff = "L/Ymod",
                 recharge = "L/Ymod", discharge = "L^3/Ymod", drainage_area = "L^2", soil_moisture = "fraction, not fertility" },
-            fixture = new { upstreamProfile = "existing L03B analytical constraints, not a live native audit",
+            fixture = new { legacyAtmosphericParametersApplyOnlyToReference = true, upstreamProfile = "existing L03B analytical constraints, not a live native audit",
                 reliefBudget = new[] { 64, 48, 128 }, overlap = 1.25, windX = 1, windZ = 0,
                 oceanEvaporation = 1, baseCondensation = 0.12, orographicCondensation = 0.025,
                 potentialET = 0.3, etFraction = 0.5, soilRetention = 0.25, storageCapacity = 2,
@@ -183,8 +248,10 @@ public sealed class SpatialDiagnosticExportTests
         var result = new bool[height.Length];
         var queue = new Queue<int>();
         for (int i = 0; i < height.Length; i++)
-            if ((i % Side == 0 || i % Side == Side - 1 || i / Side == 0 || i / Side == Side - 1) && height[i] < sea)
+            if ((i % Side == 0 || i % Side == Side - 1 || i / Side == Side - 1) && height[i] < sea)
             { result[i] = true; queue.Enqueue(i); }
+        for (int i = 0; i < Side; i++)
+            if (!result[i] && height[i] < sea) { result[i] = true; queue.Enqueue(i); }
         while (queue.TryDequeue(out int id))
             foreach (long neighbour in Neighbours(id, false))
                 if (!result[(int)neighbour] && height[(int)neighbour] < sea)
