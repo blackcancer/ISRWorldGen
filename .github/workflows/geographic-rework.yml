@@ -1,0 +1,61 @@
+name: Geographic rework L03-L05
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/WorldGen.Core/**'
+      - 'testsrc/WorldGen.Tests/L03*/**'
+      - 'testsrc/WorldGen.Tests/L04*/**'
+      - 'testsrc/WorldGen.Tests/L05*/**'
+      - 'testsrc/WorldGen.Geography.Tests/**'
+      - '.github/workflows/geographic-rework.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: geographic-rework-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked algorithm sources and their contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/geographic-reproduction
+          git archive --format=zip --output=.local/geographic-reproduction/source.zip HEAD AGENTS.md README.md global.json Directory.Build.props src/WorldGen.Core testsrc tools specs contracts tasks tests registry docs
+          git rev-parse HEAD > .local/geographic-reproduction/commit.txt
+          sha256sum .local/geographic-reproduction/source.zip > .local/geographic-reproduction/source.sha256
+      - name: Retain exact source snapshot (not a qualification)
+        uses: actions/upload-artifact@v4
+        with:
+          name: geographic-source-${{ github.sha }}
+          path: .local/geographic-reproduction/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Execute existing Core regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test testsrc/WorldGen.ClimateHydrology.Tests/WorldGen.ClimateHydrology.Tests.csproj -c Release --logger 'trx;LogFileName=geographic.trx' --results-directory .local/geographic-tests
+      - name: Retain numerical regression results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geographic-regression-${{ github.sha }}
+          path: .local/geographic-tests/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
