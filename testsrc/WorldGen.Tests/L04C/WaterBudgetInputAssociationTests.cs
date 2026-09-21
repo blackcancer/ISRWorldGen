@@ -101,7 +101,7 @@ public sealed class WaterBudgetInputAssociationTests
         WaterBudgetSnapshot second = WaterBudgetSolver.Solve(inputs.Reverse(), rain, Settings, transfers.Reverse(), 7);
         CollectionAssert.AreEqual(first.Cells.ToArray(), second.Cells.ToArray());
         CollectionAssert.AreEqual(first.Transfers.ToArray(), second.Transfers.ToArray());
-        Assert.AreEqual(count, first.Transfers.Count);
+        Assert.HasCount(count, first.Transfers);
         foreach (WaterBudgetCell cell in first.Cells)
         {
             Assert.AreEqual(10d, cell.PrecipitationModelLengthPerYear);
@@ -217,9 +217,9 @@ public sealed class WaterBudgetInputAssociationTests
 
     private sealed class CorrespondingSource(IEnumerable<PrecipitationField> fields) : IPrecipitationFieldSource
     {
-        private readonly Dictionary<long, PrecipitationField> index = fields.ToDictionary(field => field.CellId);
+        private readonly Dictionary<long, PrecipitationField> index = fields.ToDictionary(value => value.CellId);
         public int AlgorithmVersion => PrecipitationSnapshot.AlgorithmVersion;
-        public IReadOnlyList<PrecipitationField> Fields => index.Values.OrderBy(field => field.CellId).ToArray();
+        public IReadOnlyList<PrecipitationField> Fields => index.Values.OrderBy(value => value.CellId).ToArray();
         public bool TryGetField(long cellId, out PrecipitationField field) => index.TryGetValue(cellId, out field);
     }
 }
