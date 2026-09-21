@@ -107,9 +107,14 @@ public interface IPrecipitationFieldSource
 /// </summary>
 public sealed class PrecipitationSnapshot : IPrecipitationFieldSource
 {
+    private static readonly IComparer<PrecipitationField> CellIdComparer =
+        Comparer<PrecipitationField>.Create(static (left, right) => left.CellId.CompareTo(right.CellId));
+    private readonly PrecipitationField[] orderedFields;
+
     internal PrecipitationSnapshot(IEnumerable<PrecipitationField> fields, WindVector wind, MoistureBoundaryCondition boundary)
     {
-        Fields = Array.AsReadOnly(fields.OrderBy(field => field.CellId).ToArray());
+        orderedFields = fields.OrderBy(field => field.CellId).ToArray();
+        Fields = Array.AsReadOnly(orderedFields);
         Wind = wind;
         Boundary = boundary;
     }
@@ -123,9 +128,14 @@ public sealed class PrecipitationSnapshot : IPrecipitationFieldSource
 
     public bool TryGetField(long cellId, out PrecipitationField field)
     {
-        foreach (PrecipitationField candidate in Fields)
+        // The snapshot already owns a canonical sorted array. Binary search avoids
+        // an O(n) scan for each L04-C input without another per-cell index allocation.
+        // CompareTo, rather than subtraction, preserves ordering at Int64 extremes.
+        int index = Array.BinarySearch(orderedFields, new PrecipitationField(cellId, 0d, 0d), CellIdComparer);
+        if (index >= 0)
         {
-            if (candidate.CellId == cellId) { field = candidate; return true; }
+            field = orderedFields[index];
+            return true;
         }
         field = default;
         return false;
@@ -167,10 +177,12 @@ public static class PrecipitationSolver
             throw new ArgumentException("An open global ocean requires at least one explicit moisture port.", nameof(globalMoisturePortCellIds));
         int minX = cells.Min(cell => cell.GridX), maxX = cells.Max(cell => cell.GridX);
         int minZ = cells.Min(cell => cell.GridZ), maxZ = cells.Max(cell => cell.GridZ);
+        // Only port-bearing cells need the secondary ID index. Building it once is
+        // linear; repeated SingleOrDefault scans were quadratic with many ports.
+        Dictionary<long, PrecipitationCell> portCells = cells.Where(cell => ports.Contains(cell.Id)).ToDictionary(cell => cell.Id);
         foreach (long portId in ports)
         {
-            PrecipitationCell? port = cells.SingleOrDefault(cell => cell.Id == portId);
-            if (port is null || !port.IsOcean ||
+            if (!portCells.TryGetValue(portId, out PrecipitationCell? port) || !port.IsOcean ||
                 TryGetUpwind(grid, port, wind, out _) ||
                 (wind.X > 0 && port.GridX != minX) || (wind.X < 0 && port.GridX != maxX) ||
                 (wind.Z > 0 && port.GridZ != minZ) || (wind.Z < 0 && port.GridZ != maxZ))

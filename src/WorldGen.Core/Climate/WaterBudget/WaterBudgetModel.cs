@@ -131,9 +131,14 @@ public static class WaterBudgetSolver
         foreach (WaterBudgetInput input in inputs.OrderBy(value => value.CellId))
         {
             ValidateInput(input);
+            // An interface implementation may report success with the wrong cell,
+            // for example after a stale index lookup. Never attribute its rain to
+            // another catchment, even when the numeric balance would still close.
             if (!precipitation.TryGetField(input.CellId, out PrecipitationField field) ||
+                field.CellId != input.CellId ||
+                !double.IsFinite(field.AtmosphericMoistureModelLengthPerYear) || field.AtmosphericMoistureModelLengthPerYear < 0d ||
                 !double.IsFinite(field.PrecipitationModelLengthPerYear) || field.PrecipitationModelLengthPerYear < 0d)
-                throw new ArgumentException("Every budget input requires one finite non-negative upstream precipitation field.", nameof(precipitation));
+                throw new ArgumentException("Every budget input requires matching cell identity and finite non-negative upstream precipitation and atmospheric moisture fields.", nameof(precipitation));
 
             double precipitationDepth = field.PrecipitationModelLengthPerYear;
             double actualEt = Math.Min(precipitationDepth, input.PotentialEvapotranspirationModelLengthPerYear * settings.PotentialEvapotranspirationFraction);
@@ -173,18 +178,23 @@ public static class WaterBudgetSolver
             .ToArray();
         if (values.Select(transfer => transfer.TransferId).Distinct().Count() != values.Length)
             throw new ArgumentException("Groundwater transfer IDs must be unique.", nameof(source));
-        HashSet<StableId> reservoirs = cells.Select(cell => cell.ReservoirId).ToHashSet();
+        if (values.Length == 0) return values;
+
+        // One indexed lookup per reservoir, without changing the canonical order
+        // of outgoing groups or floating-point summation within each group.
+        Dictionary<StableId, double> rechargeByReservoir = cells.ToDictionary(
+            cell => cell.ReservoirId, cell => cell.RechargeModelVolumePerYear);
         foreach (GroundwaterTransfer transfer in values)
         {
             if (!Enum.IsDefined(transfer.Kind) || transfer.SourceReservoirId == transfer.DestinationReservoirId ||
-                !reservoirs.Contains(transfer.SourceReservoirId) || !reservoirs.Contains(transfer.DestinationReservoirId) ||
+                !rechargeByReservoir.ContainsKey(transfer.SourceReservoirId) || !rechargeByReservoir.ContainsKey(transfer.DestinationReservoirId) ||
                 !double.IsFinite(transfer.FlowModelVolumePerYear) || transfer.FlowModelVolumePerYear < 0d)
                 throw new ArgumentOutOfRangeException(nameof(source), "Transfers must be finite, link distinct known reservoirs, and use a known kind.");
         }
 
         foreach (IGrouping<StableId, GroundwaterTransfer> outgoing in values.GroupBy(transfer => transfer.SourceReservoirId))
         {
-            double rechargeVolume = cells.Single(cell => cell.ReservoirId == outgoing.Key).RechargeModelVolumePerYear;
+            double rechargeVolume = rechargeByReservoir[outgoing.Key];
             double transferred = outgoing.Sum(transfer => transfer.FlowModelVolumePerYear);
             if (!double.IsFinite(transferred) || transferred > rechargeVolume + TransferTolerance(rechargeVolume))
                 throw new ArgumentException("Outgoing groundwater cannot exceed locally counted recharge; a resurgence is a transfer, not new water.", nameof(source));
