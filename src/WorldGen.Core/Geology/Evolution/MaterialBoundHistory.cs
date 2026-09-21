@@ -35,22 +35,28 @@ public sealed class MaterialBoundHistory
     public SheetRheologyOptions? Rheology { get; }
     public ReadOnlyCollection<SheetSolveReceipt> MechanicalSolves { get; }
     public MaterialDeformationFrame? FinalDeformation { get; }
+    public OceanCoolingOptions? OceanCooling { get; }
+    public ReadOnlyCollection<double>? InitialColdFraction { get; }
+    public ReadOnlyCollection<double>? FinalColdFraction { get; }
+    public ReadOnlyCollection<OceanThermalReceipt> ThermalReceipts { get; }
 
     private MaterialBoundHistory(int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings,
         MaterialBoundSnapshot initial, MaterialBoundSnapshot final, TectonicPlate[] plates,
-        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum, SheetRheologyOptions? rheology, List<SheetSolveReceipt> mechanicalSolves, MaterialDeformationFrame? finalDeformation)
+        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum, SheetRheologyOptions? rheology, List<SheetSolveReceipt> mechanicalSolves, MaterialDeformationFrame? finalDeformation, OceanCoolingOptions? oceanCooling, ReadOnlyCollection<double>? initialCold, ReadOnlyCollection<double>? finalCold, List<OceanThermalReceipt> thermalReceipts)
     {
         Seed = seed; ReferenceWidth = scale.ReferenceWidth; ReferenceLength = scale.ReferenceLength; Settings = settings;
         Initial = initial; Final = final; Plates = Array.AsReadOnly(plates); Ledger = ledger.AsReadOnly();
         InitialContinentalByOrigin = Array.AsReadOnly(firstOrigin); FinalContinentalByOrigin = Array.AsReadOnly(lastOrigin);
         FinalOwnerFraction = Array.AsReadOnly(ownerFraction); UnresolvedInterfaceFaces = unresolved;
         InitialMaterialChecksum = initialMaterialChecksum; FinalMaterialChecksum = finalMaterialChecksum;
+        OceanCooling = oceanCooling; InitialColdFraction = initialCold; FinalColdFraction = finalCold; ThermalReceipts = thermalReceipts.AsReadOnly();
         Rheology = rheology; MechanicalSolves = mechanicalSolves.AsReadOnly(); FinalDeformation = finalDeformation;
         InitialAssemblageChecksum = assemblageChecksum ?? "LEGACY_EQUAL_QUOTA_INITIALIZATION";
         string canonical = JsonSerializer.Serialize(new { AlgorithmId, seed, ReferenceWidth, ReferenceLength, settings,
             initial = initial.Checksum, final = final.Checksum, plates, ledger, firstOrigin, lastOrigin, ownerFraction, unresolved, initialMaterialChecksum, finalMaterialChecksum });
         if (assemblageChecksum is not null) canonical += "|initial-assemblage=" + assemblageChecksum;
         if (rheology is not null) canonical += "|mechanics=" + SheetRheologyOptions.AlgorithmId + "|" + (rheology.PowerLaw is null ? ThinSheetDeformation.AlgorithmId : PowerLawSheetDeformation.AlgorithmId) + "|" + JsonSerializer.Serialize(new { rheology, mechanicalSolves });
+        if (oceanCooling is not null) canonical += "|ocean-thermal=" + OceanCoolingOptions.AlgorithmId + "|" + JsonSerializer.Serialize(new { oceanCooling, initialCold, finalCold, thermalReceipts });
         Checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
@@ -77,8 +83,18 @@ public sealed class MaterialBoundHistory
         return GenerateCore(seed, scale, settings, assemblage, rheology);
     }
 
+    /// <summary>Explicit one-way thermal/isostatic experiment, same material/age mechanics.</summary>
+    public static MaterialBoundHistory GenerateWithOceanCooling(int seed, TectonicScalePlan scale,
+        TectonicEvolutionSettings settings, ContinentalAssemblage assemblage, SheetRheologyOptions rheology, OceanCoolingOptions cooling)
+    {
+        ArgumentNullException.ThrowIfNull(assemblage); ArgumentNullException.ThrowIfNull(rheology);
+        ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings); ArgumentNullException.ThrowIfNull(cooling);
+        assemblage.RequireCompatible(seed, scale, settings.Side);
+        return GenerateCore(seed, scale, settings, assemblage, rheology, cooling);
+    }
+
     private static MaterialBoundHistory GenerateCore(int seed, TectonicScalePlan scale,
-        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage, SheetRheologyOptions? rheology = null)
+        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage, SheetRheologyOptions? rheology = null, OceanCoolingOptions? cooling = null)
     {
         ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
         if (settings.Side > 512 || settings.PlateCount > 16 || settings.DeformationWidth > .25 * Math.Min(scale.ReferenceWidth, scale.ReferenceLength))
@@ -98,9 +114,12 @@ public sealed class MaterialBoundHistory
         double[] o = (assemblage?.OceanicKm ?? initialHistory.Initial.OceanicKm).ToArray();
         int[] initialOwners = initialHistory.Initial.PlateIds.ToArray();
         var state = MaterialPlateCohorts.Create(n, plates.Length, initialOwners, c, o, o.Select(v => v * settings.InitialOceanAge).ToArray(), o);
+        OceanThermalCohorts? thermal = cooling is null ? null : OceanThermalCohorts.Create(state, cooling);
+        var initialCold = thermal?.ColdFractions();
+        var thermalReceipts = new List<OceanThermalReceipt>();
         double[] compression = new double[count], extension = new double[count], shear = new double[count];
         double[][] fields = state.Aggregate();
-        var initial = new MaterialBoundSnapshot(n, 0, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, initialOwners);
+        var initial = new MaterialBoundSnapshot(n, 0, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, initialOwners, cooling, initialCold);
         string firstMaterial = state.ComputeChecksum();
         double[] firstOrigin = state.ContinentalInventories();
         double initialC = CrustTransport.Sum(fields[0]), initialO = CrustTransport.Sum(fields[1]);
@@ -158,7 +177,9 @@ public sealed class MaterialBoundHistory
                     if (ocean > 0) removedMoment[i] = moved.Value(lower[i], 2, i) * (removed[i] / ocean);
                 }
             }
+            thermal = thermal?.Advance(state, moved, faces.East, faces.South, dx, dz, dt, born, lower, removed);
             state = moved.ExchangeOcean(born, lower, removed).RelaxContinental(dx, dz, dt, settings.LowerCrustMobility);
+            thermal?.RequireCarriers(state);
             fields = state.Aggregate(); created += CrustTransport.Sum(born); recycled += CrustTransport.Sum(removed);
             CrustTransport.RequireBalance(initialC, CrustTransport.Sum(fields[0]), "material-bound continental inventory");
             CrustTransport.RequireBalance(initialO + created - recycled, CrustTransport.Sum(fields[1]), "material-bound ocean inventory");
@@ -167,13 +188,20 @@ public sealed class MaterialBoundHistory
             for (int p = 0; p < plates.Length; p++) CrustTransport.RequireBalance(firstOrigin[p], currentOrigin[p], "continental origin " + p);
             if (fields[0].Any(v => v > 150)) throw new ArithmeticException("Material-bound crust exceeds rheology domain; no height clamp.");
             time += dt;
+            if (thermal is not null)
+            {
+                var cold = thermal.ColdFractions();
+                thermalReceipts.Add(new(time,thermal.MaximumBalanceResidual,CrustTransport.Sum(fields[1]),
+                    CrustTransport.Sum(fields[1].Select((v,i)=>v*cold[i]))));
+            }
             ledger.Add(new(time, CrustTransport.Sum(fields[0]) * area, CrustTransport.Sum(fields[1]) * area,
                 created * area, recycled * area, CrustTransport.Sum(fields[2]) * area, fields[0].Max(), collisions, subductions));
         }
         if (rheology is not null) deformation = SolveAtCurrentTime();
         MaterialMotion finalMotion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
-        var final = new MaterialBoundSnapshot(n, time, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, finalMotion.Owners.ToArray());
-        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum, rheology, mechanicalSolves, deformation);
+        var finalCold = thermal?.ColdFractions();
+        var final = new MaterialBoundSnapshot(n, time, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, finalMotion.Owners.ToArray(), cooling, finalCold);
+        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum, rheology, mechanicalSolves, deformation, cooling, initialCold, finalCold, thermalReceipts);
         MaterialDeformationFrame SolveAtCurrentTime()
         {
             var frame = MaterialRheology.Solve(state, plates, dx, dz, settings.DeformationWidth, rheology!, deformation?.Solution);

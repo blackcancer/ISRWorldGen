@@ -1,0 +1,90 @@
+name: Transported ocean cooling and continuous solid heights
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/ocean-thermal-20260922]
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/**'
+      - 'testsrc/WorldGen.OceanCooling/**'
+      - 'tools/export_ocean_cooling.py'
+      - 'tools/verify_ocean_cooling.py'
+      - '.github/workflows/ocean-thermal.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ocean-thermal-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  world:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        seed: ['-437287116', '73', '20260906']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Actual Core checks and same complete million-unit world
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.OceanCooling/WorldGen.OceanCooling.csproj -c Release -- .local/ocean-thermal 512 '${{ matrix.seed }}' powerlaw
+          if ($LASTEXITCODE -ne 0) { throw 'C# thermal checks or world evolution failed.' }
+          python tools/export_ocean_cooling.py --root .local/ocean-thermal
+          if ($LASTEXITCODE -ne 0) { throw 'True height encoding failed.' }
+      - name: Capture exact source even after rejection
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .local/ocean-thermal/source -Force | Out-Null
+          git archive --format=zip --output=.local/ocean-thermal/source/source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source capture failed.' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocean-thermal-${{ matrix.os }}-${{ matrix.seed }}-${{ github.sha }}
+          path: .local/ocean-thermal/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  platforms:
+    needs: world
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ocean-thermal-ubuntu-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/linux
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ocean-thermal-windows-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/windows
+      - name: Compare actual float64 and PNG16 with unchanged platform tolerance
+        run: python tools/verify_ocean_cooling.py .local/linux .local/windows .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocean-thermal-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          if-no-files-found: warn
+          retention-days: 30

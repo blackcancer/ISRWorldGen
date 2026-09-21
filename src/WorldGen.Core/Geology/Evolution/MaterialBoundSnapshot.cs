@@ -21,8 +21,10 @@ public sealed class MaterialBoundSnapshot
     public string Checksum { get; }
 
     internal MaterialBoundSnapshot(int side, double time, double[] continental, double[] oceanic,
-        double[] ageMoment, double[] inherited, double[] compression, double[] extension, double[] shear, int[] plateIds)
+        double[] ageMoment, double[] inherited, double[] compression, double[] extension, double[] shear, int[] plateIds, OceanCoolingOptions? cooling = null, IReadOnlyList<double>? coldFraction = null)
     {
+        if ((cooling is null) != (coldFraction is null) || (coldFraction is not null && coldFraction.Count != continental.Length))
+            throw new ArgumentException("Thermal response needs a matching carried field.");
         Side = side; Time = time;
         ContinentalKm = Array.AsReadOnly((double[])continental.Clone()); OceanicKm = Array.AsReadOnly((double[])oceanic.Clone());
         InheritedOceanicKm = Array.AsReadOnly((double[])inherited.Clone());
@@ -32,7 +34,8 @@ public sealed class MaterialBoundSnapshot
         for (int i = 0; i < age.Length; i++)
         {
             age[i] = oceanic[i] > 0 ? ageMoment[i] / oceanic[i] : 0;
-            heights[i] = CrustResponse.ElevationKm(continental[i], oceanic[i], age[i]);
+            heights[i] = cooling is null ? CrustResponse.ElevationKm(continental[i], oceanic[i], age[i])
+                : cooling.ElevationKm(continental[i], oceanic[i], coldFraction![i]);
         }
         OceanAge = Array.AsReadOnly(age); ElevationKm = Array.AsReadOnly(heights);
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
