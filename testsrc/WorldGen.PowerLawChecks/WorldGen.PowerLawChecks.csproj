@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><IsPackable>false</IsPackable><AssemblyName>WorldGen.Rheology</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/WorldGen.Core/WorldGen.Core.csproj" />
+    <Compile Include="../WorldGen.Rheology/PowerLawChecks.cs" Link="PowerLawChecks.cs" />
+  </ItemGroup>
+</Project>

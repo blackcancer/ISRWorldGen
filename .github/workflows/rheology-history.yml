@@ -1,0 +1,140 @@
+name: Controlled linear and nonlinear material rheology
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, codex/rheology-20260921]
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/**'
+      - 'src/WorldGen.Core/Foundation/**'
+      - 'testsrc/WorldGen.Rheology/**'
+      - 'testsrc/WorldGen.MaterialBoundEvolution/**'
+      - 'tools/export_rheology.py'
+      - 'tools/verify_rheology.py'
+      - 'tools/compare_rheology_controls.py'
+      - 'tools/export_tectonic_history.py'
+      - 'tools/verify_material_bound_platforms.py'
+      - 'tools/verify_tectonic_platforms.py'
+      - 'tools/export_spatial_png.py'
+      - '.github/workflows/rheology-history.yml'
+      - 'global.json'
+      - 'Directory.Build.props'
+permissions:
+  contents: read
+concurrency:
+  group: rheology-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  world:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        seed: ['-437287116', '73', '20260906']
+        mode: [homogeneous, heterogeneous, powerlaw]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile real Core and evolve one complete million-unit atlas
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.Rheology/WorldGen.Rheology.csproj -c Release -- .local/rheology 512 '${{ matrix.seed }}' '${{ matrix.mode }}'
+          if ($LASTEXITCODE -ne 0) { throw 'C# checks or whole-world evolution failed.' }
+          python tools/export_rheology.py --root .local/rheology
+          if ($LASTEXITCODE -ne 0) { throw 'Actual height encoding failed.' }
+      - name: Capture exact source even after rejection
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .local/rheology/source -Force | Out-Null
+          git archive --format=zip --output=.local/rheology/source/source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source capture failed.' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rheology-${{ matrix.mode }}-${{ matrix.os }}-${{ matrix.seed }}-${{ github.sha }}
+          path: .local/rheology/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  platforms:
+    needs: world
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [homogeneous, heterogeneous, powerlaw]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rheology-${{ matrix.mode }}-ubuntu-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/linux
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rheology-${{ matrix.mode }}-windows-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/windows
+      - name: Compare all true height pixels, material fields and per-origin inventories
+        run: python tools/verify_rheology.py .local/linux .local/windows .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rheology-platforms-${{ matrix.mode }}-${{ github.sha }}
+          path: .local/platforms.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  controls:
+    needs: platforms
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rheology-homogeneous-ubuntu-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/controls/homogeneous
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rheology-heterogeneous-ubuntu-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/controls/heterogeneous
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rheology-powerlaw-ubuntu-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/controls/powerlaw
+      - name: Verify paired experimental conditions before reporting terrain differences
+        run: python tools/compare_rheology_controls.py .local/controls .local/controls.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rheology-paired-controls-${{ github.sha }}
+          path: .local/controls.json
+          if-no-files-found: warn
+          retention-days: 30
