@@ -102,8 +102,7 @@ public sealed class TectonicHistory
             0, 0, CrustTransport.Sum(moment) * area, c.Max(), 0, 0) };
         double initialC = CrustTransport.Sum(c), initialO = CrustTransport.Sum(o), created = 0, recycled = 0, time = 0;
         double speed = plates.Max(p => Math.Max(Math.Abs(p.Vx), Math.Abs(p.Vz)));
-        double cfl = settings.AdvectionScheme == CrustAdvectionScheme.CoupledMusclV1 ? .24 : .35;
-        double maxDt = Math.Min(1, speed > 0 ? cfl / (speed / dx + speed / dz) : 1);
+        double maxDt = Math.Min(1, speed > 0 ? .35 / (speed / dx + speed / dz) : 1);
         if (settings.LowerCrustMobility > 0) maxDt = Math.Min(maxDt, .40 / (settings.LowerCrustMobility * (2 / (dx * dx) + 2 / (dz * dz))));
         if (Math.Ceiling(settings.Duration / maxDt) > 4096) throw new ArgumentOutOfRangeException(nameof(settings), "History exceeds 4096-step budget.");
         while (time < settings.Duration)
@@ -127,19 +126,10 @@ public sealed class TectonicHistory
                 shear[i] += Math.Abs((velocity.X[s] - velocity.X[prev]) / (2 * dz) + (velocity.Z[e] - velocity.Z[w]) / (2 * dx)) * dt / 2;
             }
             // Transport every extensive material/moment with exactly the same faces.
-            double[] nc, no, nm, ni;
-            if (settings.AdvectionScheme == CrustAdvectionScheme.CoupledMusclV1)
-            {
-                double[][] transported = CoupledCrustTransport.Advect([c, o, moment, inherited], east, south, n, dx, dz, dt);
-                nc = transported[0]; no = transported[1]; nm = transported[2]; ni = transported[3];
-            }
-            else
-            {
-                nc = CrustTransport.Advect(c, east, south, n, dx, dz, dt);
-                no = CrustTransport.Advect(o, east, south, n, dx, dz, dt);
-                nm = CrustTransport.Advect(moment, east, south, n, dx, dz, dt);
-                ni = CrustTransport.Advect(inherited, east, south, n, dx, dz, dt);
-            }
+            double[] nc = CrustTransport.Advect(c, east, south, n, dx, dz, dt);
+            double[] no = CrustTransport.Advect(o, east, south, n, dx, dz, dt);
+            double[] nm = CrustTransport.Advect(moment, east, south, n, dx, dz, dt);
+            double[] ni = CrustTransport.Advect(inherited, east, south, n, dx, dz, dt);
             double ageExpected = CrustTransport.Sum(moment) + dt * CrustTransport.Sum(o);
             for (int i = 0; i < count; i++) nm[i] += no[i] * dt;
             int collisionFaces = 0, subductionFaces = 0;

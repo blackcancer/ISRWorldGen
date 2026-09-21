@@ -3,26 +3,19 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using ISRWorldGen.Core.Geology.Evolution;
 
-if (args.Length is < 1 or > 3 || (args.Length >= 2 && (!int.TryParse(args[1], out int parsed) || parsed is < 64 or > 512 || (parsed & (parsed - 1)) != 0)))
-    throw new ArgumentException("Usage: WorldGen.TectonicEvolution <new-output-directory> [side=256; 64..512 power of two] [donor|coupled]");
-int side = args.Length >= 2 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 256;
-string scheme = args.Length == 3 ? args[2] : "donor";
-CrustAdvectionScheme transport = scheme switch
-{
-    "donor" => CrustAdvectionScheme.DonorCellV1,
-    "coupled" => CrustAdvectionScheme.CoupledMusclV1,
-    _ => throw new ArgumentException("Expected donor or coupled transport.")
-};
+if (args.Length is < 1 or > 2 || (args.Length == 2 && (!int.TryParse(args[1], out int parsed) || parsed is < 64 or > 512 || (parsed & (parsed - 1)) != 0)))
+    throw new ArgumentException("Usage: WorldGen.TectonicEvolution <new-output-directory> [side=256; 64..512 power of two]");
+int side = args.Length == 2 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 256;
 string root = Path.GetFullPath(args[0]);
 if (Directory.Exists(root) || File.Exists(root)) throw new IOException("Evidence directory exists; never overwrite an earlier campaign.");
-string[] checks = TectonicChecks.Run().Concat(PolarityRegressionChecks.Run()).Concat(CoupledTransportChecks.Run()).ToArray();
+string[] checks = TectonicChecks.Run().Concat(PolarityRegressionChecks.Run()).ToArray();
 Directory.CreateDirectory(root);
 var json = new JsonSerializerOptions { WriteIndented = true };
 var reports = new List<object>();
 foreach (int seed in new[] { -437287116, 73, 20260906 })
 {
     var reference = new TectonicScalePlan(1_000_000, 1_000_000);
-    var settings = new TectonicEvolutionSettings(side: side, advectionScheme: transport);
+    var settings = new TectonicEvolutionSettings(side: side);
     TectonicHistory history = TectonicHistory.Generate(seed, reference, settings);
     int components = CountLargeLandComponents(history.Final.ElevationKm, side);
     string seedRoot = Path.Combine(root, "seed-" + seed.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -69,7 +62,7 @@ foreach (int seed in new[] { -437287116, 73, 20260906 })
         steps = history.Ledger.Count - 1, initial = history.Ledger[0], final = history.Ledger[^1],
         solidMin = solid.Min(), solidMax = solid.Max(), largeLandComponents = components,
         landFraction = history.Final.ElevationKm.Count(v => v >= 0) / (double)(side * side),
-        solverNotes = new[] { transport == CrustAdvectionScheme.DonorCellV1 ? "First-order donor-cell numerical diffusion remains measurable." : "Coupled limited reconstruction reduces, but does not eliminate, numerical diffusion.",
+        solverNotes = new[] { "First-order donor-cell numerical diffusion remains measurable.",
             "Steering domains move; they are not a rigid Lagrangian plate reconstruction.",
             "Subduction recycles volume on selected lower sides, but flexural trench/arc mechanics are not implemented.",
             "No tectonic phase is hidden in a coloured rendering. No Earth data is copied into the generated height field." }

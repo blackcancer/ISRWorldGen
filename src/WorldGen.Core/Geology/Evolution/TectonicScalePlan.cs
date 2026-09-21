@@ -35,12 +35,9 @@ public sealed record TectonicScalePlan
     }
 }
 
-public enum CrustAdvectionScheme { DonorCellV1, CoupledMusclV1 }
-
 /// <summary>Explicit experimental units: reference horizontal units, model Myr, km of equivalent crust thickness.</summary>
 public sealed record TectonicEvolutionSettings
 {
-    public CrustAdvectionScheme AdvectionScheme { get; }
     public int Side { get; }
     public int PlateCount { get; }
     public int CratonCount { get; }
@@ -54,16 +51,15 @@ public sealed record TectonicEvolutionSettings
 
     public TectonicEvolutionSettings(int side = 256, int plateCount = 12, int cratonCount = 4,
         double duration = 36, double speedReferenceUnitsPerTime = 1800,
-        double deformationWidth = 22000, double lowerCrustMobility = 2_000_000, double initialOceanAge = 50, int motionSign = 1, CrustAdvectionScheme advectionScheme = CrustAdvectionScheme.DonorCellV1)
+        double deformationWidth = 22000, double lowerCrustMobility = 2_000_000, double initialOceanAge = 50, int motionSign = 1)
     {
-        if (!Enum.IsDefined(advectionScheme) || motionSign is not (-1 or 1) || side is < 32 or > 512 || (side & (side - 1)) != 0 || plateCount is < 2 or > 32 || cratonCount is < 2 or > 6 ||
+        if (motionSign is not (-1 or 1) || side is < 32 or > 512 || (side & (side - 1)) != 0 || plateCount is < 2 or > 32 || cratonCount is < 2 or > 6 ||
             !double.IsFinite(duration) || duration is < 0 or > 100 ||
             !double.IsFinite(speedReferenceUnitsPerTime) || speedReferenceUnitsPerTime is < 0 or > 4000 ||
             !double.IsFinite(deformationWidth) || deformationWidth is < 5000 or > 80000 ||
             !double.IsFinite(lowerCrustMobility) || lowerCrustMobility is < 0 or > 5_000_000 ||
             !double.IsFinite(initialOceanAge) || initialOceanAge is < 0 or > 200)
             throw new ArgumentOutOfRangeException(nameof(side), "Unsupported bounded tectonic campaign settings.");
-        AdvectionScheme = advectionScheme;
         Side = side; PlateCount = plateCount; CratonCount = cratonCount;
         Duration = duration; SpeedReferenceUnitsPerTime = speedReferenceUnitsPerTime;
         DeformationWidth = deformationWidth; LowerCrustMobility = lowerCrustMobility; InitialOceanAge = initialOceanAge; MotionSign = motionSign;
