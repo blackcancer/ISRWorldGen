@@ -14,7 +14,7 @@ namespace ISRWorldGen.Core.Geology.Evolution;
 /// </summary>
 public sealed class MaterialBoundHistory
 {
-    public const string AlgorithmId = "material-bound-history-v2-shared-metric-coherence";
+    public const string AlgorithmId = "material-bound-history-v3-carrier-resolved-origin-fluxes";
     public const double ReferenceKmPerUnit = TectonicHistory.ReferenceKmPerUnit;
     public int Seed { get; }
     public double ReferenceWidth { get; }

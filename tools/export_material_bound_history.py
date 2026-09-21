@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import export_tectonic_history as base
 
-ALGORITHM = 'material-bound-history-v2-shared-metric-coherence'
+ALGORITHM = 'material-bound-history-v3-carrier-resolved-origin-fluxes'
 
 def export(root: Path) -> None:
     directories = sorted(root.glob('seed-*'))

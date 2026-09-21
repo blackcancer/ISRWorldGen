@@ -11,7 +11,7 @@ namespace ISRWorldGen.Core.Geology.Evolution;
 /// </summary>
 public sealed class MaterialPlateCohorts
 {
-    public const string AlgorithmId = "material-origin-donor-cohorts-v2-metric-support";
+    public const string AlgorithmId = "material-origin-donor-cohorts-v3-carrier-resolved-fluxes";
     public int Side { get; }
     public int PlateCount => fields.Length / 4;
     private readonly double[][] fields; // plate-major: C, O, O*age, inherited O
@@ -76,10 +76,18 @@ public sealed class MaterialPlateCohorts
 
     public MaterialPlateCohorts Advect(double[] east, double[] south, double dx, double dz, double dt)
     {
-        // The unchanged, previously qualified first-order operator is deliberate.
-        // There is no ratio reconstruction, MUSCL limiter or height smoothing.
+        // Keep the first-order donor law; carry oceanic moments on the actual
+        // representable volume packets. No slope reconstruction or height smoothing.
         var next = new double[fields.Length][];
-        for (int k = 0; k < fields.Length; k++) next[k] = CrustTransport.Advect(fields[k], east, south, Side, dx, dz, dt);
+        for (int p = 0; p < PlateCount; p++)
+        {
+            // This call also validates geometry, velocities and the outgoing CFL.
+            next[4 * p] = CrustTransport.Advect(fields[4 * p], east, south, Side, dx, dz, dt);
+            var transported = AdvectOceanCarriers(p, east, south, dx, dz, dt);
+            next[4 * p + 1] = transported.Ocean;
+            next[4 * p + 2] = transported.Moment;
+            next[4 * p + 3] = transported.Inherited;
+        }
         return new MaterialPlateCohorts(Side, next);
     }
 
@@ -117,9 +125,11 @@ public sealed class MaterialPlateCohorts
                 int p = lowerPlate[i];
                 if (p < 0 || removed[i] > fields[4 * p + 1][i])
                     throw new ArgumentException("Cannot recycle another plate or more oceanic material than exists.");
-                double remaining = 1 - removed[i] / fields[4 * p + 1][i];
-                next[4 * p + 1][i] = fields[4 * p + 1][i] - removed[i];
-                next[4 * p + 2][i] *= remaining; next[4 * p + 3][i] *= remaining;
+                double ocean = fields[4 * p + 1][i];
+                double surviving = ocean - removed[i];
+                next[4 * p + 1][i] = surviving;
+                next[4 * p + 2][i] = surviving * (fields[4 * p + 2][i] / ocean);
+                next[4 * p + 3][i] = surviving * (fields[4 * p + 3][i] / ocean);
             }
         }
         return new MaterialPlateCohorts(Side, next);
@@ -196,6 +206,44 @@ public sealed class MaterialPlateCohorts
         return new MaterialMotion(Side, dx, dz, vx, vz, owners, purity, support);
     }
 
+    // Evaluate the same positive first-order donor stencil as actual carrier
+    // packets. Independently rounded O and O*age can otherwise leave a positive
+    // moment where the subnormal ocean amount rounds to zero. No cutoff, field
+    // clamp or higher-order reconstruction is used. The representable ocean
+    // packet carries its donor age and inherited fraction, including retention.
+    private (double[] Ocean, double[] Moment, double[] Inherited) AdvectOceanCarriers(
+        int plate, double[] east, double[] south, double dx, double dz, double dt)
+    {
+        double[] ocean = fields[4 * plate + 1], moment = fields[4 * plate + 2], inherited = fields[4 * plate + 3];
+        double[] ages = new double[Count], fractions = new double[Count];
+        for (int i = 0; i < Count; i++) if (ocean[i] > 0)
+        {
+            ages[i] = moment[i] / ocean[i]; fractions[i] = inherited[i] / ocean[i];
+            if (!double.IsFinite(ages[i]) || !double.IsFinite(fractions[i]) || fractions[i] > 1)
+                throw new ArithmeticException("Invalid oceanic donor concentration.");
+        }
+        double[] no = new double[Count], nm = new double[Count], ni = new double[Count];
+        double ax = dt / dx, az = dt / dz;
+        for (int z = 0; z < Side; z++) for (int x = 0; x < Side; x++)
+        {
+            int i = z * Side + x, e = z * Side + (x + 1) % Side, w = z * Side + (x + Side - 1) % Side;
+            int so = ((z + 1) % Side) * Side + x, n = ((z + Side - 1) % Side) * Side + x;
+            double outgoing = ax * (Math.Max(east[i], 0) + Math.Max(-east[w], 0))
+                + az * (Math.Max(south[i], 0) + Math.Max(-south[n], 0));
+            Add(i, 1 - outgoing); Add(e, ax * Math.Max(-east[i], 0)); Add(w, ax * Math.Max(east[w], 0));
+            Add(so, az * Math.Max(-south[i], 0)); Add(n, az * Math.Max(south[n], 0));
+            void Add(int donor, double coefficient)
+            {
+                double amount = ocean[donor] * coefficient;
+                no[i] += amount; nm[i] += amount * ages[donor]; ni[i] += amount * fractions[donor];
+            }
+        }
+        CrustTransport.RequireBalance(CrustTransport.Sum(ocean), CrustTransport.Sum(no), "origin ocean carrier transport");
+        CrustTransport.RequireBalance(CrustTransport.Sum(moment), CrustTransport.Sum(nm), "origin ocean-age carrier transport");
+        CrustTransport.RequireBalance(CrustTransport.Sum(inherited), CrustTransport.Sum(ni), "origin inherited carrier transport");
+        return (no, nm, ni);
+    }
+
     private double[][] Copy() => fields.Select(a => (double[])a.Clone()).ToArray();
     private void ValidateState()
     {
@@ -206,7 +254,7 @@ public sealed class MaterialPlateCohorts
                     throw new ArithmeticException("Nonfinite or negative extensive material.");
             double o = fields[4 * p + 1][i], a = fields[4 * p + 2][i], inherited = fields[4 * p + 3][i];
             if ((o == 0 && (a != 0 || inherited != 0)) || inherited - o > 1e-10)
-                throw new ArithmeticException("Oceanic moment or inherited material lost its carrier.");
+                throw new ArithmeticException($"Oceanic moment or inherited material lost its carrier: origin={p} cell={i} O={o:R} moment={a:R} inherited={inherited:R}.");
         }
     }
 }
