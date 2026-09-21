@@ -19,7 +19,7 @@ public readonly record struct RawReliefSample(double HeightBlocks, double Signed
 /// </summary>
 public sealed class RawReliefModel
 {
-    public const string AlgorithmId = "raw-structural-relief-v6-broad-supported-orogens";
+    public const string AlgorithmId = "raw-structural-relief-v7-massif-volume-before-crest-detail";
     private readonly int seed;
     private readonly WorldBounds bounds;
     private readonly Feature[] features;
@@ -188,9 +188,7 @@ public sealed class RawReliefModel
         continentalBase -= .11 * extension * land;
         double initial = marine * (1 - land) + continentalBase * land;
         double crests = ridges.Sample(wx, wz);
-        double broad = .19 * (1 - (1 - compression) * (1 - inherited));
-        double crags = .55 + .45 * Mountain(seed, px, pz, 3800 * scale, 41);
-        double deformation = 1 - (1 - broad) * (1 - crests * crags);
+        double deformation = RawMassifComposition.Sample(seed, px, pz, scale, compression, inherited, crests);
         double value = initial + (.98 - initial) * deformation * land;
         // Marine convergence changes the broad basement, not a submerged copy of
         // terrestrial branching spurs. Ridge/trench terms are applied separately.
