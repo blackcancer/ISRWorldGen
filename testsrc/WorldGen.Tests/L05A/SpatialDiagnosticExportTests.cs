@@ -88,14 +88,14 @@ public sealed class SpatialDiagnosticExportTests
             new DischargeClassificationSettings(stepX * (double)stepZ, 8d * stepX * stepZ, 8d * stepX * stepZ));
         Assert.HasCount(count, topology.Cells);
         Assert.HasCount(count, discharge.Reaches);
-        Assert.IsTrue(Math.Abs(discharge.Balance.ResidualModelVolumePerYear) <=
-            1e-9 + 1e-6 * discharge.Balance.ReferenceFlowModelVolumePerYear);
+        Assert.IsLessThanOrEqualTo(1e-9 + 1e-6 * discharge.Balance.ReferenceFlowModelVolumePerYear,
+            Math.Abs(discharge.Balance.ResidualModelVolumePerYear));
         for (int i = 0; i < count; i++)
         {
             Assert.AreEqual(height[i], topology.Cells[i].PhysicalElevation);
             if (topology.Cells[i].ReceiverId is long receiver)
-                Assert.IsTrue(topology.Cells[(int)receiver].RoutingElevation <= topology.Cells[i].RoutingElevation);
-            Assert.IsTrue(discharge.Reaches[i].DischargeModelVolumePerYear >= 0);
+                Assert.IsLessThanOrEqualTo(topology.Cells[i].RoutingElevation, topology.Cells[(int)receiver].RoutingElevation);
+            Assert.IsGreaterThanOrEqualTo(0d, discharge.Reaches[i].DischargeModelVolumePerYear);
         }
 
         long[] terminalIds = topology.Connectivity.Select(item => item.TerminalCellId).Distinct().Order().ToArray();
