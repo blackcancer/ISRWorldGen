@@ -162,7 +162,12 @@ public sealed class WaterBudgetInputAssociationTests
     private void WriteDiagnostics(PrecipitationCell[] positions, WaterBudgetSnapshot water,
         int width, int height, byte[] payload, string fingerprint)
     {
-        string root = Path.Combine(TestContext.TestRunDirectory ?? Path.GetTempPath(), "climate-pipeline-analytic-v1");
+        // CI supplies a distinct owned report directory per baseline/candidate run.
+        // Do not rely on a runner retaining TestContext attachments on every OS.
+        string? diagnosticsRoot = Environment.GetEnvironmentVariable("ISR_CLIMATE_DIAGNOSTICS_ROOT");
+        if (diagnosticsRoot is not null && !Path.IsPathFullyQualified(diagnosticsRoot))
+            throw new InvalidOperationException("The explicit climate diagnostics root must be an absolute path.");
+        string root = Path.Combine(diagnosticsRoot ?? TestContext.TestRunDirectory ?? Path.GetTempPath(), "climate-pipeline-analytic-v1");
         Directory.CreateDirectory(root);
         string numeric = Path.Combine(root, "fields.json");
         File.WriteAllBytes(numeric, payload);

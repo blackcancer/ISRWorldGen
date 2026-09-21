@@ -58,6 +58,33 @@ def fingerprint(path: Path) -> str:
     return match.group(1)
 
 
+def verify_diagnostics(directory: Path, commit: str, expected_hash: str) -> dict[str, bytes]:
+    """A green TRX alone cannot hide missing Windows attachments or stale maps."""
+    base = directory / 'climate-pipeline-analytic-v1'
+    manifest = json.loads((base / 'manifest.json').read_text(encoding='utf-8'))
+    require(manifest['commit'] == commit and manifest['scope'] == 'CORE_CLIMATE_WATER_ONLY',
+            'Diagnostic provenance is stale or belongs to another scope.')
+    require(manifest['fieldSha256'] == expected_hash and manifest['width'] == 16 and manifest['height'] == 8,
+            'Unexpected numeric diagnostic or raster dimensions.')
+    require(manifest['units'] == 'L/Ymod' and manifest['palette'] == 'linear-greyscale-0-to-16-v1',
+            'Diagnostic units/palette changed.')
+    require(manifest['nativeGame'] == 'NOT_RUN', 'Core fixture cannot qualify the native game.')
+    payloads = {'fields.json': (base / 'fields.json').read_bytes()}
+    require(hashlib.sha256(payloads['fields.json']).hexdigest() == expected_hash,
+            'Retained field bytes differ from the C# fingerprint.')
+    layers = manifest['layers']
+    require(len(layers) == 3 and {layer['path'] for layer in layers} ==
+            {'precipitation.svg', 'runoff.svg', 'recharge.svg'}, 'Incomplete or unexpected map bundle.')
+    for layer in layers:
+        data = (base / layer['path']).read_bytes()
+        require(hashlib.sha256(data).hexdigest() == layer['sha256'], 'Retained SVG checksum mismatch.')
+        svg = ET.fromstring(data)
+        require(svg.get('viewBox') == '0 0 16 8' and len(svg.findall('{*}rect')) == 128,
+                'Retained map does not contain the complete analytical grid.')
+        payloads[layer['path']] = data
+    return payloads
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--configuration', choices=('Debug', 'Release'), required=True)
@@ -76,7 +103,8 @@ def main() -> None:
 
     def run(command: list[str], label: str, source_commit: str = commit) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ, DOTNET_CLI_UI_LANGUAGE='en-US', GITHUB_SHA=source_commit,
-                   ISR_L04A_EVIDENCE_COMMIT=source_commit)
+                   ISR_L04A_EVIDENCE_COMMIT=source_commit,
+                   ISR_CLIMATE_DIAGNOSTICS_ROOT=str(reports / 'diagnostics' / label))
         result = subprocess.run(command, cwd=root, env=env, text=True, encoding='utf-8', errors='replace',
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300, check=False)
         (reports / (label + '.log')).write_text(result.stdout, encoding='utf-8')
@@ -109,6 +137,7 @@ def main() -> None:
         valid = test('baseline-valid', 'FullyQualifiedName=' + PREFIX + FINGERPRINT, BASE)
         require(valid.returncode == 0, valid.stdout)
         before = fingerprint(reports / 'baseline-valid.trx')
+        before_maps = verify_diagnostics(reports / 'diagnostics' / 'baseline-valid', BASE, before)
     finally:
         for name, data in candidate.items():
             (root / name).write_bytes(data)
@@ -129,12 +158,15 @@ def main() -> None:
         require(any('.' + lot + '.' in name for name in classes), f'Original {lot} tests were not included.')
     after = fingerprint(reports / 'candidate.trx')
     require(before == after, 'Valid precipitation/water/transfer output changed from the pinned baseline.')
+    after_maps = verify_diagnostics(reports / 'diagnostics' / 'candidate', commit, after)
+    require(before_maps == after_maps, 'Valid fields/maps changed from the pinned baseline.')
     require(not subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=root).strip(),
             'CI tests modified tracked repository state.')
     result = dict(status='PASS', scope='REAL_CORE_CLIMATE_HYDROLOGY_REGRESSION', commit=commit, baseline=BASE,
                   configuration=args.configuration, tests=len(entries), new_tests=len(NEW_TESTS), failed=0, skipped=0,
                   expected_red='MISATTRIBUTED_PRECIPITATION_ACCEPTED',
                   valid_pipeline_sha256=after, baseline_pipeline_sha256=before, valid_output_unchanged=True,
+                  diagnostics_verified=True, retained_maps_per_variant=3, field_and_map_bytes_unchanged=True,
                   sources_restored=restored,
                   source_sha256={name: hashlib.sha256(data).hexdigest() for name, data in candidate.items()},
                   native_game='NOT_RUN', full_solution='NOT_RUN', independent_review='NOT_RUN',
