@@ -19,7 +19,7 @@ public readonly record struct RawReliefSample(double HeightBlocks, double Signed
 /// </summary>
 public sealed class RawReliefModel
 {
-    public const string AlgorithmId = "raw-structural-relief-v4-planned-orogenic-ridgelines";
+    public const string AlgorithmId = "raw-structural-relief-v5-irregular-spurs-supported-shoulders";
     private readonly int seed;
     private readonly WorldBounds bounds;
     private readonly Feature[] features;

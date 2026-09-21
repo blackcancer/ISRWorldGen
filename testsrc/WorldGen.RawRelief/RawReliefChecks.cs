@@ -7,7 +7,7 @@ internal static class RawReliefChecks
 {
     internal static int Run()
     {
-        int checks = 0;
+        int checks = AdvancedRidgeChecks.Run();
         Segment[] whole = [new(0, 0, 120, 0)];
         Segment[] split = [new(0, 0, 40, 0), new(40, 0, 75, 0), new(75, 0, 120, 0)];
         Check(double.IsPositiveInfinity(DistanceSquared(0, 0, [])), "Empty contact has no influence");
