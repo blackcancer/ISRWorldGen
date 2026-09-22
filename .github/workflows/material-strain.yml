@@ -66,8 +66,12 @@ jobs:
           dotnet run --no-build --project testsrc/WorldGen.MaterialStrain/WorldGen.MaterialStrain.csproj -c Release -- .local/world ${{ matrix.seed }} 2>&1 | Out-File .local/reuse.log
           $code = $LASTEXITCODE
           $after = (Get-ChildItem .local/world -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
-          if ($code -eq 0 -or $before -ne $after) { throw 'Existing evidence was not preserved.' }
-          '{"preserved":true}' | Set-Content .local/reuse.json
+          $expectedRefusal = (Get-Content .local/reuse.log -Raw).Contains('System.IO.IOException: Never overwrite prior evidence.')
+          if ($code -eq 0 -or $before -ne $after -or -not $expectedRefusal) { throw 'Existing evidence was not preserved by the expected refusal.' }
+          @{ preserved = $true; expectedRefusal = $true; nativeExitCode = $code } | ConvertTo-Json | Set-Content .local/reuse.json
+          # The native nonzero code is expected ONLY after the checks above.
+          # GitHub appends exit $LASTEXITCODE; do not propagate the proved refusal.
+          exit 0
       - name: Retain exact source and runtime even on failure
         if: always()
         shell: pwsh
