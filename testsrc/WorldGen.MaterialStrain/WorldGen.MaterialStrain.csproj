@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><Compile Include="Program.cs"/><ProjectReference Include="../../src/WorldGen.Core/WorldGen.Core.csproj"/></ItemGroup>
+</Project>

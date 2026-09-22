@@ -1,0 +1,102 @@
+name: Material trajectories and two-dimensional thinning
+on:
+  push:
+    branches: [main, 'codex/material-strain-*']
+    paths: ['src/WorldGen.Core/Geology/Evolution/**', 'testsrc/WorldGen.MaterialStrain/**', 'tools/verify_material_strain.py', 'tools/export_material_strain.py', '.github/workflows/material-strain.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-dotnet@v4
+        with: {global-json-file: global.json}
+      - name: Run actual new and retained C sharp checks
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory .local | Out-Null
+          foreach ($name in @('MaterialStrain','RiftNecking','RiftSpreadingIntegration','RiftRegression')) {
+            dotnet build "testsrc/WorldGen.$name/WorldGen.$name.csproj" -c Release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            dotnet run --no-build --project "testsrc/WorldGen.$name/WorldGen.$name.csproj" -c Release 1> ".local/$name.json" 2> ".local/$name.log"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: strain-checks-${{ matrix.os }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+  worlds:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        seed: [-437287116, 20260906, 73]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-dotnet@v4
+        with: {global-json-file: global.json}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Observe actual complete million-unit history, no extra source of ocean
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory .local | Out-Null
+          dotnet run --project testsrc/WorldGen.MaterialStrain/WorldGen.MaterialStrain.csproj -c Release -- .local/world ${{ matrix.seed }} 2>&1 | Tee-Object .local/run.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: python tools/export_material_strain.py .local/world
+      - name: Refuse an existing output with byte preservation
+        shell: pwsh
+        run: |
+          $before = (Get-ChildItem .local/world -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
+          dotnet run --no-build --project testsrc/WorldGen.MaterialStrain/WorldGen.MaterialStrain.csproj -c Release -- .local/world ${{ matrix.seed }} 2>&1 | Out-File .local/reuse.log
+          $code = $LASTEXITCODE
+          $after = (Get-ChildItem .local/world -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
+          if ($code -eq 0 -or $before -ne $after) { throw 'Existing evidence was not preserved.' }
+          '{"preserved":true}' | Set-Content .local/reuse.json
+      - name: Retain exact source and runtime even on failure
+        if: always()
+        shell: pwsh
+        run: |
+          git archive --format=zip --output=.local/source.zip HEAD
+          dotnet --info | Set-Content .local/runtime.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: strain-world-${{ matrix.os }}-${{ matrix.seed }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+  compare:
+    needs: worlds
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: strain-world-*-${{ github.sha }}
+          path: .local/downloads
+      - run: python tools/verify_material_strain.py .local/downloads .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: strain-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          retention-days: 30

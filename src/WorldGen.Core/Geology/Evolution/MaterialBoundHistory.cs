@@ -62,8 +62,23 @@ public sealed class MaterialBoundHistory
         return GenerateCore(seed, scale, settings, assemblage);
     }
 
+    /// <summary>Observe actual material trajectories without feeding diagnostics
+    /// back into velocities, material exchange, heights or history identity.</summary>
+    public static (MaterialBoundHistory History, MaterialStrainSnapshot Strain) GenerateWithStrain(
+        int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings,
+        ContinentalAssemblage assemblage, MaterialStrainOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(assemblage);
+        ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
+        assemblage.RequireCompatible(seed, scale, settings.Side);
+        var tracker = new MaterialStrainTracker(settings.Side, scale.ReferenceWidth, scale.ReferenceLength,
+            assemblage.ContinentalKm, assemblage.OceanicKm, options);
+        var history = GenerateCore(seed, scale, settings, assemblage, tracker);
+        return (history, tracker.Snapshot());
+    }
+
     private static MaterialBoundHistory GenerateCore(int seed, TectonicScalePlan scale,
-        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage)
+        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage, MaterialStrainTracker? strain = null)
     {
         ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
         if (settings.Side > 512 || settings.PlateCount > 16 || settings.DeformationWidth > .25 * Math.Min(scale.ReferenceWidth, scale.ReferenceLength))
@@ -101,6 +116,7 @@ public sealed class MaterialBoundHistory
             double dt = Math.Min(maxDt, settings.Duration - time);
             MaterialMotion motion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
             var faces = motion.Faces();
+            strain?.Advance(time, dt, motion.X, motion.Z);
             int[] lower = Enumerable.Repeat(-1, count).ToArray();
             double[] priority = new double[count]; int collisions = 0, subductions = 0;
             BuildSinks(state, motion, plates, lower, priority, dx, dz, settings.DeformationWidth, ref collisions, ref subductions, ref unresolved);
