@@ -1,0 +1,64 @@
+name: Prehistory evidence recovery without terrain recomputation
+on:
+  push:
+    branches: ['codex/ocean-evidence-*']
+    paths: ['.github/workflows/ocean-prehistory-recovery.yml', 'tools/Test-PrehistoryOutputRefusal.ps1']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  refusal:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Compile exact campaign runner and create a separate refusal fixture
+        shell: pwsh
+        run: |
+          dotnet build testsrc/WorldGen.OceanPrehistoryCampaign/WorldGen.OceanPrehistoryCampaign.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory .local/existing | Out-Null
+          [System.IO.File]::WriteAllBytes((Join-Path $PWD '.local/existing/sentinel.bin'), [byte[]](0,1,2,255,0,42))
+      - name: Test the real refusal and require a successful negative-test exit
+        shell: pwsh
+        run: |
+          & ./tools/Test-PrehistoryOutputRefusal.ps1 -OutputPath .local/existing -LogDirectory .local/refusal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prehistory-refusal-${{ matrix.os }}-${{ github.sha }}
+          path: .local/refusal/
+          retention-days: 30
+  compare-preserved-worlds:
+    needs: refusal
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install numpy==2.3.5
+      - name: Retrieve the exact six completed numerical results, not a new world
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 35692828873
+          pattern: prehistory-*-f1b4bbc2e645114670790935e928b1aca8fcf35d
+          path: .local/downloads
+      - name: Check original manifests, hashes, completion, refusal receipts and field tolerances
+        run: python tools/verify_prehistory_campaign.py .local/downloads .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prehistory-recovered-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          retention-days: 30

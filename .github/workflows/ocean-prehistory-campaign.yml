@@ -2,7 +2,7 @@ name: Full atlas ocean prehistory continuation
 on:
   push:
     branches: ['codex/ocean-chronology-*']
-    paths: ['testsrc/WorldGen.OceanPrehistoryCampaign/**', '.github/workflows/ocean-prehistory-campaign.yml', 'tools/verify_prehistory_campaign.py']
+    paths: ['testsrc/WorldGen.OceanPrehistoryCampaign/**', '.github/workflows/ocean-prehistory-campaign.yml', 'tools/verify_prehistory_campaign.py', 'tools/Test-PrehistoryOutputRefusal.ps1']
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,11 +32,8 @@ jobs:
       - name: Existing output is rejected without modifying earlier evidence
         shell: pwsh
         run: |
-          $before = (Get-ChildItem .local/world -File -Recurse | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
-          dotnet run --no-build --project testsrc/WorldGen.OceanPrehistoryCampaign/WorldGen.OceanPrehistoryCampaign.csproj -c Release -- .local/world ${{ matrix.seed }} 2>&1 | Out-File .local/reuse-rejected.log
-          $code = $LASTEXITCODE
-          $after = (Get-ChildItem .local/world -File -Recurse | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
-          if ($code -eq 0 -or $before -ne $after) { throw 'Reused output was not rejected intact' }
+          & ./tools/Test-PrehistoryOutputRefusal.ps1 -OutputPath .local/world -LogDirectory .local/refusal -Seed ${{ matrix.seed }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           '{"status":"PASS","scope":"existing-directory refusal and byte preservation"}' | Set-Content .local/reuse-check.json
       - name: Preserve exact source and runtime
         if: always()

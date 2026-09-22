@@ -1,0 +1,9 @@
+# Recuperation de recette sans recalcul des mondes
+
+Code numerique execute : f1b4bbc2e645114670790935e928b1aca8fcf35d ; campagne 35692828873. Les premiers jobs ont termine les trois etats 0/36/72, puis ont echoue APRES la generation, pendant le test negatif de reutilisation d'un dossier. Le journal Ubuntu 20260906 et son artefact contiennent COMPLETE.json, le refus C# IOException attendu et reuse-check.json PASS. Le wrapper pwsh propage le dernier code natif non nul a la fin du script : un refus attendu devient un echec de step. Ce constat ne prejuge pas des autres jobs tant que leurs preuves ne sont pas lues.
+
+Correction : un script de test distinct capture le code, exige le message du refus attendu, compare les noms/longueurs/hashes des fichiers avant/apres et retourne explicitement zero UNIQUEMENT apres ces assertions. Aucune tolerance numerique ni formule de generation changee. Le workflow normal appelle ce script pour les campagnes suivantes.
+
+Recuperation : nouvelle branche codex/ocean-evidence-20260922, issue du SHA exact du calcul. La CI compile le meme runner sur Windows/Linux et teste seulement un dossier sentinelle deja present. Elle telecharge ensuite les six artefacts originaux de 35692828873, exige leur completion individuelle et compare tous leurs champs avec le verificateur initial inchange. Ni edition des artefacts, ni transformation d'un run rouge en run vert, ni relance silencieuse du terrain. Une sortie manquante ou non complete fait echouer la recuperation.
+
+Le statut de la campagne originale reste celui effectivement observe. Le resultat de la nouvelle verification doit etre lu separement. Le repertoire sentinelle et les logs vivent sur runners jetables ; pas d'acces a une sauvegarde utilisateur. Main et la branche de rheologie restent inchanges. Revue par second agent et recette native : NOT_RUN. Erosion non lancee.
