@@ -1,0 +1,93 @@
+name: Material breakup to ocean chronology
+on:
+  push:
+    branches: [main, 'codex/rift-necking-*']
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/Rift*.cs'
+      - 'src/WorldGen.Core/Geology/Evolution/Spreading*.cs'
+      - 'src/WorldGen.Core/Geology/Evolution/OceanBirthMap.cs'
+      - 'testsrc/WorldGen.RiftNecking/**'
+      - 'testsrc/WorldGen.RiftSpreadingIntegration/**'
+      - 'tools/verify_rift_campaign.py'
+      - '.github/workflows/rift-necking.yml'
+      - 'global.json'
+      - 'Directory.Build.props'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build real Core and both independent test executables
+        shell: pwsh
+        run: |
+          dotnet build testsrc/WorldGen.RiftNecking/WorldGen.RiftNecking.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Rift compilation failed' }
+          dotnet build testsrc/WorldGen.RiftSpreadingIntegration/WorldGen.RiftSpreadingIntegration.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Chronology integration compilation failed' }
+      - name: Run both suites and preserve the exact first failure
+        shell: python
+        run: |
+          import json, os, subprocess
+          from pathlib import Path
+          root=Path('.local/rift'); root.mkdir(parents=True,exist_ok=False)
+          (root/'INCOMPLETE.json').write_text(json.dumps({'commit':os.environ['GITHUB_SHA']}))
+          exits={}
+          for name,project in [('necking','WorldGen.RiftNecking'),('integration','WorldGen.RiftSpreadingIntegration')]:
+              result=subprocess.run(['dotnet','run','--no-build','--project',f'testsrc/{project}/{project}.csproj','-c','Release'],capture_output=True,timeout=180)
+              (root/(name+'.json')).write_bytes(result.stdout)
+              (root/(name+'.log')).write_bytes(result.stderr)
+              exits[name]=result.returncode
+          (root/'source.json').write_text(json.dumps({'commit':os.environ['GITHUB_SHA'],'exits':exits}))
+          (root/'runtime.txt').write_bytes(subprocess.check_output(['dotnet','--info']))
+          subprocess.run(['git','archive','--format=zip','--output='+str(root/'source.zip'),'HEAD'],check=True)
+          if any(exits.values()):
+              (root/'FAILED.json').write_text(json.dumps(exits));raise SystemExit(1)
+          (root/'COMPLETE.json').write_text(json.dumps({'scope':'CONTROLLED_MODEL_AND_INTEGRATION_ONLY','geographicAcceptance':'NOT_EVALUATED'}))
+          (root/'INCOMPLETE.json').unlink()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rift-${{ matrix.os }}-${{ github.sha }}
+          path: .local/rift
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  compare:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rift-*-${{ github.sha }}
+          path: evidence
+      - name: Compare exact C# results, no geographic acceptance
+        run: python tools/verify_rift_campaign.py evidence platforms.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rift-platforms-${{ github.sha }}
+          path: platforms.json
+          retention-days: 30
