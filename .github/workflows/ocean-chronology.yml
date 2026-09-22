@@ -1,0 +1,63 @@
+name: Ocean birth chronology qualification
+on:
+  push:
+    branches: [main, 'codex/ocean-chronology-*']
+    paths: ['src/WorldGen.Core/**', 'testsrc/WorldGen.OceanChronology/**', 'tools/verify_ocean_chronology.py', '.github/workflows/ocean-chronology.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Compile actual Core and run chronological and full-atlas regression checks
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .local | Out-Null
+          dotnet run --project testsrc/WorldGen.OceanChronology/WorldGen.OceanChronology.csproj -c Release -- .local/ocean-checks 2>&1 | Tee-Object .local/qualification.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Record exact source and runtime even on failure
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .local/source | Out-Null
+          git rev-parse HEAD | Set-Content .local/source/commit.txt
+          dotnet --info | Set-Content .local/source/runtime.txt
+          git archive --format=zip --output=.local/source/source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocean-chronology-${{ matrix.os }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+  compare:
+    needs: qualify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ocean-chronology-*-${{ github.sha }}
+          path: .local/downloads
+      - name: Compare real data without widening inherited field tolerances
+        run: python tools/verify_ocean_chronology.py .local/downloads .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ocean-chronology-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          retention-days: 30
