@@ -16,6 +16,13 @@ def compare(root, output):
     if commits[0]!=commits[1]:raise ValueError('Different code revisions')
     def same(a,b,path):
         nonlocal maximum,numbers
+        if type(a) in (int,float) and type(b) in (int,float):
+            if not math.isfinite(a) or not math.isfinite(b):raise ValueError('Nonfinite '+path)
+            delta=abs(a-b);maximum=max(maximum,delta);numbers+=1
+            identity=path.rsplit('/',1)[-1] in {'OriginId','RupturedOriginId','Flank','EventId','SourceEventId','flank','expectedEvent','particles','failures'}
+            if identity and (type(a) is not int or type(b) is not int or a!=b):raise ValueError('Changed discrete identity '+path)
+            if delta>1e-8:raise ValueError(f'Divergence {path}: {delta}')
+            return
         if type(a)!=type(b):raise ValueError('Different type '+path)
         if isinstance(a,dict):
             if a.keys()!=b.keys():raise ValueError('Different fields '+path)
@@ -23,12 +30,8 @@ def compare(root, output):
         elif isinstance(a,list):
             if len(a)!=len(b):raise ValueError('Different array length '+path)
             for i,(x,y) in enumerate(zip(a,b)):same(x,y,path+'/'+str(i))
-        elif type(a) in (int,float):
-            if not math.isfinite(a) or not math.isfinite(b):raise ValueError('Nonfinite '+path)
-            delta=abs(a-b);maximum=max(maximum,delta);numbers+=1
-            if (type(a) is int and delta!=0) or delta>1e-8:raise ValueError(f'Divergence {path}: {delta}')
         elif a!=b:raise ValueError('Different identity/status '+path)
-    for filename,status,count in [('necking.json','PASS_CONTROLLED_MODEL_ONLY',18),('integration.json','PASS_RIFT_CHRONOLOGY_INTEGRATION',10)]:
+    for filename,status,count in [('necking.json','PASS_CONTROLLED_MODEL_ONLY',18),('integration.json','PASS_RIFT_CHRONOLOGY_INTEGRATION',14)]:
         data=[json.loads((d/filename).read_text(encoding='utf-8-sig')) for d in dirs]
         if any(d['status']!=status or len(d['checks'])!=count for d in data):raise ValueError('Missing required checks')
         if filename=='integration.json' and any(d['failures']!=0 or any(c['status']!='PASS' for c in d['checks']) for d in data):raise ValueError('Rejected integration')

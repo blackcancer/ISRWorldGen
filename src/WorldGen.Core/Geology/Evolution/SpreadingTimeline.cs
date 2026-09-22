@@ -17,7 +17,7 @@ public sealed record SpreadingPhase(int SourceEventId, double StartTimeMyr, doub
 /// </summary>
 public sealed class SpreadingTimeline
 {
-    public const string AlgorithmId = "dated-piecewise-translation-birth-reconstruction-v1";
+    public const string AlgorithmId = "dated-piecewise-translation-birth-reconstruction-v2-resolved-endpoints";
     public string Name { get; }
     public ReadOnlyCollection<SpreadingPhase> Phases { get; }
     private readonly SpreadingEpisode[] episodes;

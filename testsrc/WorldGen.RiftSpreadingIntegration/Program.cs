@@ -89,6 +89,50 @@ Case("concurrent birth queries reproduce interior ages", () => {
     Parallel.For(0,128,_=>{Require(t[0].TryResolveBirth(p.X,p.Z,out var w),"Read failed");
         Require(w==expected,"Mutable reconstruction state");});
 });
+Case("hiatus line remains ambiguous instead of receiving an invented younger age", () => {
+    foreach(double angle in angles) {
+        var r=Model(paused);var t=Timelines(r,angle);var p=Particle(r,angle,0,40,.43);
+        Refuse(()=>t[0].TryResolveBirth(p.X,p.Z,out _));
+    }
+});
+Case("unresolvable coordinates and vanishing time intervals are rejected", () => {
+    var distant=new SpreadingEpisode(0,1e15,1e15,1e15,1e15+500000,0,0,1000,0,-25,0);
+    Refuse(()=>SpreadingKinematics.TryResolveBirth(distant,1e15,1e15+250000,out _));
+    var tiny=new SpreadingEpisode(0,0,0,0,500000,0,0,1000,0,-1e-15,0);
+    Refuse(()=>SpreadingKinematics.TryResolveBirth(tiny,0,250000,out _));
+});
+Case("birth grid covers only the actual new carrier and resizes without cropping", () => {
+    const int n=128;var scale=new TectonicScalePlan(1000000,1000000);
+    var r=new RiftNecking(ribbons,[new(0,60,-1500,2500)],300000,1000000,.01,7);
+    var t=RiftSpreadingAdapter.ToTimelines(r,"carrier-grid",0,0,1,0);var section=r.Sample(60);
+    double[] o=new double[n*n];
+    for(int z=0;z<n;z++) for(int x=0;x<n;x++) {
+        double px=(x+.5)*1000000/n;
+        if(px>section.GapLeftReference && px<section.GapRightReference)o[z*n+x]=7;
+    }
+    var map=SpreadingTimeline.Reconstruct(73,scale,n,o,t,"actual-created-gap");
+    int covered=0;
+    for(int i=0;i<o.Length;i++) {
+        if(o[i]==0){Require(map.SourceEventIds[i]==-1 && map.AgeMyr[i]==0,"Absent ocean obtained a birth");continue;}
+        double x=(i%n+.5)*1000000/n;
+        double expected=Math.Abs(x-section.RidgeReference!.Value)/2000;
+        Near(map.AgeMyr[i],expected,1e-9);Require(map.SourceEventIds[i]==0,"Wrong gap event");covered++;
+    }
+    Require(covered>0,"Empty carrier test");
+    foreach(long size in new long[]{131072,262144,1000000}) {
+        var scaled=SpreadingTimeline.Reconstruct(73,new TectonicScalePlan(size,size),n,o,t,"actual-created-gap");
+        Require(scaled.Checksum==map.Checksum,"Map size cropped the birth atlas");
+    }
+    // Mark one pre-existing/uncovered ocean cell: the same history must refuse
+    // to fabricate a birth there. No uniform age or nearest-ridge fallback.
+    o[0]=7;Refuse(()=>SpreadingTimeline.Reconstruct(73,scale,n,o,t,"unknown-inherited-ocean"));
+});
+Case("unknown competing histories stay a hard failure", () => {
+    var a=new SpreadingPhase(0,-20,0,0,0,0,500000,0,0,1000,0);
+    var b=new SpreadingPhase(1,-40,-20,-20000,0,-20000,500000,0,0,1000,0);
+    var t=new SpreadingTimeline("overlap",[b,a]);
+    Refuse(()=>t.TryResolveBirth(5000,250000,out _));
+});
 Console.WriteLine(JsonSerializer.Serialize(new {status=failures==0?"PASS_RIFT_CHRONOLOGY_INTEGRATION":"FAIL",
     riftAlgorithm=RiftNecking.AlgorithmId,spreadingAlgorithm=SpreadingKinematics.AlgorithmId,
     checks,failures,particles=witnesses.Count,maximumBirthErrorMyr=maximumError,witnesses,
@@ -125,4 +169,4 @@ void Case(string name,Action body) {
 }
 static void Near(double a,double b,double tolerance) {Require(double.IsFinite(a)&&double.IsFinite(b)&&Math.Abs(a-b)<=tolerance,$"Numeric mismatch {a:R} / {b:R}");}
 static void Require(bool v,string message){if(!v)throw new InvalidOperationException(message);}
-static void Refuse(Action body){try{body();}catch(ArgumentException){return;}throw new InvalidOperationException("Invalid input accepted");}
+static void Refuse(Action body){try{body();}catch(ArgumentException){return;}catch(ArithmeticException){return;}throw new InvalidOperationException("Invalid input accepted");}

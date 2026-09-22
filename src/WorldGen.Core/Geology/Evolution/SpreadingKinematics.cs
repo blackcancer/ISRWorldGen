@@ -17,7 +17,7 @@ public readonly record struct OceanBirthWitness(int SourceEventId, double BirthT
 
 public static class SpreadingKinematics
 {
-    public const string AlgorithmId = "piecewise-translating-ridge-birth-inversion-v1";
+    public const string AlgorithmId = "piecewise-translating-ridge-birth-inversion-v2-resolved-endpoints";
 
     /// <summary>
     /// x_now = A_0 + s*(B_0-A_0) + (V_material - V_ridge)*age.
@@ -45,7 +45,26 @@ public static class SpreadingKinematics
         double s = (rx * vz - rz * vx) / determinant;
         double age = (sx * rz - sz * rx) / determinant;
         if (!double.IsFinite(s) || !double.IsFinite(age)) throw new ArithmeticException("Birth inversion overflow.");
-        if (s < 0 || s > 1 || -age < episode.FirstBirthTimeMyr || -age > episode.LastBirthTimeMyr) return false;
+        // Input positions and extrapolated segments have already been rounded.
+        // A strict comparison at an exact mathematical endpoint can lose its
+        // material witness after rotating the frame (pinned C# run 35724508934).
+        // Resolve ONLY declared endpoints within a metric-conditioned roundoff
+        // budget. Interior values are unchanged. This is not a geometric buffer
+        // of a pixel, a nearest-source fallback, or a relaxation of field tests.
+        const double machineEpsilon = 2.2204460492503131e-16;
+        double sine = Math.Abs(determinant / length / speed);
+        double positionBudget = Math.Abs(x) + Math.Abs(z) + Math.Abs(episode.Ax) + Math.Abs(episode.Az)
+            + Math.Abs(episode.Bx) + Math.Abs(episode.Bz);
+        double timeBudget = Math.Max(Math.Abs(episode.FirstBirthTimeMyr), Math.Abs(episode.LastBirthTimeMyr));
+        double alongResolution = 32 * machineEpsilon * (1 + positionBudget / length) / sine;
+        double timeResolution = 32 * machineEpsilon * (1 + timeBudget + positionBudget / speed) / sine;
+        if (!double.IsFinite(alongResolution) || !double.IsFinite(timeResolution)
+            || alongResolution > 1e-10 || timeResolution > 1e-9)
+            throw new ArithmeticException("Unresolved spreading frame; rebase coordinates instead of expanding the birth domain.");
+        if (!ResolveEndpoint(s, 0, 1, alongResolution, out s)
+            || !ResolveEndpoint(-age, episode.FirstBirthTimeMyr, episode.LastBirthTimeMyr, timeResolution, out double birth))
+            return false;
+        age = -birth;
         double forwardX = episode.Ax + s * sx + vx * age;
         double forwardZ = episode.Az + s * sz + vz * age;
         double scale = Math.Max(1, Math.Max(Math.Max(Math.Abs(x), Math.Abs(z)), length + speed * age));
@@ -53,6 +72,17 @@ public static class SpreadingKinematics
             || Math.Abs(forwardX - x) > 1e-10 * scale || Math.Abs(forwardZ - z) > 1e-10 * scale)
             throw new ArithmeticException("Birth witness does not reconstruct the observed parcel.");
         witness = new(episode.SourceEventId, -age, s, forwardX, forwardZ);
+        return true;
+    }
+
+    private static bool ResolveEndpoint(double value, double lo, double hi, double resolution, out double resolved)
+    {
+        resolved = value;
+        if (hi != lo && hi - lo <= 2 * resolution)
+            throw new ArithmeticException("Source interval is smaller than its coordinate resolution.");
+        if (value < lo - resolution || value > hi + resolution) return false;
+        if (Math.Abs(value - lo) <= resolution) resolved = lo;
+        else if (Math.Abs(value - hi) <= resolution) resolved = hi;
         return true;
     }
 }
