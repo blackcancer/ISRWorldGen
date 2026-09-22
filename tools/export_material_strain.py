@@ -20,7 +20,7 @@ def export(root):
         prepared[name+'-16bit.png']=png(w,h,pixels,16,0,'TRUE solid height Y=pixel*383/65535; no sea mask; passive observer changes no terrain')
         if read_pixels(prepared[name+'-16bit.png'])!=(w,h,16,0,pixels):raise ValueError('PNG roundtrip failed')
         grey=bytes(round(v*255/383) for v in values)
-        prepared[name+'-preview.png']=png(w,h,grey,8,0,'Fixed Y0..383 8-bit preview of actual solid height')
+        prepared[name+'-preview.png']=png(w,h,bytes(v for g in grey for v in (g,g,g)),8,2,'Fixed Y0..383 8-bit preview of actual solid height')
         if name=='height': heights=grey
     area=[];overlay=bytearray(channel for grey in heights for channel in (grey,grey,grey))
     for i,p in enumerate(samples):
@@ -35,7 +35,7 @@ def export(root):
             for oz,ox in ((0,0),(-1,0),(1,0),(0,-1),(0,1)):
                 at=3*(((z+oz)%h)*w+(x+ox)%w);overlay[at:at+3]=bytes((220,70,45))
     prepared['reference-area-ratio-16bit.png']=png(n,n,b''.join(struct.pack('>H',v) for v in area),16,0,'NOT HEIGHT: initial material coordinates; J=2**tan(pi*(pixel/65535-.5)); endpoints are asymptotic')
-    prepared['reference-area-ratio-preview.png']=png(n,n,bytes(round(v*255/65535) for v in area),8,0,'NOT HEIGHT: passive area stretch at initial material IDs; grey=J1, bright=extension, dark=compression')
+    prepared['reference-area-ratio-preview.png']=png(n,n,bytes(round(v*255/65535) for v in area for _ in range(3)),8,2,'NOT HEIGHT: passive area stretch at initial material IDs; grey=J1, bright=extension, dark=compression')
     prepared['current-thinning-overlay.png']=png(w,h,bytes(overlay),8,2,'ANNOTATED NOT HEIGHTMAP: red=current positions of passive thinning candidates; not resolved fractures')
     out.mkdir()
     for name,b in prepared.items():(out/name).write_bytes(b)
@@ -45,4 +45,13 @@ def export(root):
         files={n:hashlib.sha256(b).hexdigest() for n,b in prepared.items()})
     (root/'PNG-COMPLETE.json').write_text(json.dumps(receipt,indent=2))
     print(json.dumps(receipt,indent=2))
-if __name__=='__main__':export(Path(sys.argv[1]))
+def self_test():
+    # The repository writer supports RGB8 previews and true grayscale16 only.
+    grey=bytes([0,127,255]);rgb=bytes(v for g in grey for v in (g,g,g))
+    assert read_pixels(png(3,1,rgb,8,2,'Preview regression'))==(3,1,8,2,rgb)
+    raw=b''.join(struct.pack('>H',v) for v in (0,32768,65535))
+    assert read_pixels(png(3,1,raw,16,0,'True height regression'))==(3,1,16,0,raw)
+
+if __name__=='__main__':
+    self_test()
+    if sys.argv[1:]!=['--self-test']:export(Path(sys.argv[1]))
