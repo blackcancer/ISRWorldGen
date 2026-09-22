@@ -15,8 +15,10 @@ public sealed record StrainWeakeningOptions
     public double StrainScale { get; }
     public double ResidualRatio { get; }
     public double SupportLengthReference { get; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public PlasticSheetOptions? Plasticity { get; }
     public StrainWeakeningOptions(int mechanicalSide = 128, double updateInterval = 1,
-        double strainScale = .5, double residualRatio = .35, double supportLengthReference = 10000)
+        double strainScale = .5, double residualRatio = .35, double supportLengthReference = 10000, PlasticSheetOptions? plasticity = null)
     {
         if (mechanicalSide < 8 || mechanicalSide > 128 || (mechanicalSide & (mechanicalSide - 1)) != 0 ||
             !double.IsFinite(updateInterval) || updateInterval < .125 || updateInterval > 1 ||
@@ -25,7 +27,7 @@ public sealed record StrainWeakeningOptions
             !double.IsFinite(supportLengthReference) || supportLengthReference < 0 || supportLengthReference > 80000)
             throw new ArgumentException("Invalid bounded strain weakening parameters.");
         MechanicalSide = mechanicalSide; UpdateInterval = updateInterval; StrainScale = strainScale;
-        ResidualRatio = residualRatio; SupportLengthReference = supportLengthReference;
+        ResidualRatio = residualRatio; SupportLengthReference = supportLengthReference; Plasticity = plasticity;
     }
     public double Multiplier(double strain)
     {
@@ -36,10 +38,19 @@ public sealed record StrainWeakeningOptions
 
 public sealed record WeakeningSolveReceipt(double Time, int MechanicalSide, int Iterations,
     double RelativeResidual, double Work, double Dissipation, double MeanVelocityError,
-    double MinimumMultiplier, double MaximumStrain);
+    double MinimumMultiplier, double MaximumStrain)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public int PlasticIterations { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public double MaximumPlasticRate { get; init; }
+}
 
 public sealed record StrainWeakeningResult(MaterialBoundHistory History, ContinentalStrainMemory Memory,
-    ReadOnlyCollection<WeakeningSolveReceipt> Solves, StrainWeakeningOptions Options, string Policy);
+    ReadOnlyCollection<WeakeningSolveReceipt> Solves, StrainWeakeningOptions Options, string Policy)
+{
+    public PlasticSheetSolution? FinalPlasticity { get; init; }
+}
 
 /// <summary>Current force-balanced frame. Rates/transport on fine grid are sampled
 /// from a native staggered mechanical grid, not new solved detail.</summary>
@@ -57,14 +68,18 @@ public sealed class WeakeningFrame
     public double[] CenterX { get; }
     public double[] CenterZ { get; }
     public double[] Shear { get; }
+    public PlasticSheetSolution? Plasticity { get; }
+    public double[]? PlasticRates { get; }
     private readonly int n;
     private readonly double dx, dz;
     internal WeakeningFrame(ThinSheetSolution solved, int m, double[] viscosity, double[] multiplier,
-        double[] strain, int n, double dx, double dz)
+        double[] strain, int n, double dx, double dz, PlasticSheetSolution? plasticity = null)
     {
         Native = solved; NativeSide = m; Viscosity = Array.AsReadOnly(viscosity);
         Multipliers = Array.AsReadOnly(multiplier); EffectiveStrain = Array.AsReadOnly(strain);
         this.n = n; this.dx = dx; this.dz = dz;
+        Plasticity = plasticity;
+        if (plasticity is not null) PlasticRates = new double[n*n];
         East = new double[n*n]; South = new double[n*n]; Divergence = new double[n*n];
         Rates = new double[n*n]; CenterX = new double[n*n]; CenterZ = new double[n*n]; Shear = new double[n*n];
         double ratio = (double)n / m;
@@ -73,6 +88,7 @@ public sealed class WeakeningFrame
             int i=z*n+x;
             East[i]=Sample(solved.East,m,(x+1)/ratio-1,(z+.5)/ratio-.5);
             South[i]=Sample(solved.South,m,(x+.5)/ratio-.5,(z+1)/ratio-1);
+            if (plasticity is not null) PlasticRates![i]=Sample(plasticity.PlasticRates,m,(x+.5)/ratio-.5,(z+.5)/ratio-.5);
         }
         var gamma = new double[n*n];
         for (int z=0; z<n; z++) for (int x=0; x<n; x++)
@@ -157,10 +173,18 @@ public static class StrainWeakeningRheology
             strain[i]=mc[i]>0?q[i]/mc[i]:0;
             if (mc[i]==0&&q[i]!=0) throw new ArithmeticException("Nonlocal memory has no carrier.");
             mult[i]=options.Multiplier(strain[i]);
-            mu[i]=Viscosity(c[i]/(ratio*ratio),o[i]/(ratio*ratio),o[i]>0?age[i]/o[i]:0,mult[i]);
+            mu[i]=Viscosity(c[i]/(ratio*ratio),o[i]/(ratio*ratio),o[i]>0?age[i]/o[i]:0,options.Plasticity is null ? mult[i] : 1);
         }
         var east=new double[count];var south=new double[count];
         for(int z=0;z<m;z++)for(int x=0;x<m;x++){int i=z*m+x;east[i]=.5*(vx[i]+vx[z*m+(x+1)%m]);south[i]=.5*(vz[i]+vz[((z+1)%m)*m+x]);}
+        if (options.Plasticity is { } plastic)
+        {
+            // Plastic memory weakens yield strength, NOT the ductile viscosity.
+            // The matched control uses this SAME cell-quadrature operator.
+            var strength=mult.Select(v=>v*plastic.YieldStress).ToArray();
+            var response=ViscoplasticSheet.Solve(east,south,mu,strength,m,dx*ratio,dz*ratio,coupling,plastic,warmStart);
+            return new(response.Native,m,mu,mult,strain,n,dx,dz,response);
+        }
         var solved=ThinSheetDeformation.Solve(east,south,mu,m,dx*ratio,dz*ratio,coupling,warmStart:warmStart);
         return new(solved,m,mu,mult,strain,n,dx,dz);
     }
@@ -213,7 +237,7 @@ internal sealed class WeakeningDriver
     internal WeakeningFrame? Frame { get; private set; }
     internal double NextSolveTime { get; private set; }
     private readonly List<WeakeningSolveReceipt> receipts=new();
-    internal string Policy => StrainWeakeningRheology.AlgorithmId+"/"+ThinSheetDeformation.AlgorithmId+"/"+JsonSerializer.Serialize(Options);
+    internal string Policy => (Options.Plasticity is null ? StrainWeakeningRheology.AlgorithmId+"/"+ThinSheetDeformation.AlgorithmId : ViscoplasticSheet.AlgorithmId+"/continental-plastic-memory-v1")+"/"+JsonSerializer.Serialize(Options);
     internal WeakeningDriver(StrainWeakeningOptions options) { Options=options; }
     internal void Initialize(int n,double[] c) { Memory=new(n,c); }
     internal void Prepare(double time,MaterialPlateCohorts state,IReadOnlyList<TectonicPlate> plates,double dx,double dz,double length)
@@ -223,13 +247,14 @@ internal sealed class WeakeningDriver
         NextSolveTime=time+Options.UpdateInterval;
         var f=Frame;var s=f.Native;
         receipts.Add(new(time,f.NativeSide,s.Iterations,s.RelativeResidual,s.Work,s.Dissipation,s.MeanVelocityError,
-            f.Multipliers.Min(),f.EffectiveStrain.Max()));
+            f.Multipliers.Min(),f.EffectiveStrain.Max()) {
+            PlasticIterations=f.Plasticity?.NewtonIterations??0, MaximumPlasticRate=f.Plasticity?.PlasticRates.Max()??0 });
     }
     internal void Advance(double dt,double dx,double dz,double mobility,double[] advected,double[] final)
     {
         var f=Frame!;
-        var next=Memory.Accumulate(f.Rates,dt).Advect(f.East,f.South,dx,dz,dt);
+        var next=Memory.Accumulate(f.PlasticRates??f.Rates,dt).Advect(f.East,f.South,dx,dz,dt);
         next.RequireCarrier(advected);next=next.Relax(advected,dx,dz,dt,mobility);next.RequireCarrier(final);Memory=next;
     }
-    internal StrainWeakeningResult Result(MaterialBoundHistory history)=>new(history,Memory,receipts.AsReadOnly(),Options,Policy);
+    internal StrainWeakeningResult Result(MaterialBoundHistory history)=>new(history,Memory,receipts.AsReadOnly(),Options,Policy) { FinalPlasticity=Frame?.Plasticity };
 }
