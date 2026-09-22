@@ -5,6 +5,20 @@ from pathlib import Path
 
 FIELDS={'continental-fraction','ocean-fraction','continental-thickness','oceanic-thickness','age-moment'}
 FIXTURES=('axial','oblique','periodic')
+RETAINED={
+    'MaterialStrain':(22,'PASS_KINEMATICS_ONLY'),
+    'RiftNecking':(18,'PASS_CONTROLLED_MODEL_ONLY'),
+    'RiftSpreadingIntegration':(14,'PASS_RIFT_CHRONOLOGY_INTEGRATION'),
+    'RiftRegression':(28,'PASS_LEGACY_SUBSET_AND_DIAGNOSTIC')}
+
+def validate_retained(name,report):
+    count,status=RETAINED[name]
+    checks=report.get('checks')
+    if report.get('status')!=status or not isinstance(checks,list) or len(checks)!=count or report.get('failures'):
+        raise ValueError('Retained tests incomplete: '+name)
+    if any(isinstance(c,dict) and (c.get('status')!='PASS' or c.get('error') is not None) for c in checks):
+        raise ValueError('A retained assertion failed: '+name)
+
 
 def field(root,m,name):
     f=m['fields'][name];b=(root/f['path']).read_bytes()
@@ -66,16 +80,16 @@ def compare_tree(a,b,path='root'):
 
 def compare(root,out):
     if out.exists():raise FileExistsError('Refuse comparison overwrite')
-    dirs=[];retained={'MaterialStrain':22,'RiftNecking':18,'RiftSpreadingIntegration':14,'RiftRegression':28}
+    dirs=[]
     for os in ('ubuntu-latest','windows-latest'):
         matches=list(root.glob('rift-raster-'+os+'-*'))
         if len(matches)!=1:raise ValueError('Missing/ambiguous platform')
         d=matches[0];complete=json.loads((d/'worlds/COMPLETE.json').read_text())
         if complete['report']['passed']!=33 or complete['report']['failed']!=0:raise ValueError('Incomplete tests')
         if json.loads((d/'refusal.json').read_text())['preserved'] is not True:raise ValueError('Unverified reuse refusal')
-        for name,count in retained.items():
+        for name in RETAINED:
             report=json.loads((d/(name+'.json')).read_text(encoding='utf-8-sig'))
-            if report['status']!='PASS' or len(report['checks'])!=count:raise ValueError('Retained tests incomplete: '+name)
+            validate_retained(name,report)
         dirs.append(d/'worlds')
     records=[]
     for fixture in FIXTURES:
