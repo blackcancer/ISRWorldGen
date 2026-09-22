@@ -32,10 +32,11 @@ public sealed class MaterialBoundHistory
     public string FinalMaterialChecksum { get; }
     public string Checksum { get; }
     public string InitialAssemblageChecksum { get; }
+    public string TransportPolicy { get; }
 
     private MaterialBoundHistory(int seed, TectonicScalePlan scale, TectonicEvolutionSettings settings,
         MaterialBoundSnapshot initial, MaterialBoundSnapshot final, TectonicPlate[] plates,
-        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum)
+        List<TectonicLedger> ledger, double[] firstOrigin, double[] lastOrigin, double[] ownerFraction, long unresolved, string initialMaterialChecksum, string finalMaterialChecksum, string? assemblageChecksum, bool limitedPackets, bool matchedStep)
     {
         Seed = seed; ReferenceWidth = scale.ReferenceWidth; ReferenceLength = scale.ReferenceLength; Settings = settings;
         Initial = initial; Final = final; Plates = Array.AsReadOnly(plates); Ledger = ledger.AsReadOnly();
@@ -46,6 +47,8 @@ public sealed class MaterialBoundHistory
         string canonical = JsonSerializer.Serialize(new { AlgorithmId, seed, ReferenceWidth, ReferenceLength, settings,
             initial = initial.Checksum, final = final.Checksum, plates, ledger, firstOrigin, lastOrigin, ownerFraction, unresolved, initialMaterialChecksum, finalMaterialChecksum });
         if (assemblageChecksum is not null) canonical += "|initial-assemblage=" + assemblageChecksum;
+        TransportPolicy = limitedPackets ? CrustPacketTransport.AlgorithmId : matchedStep ? "donor-carrier-v3-matched-step-control" : "legacy-donor-carrier-v3";
+        if (limitedPackets || matchedStep) canonical += "|transport=" + TransportPolicy;
         Checksum = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
@@ -62,8 +65,28 @@ public sealed class MaterialBoundHistory
         return GenerateCore(seed, scale, settings, assemblage);
     }
 
+    /// <summary>Numerical-transport comparison only; the same initial material/physics, no new force model.</summary>
+    public static MaterialBoundHistory GenerateWithLimitedPackets(int seed, TectonicScalePlan scale,
+        TectonicEvolutionSettings settings, ContinentalAssemblage assemblage)
+    {
+        ArgumentNullException.ThrowIfNull(assemblage);
+        ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
+        assemblage.RequireCompatible(seed, scale, settings.Side);
+        return GenerateCore(seed, scale, settings, assemblage, true);
+    }
+
+    /// <summary>Donor control with exactly the candidate time-step bound; no carrier reconstruction.</summary>
+    public static MaterialBoundHistory GenerateWithDonorControl(int seed, TectonicScalePlan scale,
+        TectonicEvolutionSettings settings, ContinentalAssemblage assemblage)
+    {
+        ArgumentNullException.ThrowIfNull(assemblage);
+        ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
+        assemblage.RequireCompatible(seed, scale, settings.Side);
+        return GenerateCore(seed, scale, settings, assemblage, false, true);
+    }
+
     private static MaterialBoundHistory GenerateCore(int seed, TectonicScalePlan scale,
-        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage)
+        TectonicEvolutionSettings settings, ContinentalAssemblage? assemblage, bool limitedPackets = false, bool matchedStep = false)
     {
         ArgumentNullException.ThrowIfNull(scale); ArgumentNullException.ThrowIfNull(settings);
         if (settings.Side > 512 || settings.PlateCount > 16 || settings.DeformationWidth > .25 * Math.Min(scale.ReferenceWidth, scale.ReferenceLength))
@@ -92,7 +115,7 @@ public sealed class MaterialBoundHistory
         double time = 0, created = 0, recycled = 0; long unresolved = 0;
         var ledger = new List<TectonicLedger> { new(0, initialC * area, initialO * area, 0, 0, CrustTransport.Sum(fields[2]) * area, c.Max(), 0, 0) };
         double speed = plates.Max(p => Math.Max(Math.Abs(p.Vx), Math.Abs(p.Vz)));
-        double maxDt = Math.Min(1, speed > 0 ? .35 / (speed / dx + speed / dz) : 1);
+        double maxDt = Math.Min(1, speed > 0 ? (limitedPackets || matchedStep ? .20 : .35) / (speed / dx + speed / dz) : 1);
         if (settings.LowerCrustMobility > 0)
             maxDt = Math.Min(maxDt, .40 / (settings.LowerCrustMobility * (2 / (dx * dx) + 2 / (dz * dz))));
         if (Math.Ceiling(settings.Duration / maxDt) > 4096) throw new ArgumentException("Material history exceeds 4096-step budget.");
@@ -113,7 +136,8 @@ public sealed class MaterialBoundHistory
                 shear[i] += Math.Abs((motion.X[s] - motion.X[north]) / (2 * dz) + (motion.Z[e] - motion.Z[w]) / (2 * dx)) * dt / 2;
             }
             double expectedAge = CrustTransport.Sum(fields[2]) + dt * CrustTransport.Sum(fields[1]);
-            MaterialPlateCohorts moved = state.Advect(faces.East, faces.South, dx, dz, dt).Age(dt);
+            MaterialPlateCohorts moved = (limitedPackets ? state.AdvectLimitedPackets(faces.East, faces.South, dx, dz, dt)
+                : state.Advect(faces.East, faces.South, dx, dz, dt)).Age(dt);
             double[][] advected = moved.Aggregate();
             double[] born = new double[count], removed = new double[count], removedMoment = new double[count];
             for (int i = 0; i < count; i++)
@@ -142,7 +166,7 @@ public sealed class MaterialBoundHistory
         }
         MaterialMotion finalMotion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
         var final = new MaterialBoundSnapshot(n, time, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, finalMotion.Owners.ToArray());
-        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum);
+        return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum, limitedPackets, matchedStep);
     }
 
     private static void BuildSinks(MaterialPlateCohorts state, MaterialMotion motion, TectonicPlate[] plates,

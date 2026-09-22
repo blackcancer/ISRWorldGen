@@ -91,6 +91,19 @@ public sealed class MaterialPlateCohorts
         return new MaterialPlateCohorts(Side, next);
     }
 
+    /// <summary>Explicit alternative carrier reconstruction; no default change.</summary>
+    public MaterialPlateCohorts AdvectLimitedPackets(double[] east, double[] south, double dx, double dz, double dt)
+    {
+        var next = new double[fields.Length][];
+        for (int p = 0; p < PlateCount; p++)
+        {
+            next[4 * p] = CrustPacketTransport.AdvectScalar(fields[4 * p], east, south, Side, dx, dz, dt);
+            var moved = CrustPacketTransport.Advect(fields[4 * p + 1], fields[4 * p + 2], fields[4 * p + 3], east, south, Side, dx, dz, dt);
+            next[4 * p + 1] = moved.Carrier; next[4 * p + 2] = moved.Moment; next[4 * p + 3] = moved.Inherited;
+        }
+        return new MaterialPlateCohorts(Side, next);
+    }
+
     public MaterialPlateCohorts Age(double dt)
     {
         if (!double.IsFinite(dt) || dt < 0) throw new ArgumentOutOfRangeException(nameof(dt));
