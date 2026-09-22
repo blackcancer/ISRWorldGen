@@ -1,0 +1,115 @@
+name: Reconstructed material packets and whole-world heights
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, codex/carrier-reconstruction-20260922]
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/**'
+      - 'src/WorldGen.Core/Foundation/**'
+      - 'testsrc/WorldGen.PacketTransport/**'
+      - 'testsrc/WorldGen.MaterialBoundEvolution/**'
+      - 'tools/packet_transport_evidence.py'
+      - 'tools/verify_continental_assembly.py'
+      - 'tools/export_tectonic_history.py'
+      - 'tools/verify_material_bound_platforms.py'
+      - 'tools/verify_tectonic_platforms.py'
+      - 'tools/export_spatial_png.py'
+      - '.github/workflows/carrier-reconstruction.yml'
+      - 'global.json'
+      - 'Directory.Build.props'
+permissions:
+  contents: read
+concurrency:
+  group: carrier-reconstruction-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Exact counterexamples and analytical transport checks before whole worlds
+        run: dotnet run --project testsrc/WorldGen.PacketTransport/WorldGen.PacketTransport.csproj -c Release -- --checks
+  world:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        seed: ['-437287116', '73', '20260906']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile real Core and evolve one complete million-unit atlas
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.PacketTransport/WorldGen.PacketTransport.csproj -c Release -- .local/assemblage 512 '${{ matrix.seed }}'
+          if ($LASTEXITCODE -ne 0) { throw 'C# checks or whole-world evolution failed.' }
+          python tools/packet_transport_evidence.py --root .local/assemblage
+          if ($LASTEXITCODE -ne 0) { throw 'Actual height encoding failed.' }
+      - name: Capture exact source even after rejection
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .local/assemblage/source -Force | Out-Null
+          git archive --format=zip --output=.local/assemblage/source/source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source capture failed.' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packets-${{ matrix.os }}-${{ matrix.seed }}-${{ github.sha }}
+          path: .local/assemblage/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  platforms:
+    needs: world
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packets-ubuntu-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/linux
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packets-windows-latest-*-${{ github.sha }}
+          merge-multiple: true
+          path: .local/windows
+      - name: Compare all true height pixels, material fields and per-origin inventories
+        run: python tools/packet_transport_evidence.py --compare .local/linux .local/windows .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packets-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          if-no-files-found: warn
+          retention-days: 30
