@@ -1,0 +1,75 @@
+name: Full atlas ocean prehistory continuation
+on:
+  push:
+    branches: ['codex/ocean-chronology-*']
+    paths: ['testsrc/WorldGen.OceanPrehistoryCampaign/**', '.github/workflows/ocean-prehistory-campaign.yml', 'tools/verify_prehistory_campaign.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  worlds:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        seed: [-437287116, 20260906, 73]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile unchanged qualified Core and evolve the full atlas to 72 model Myr
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .local | Out-Null
+          dotnet run --project testsrc/WorldGen.OceanPrehistoryCampaign/WorldGen.OceanPrehistoryCampaign.csproj -c Release -- .local/world ${{ matrix.seed }} 2>&1 | Tee-Object .local/world.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Existing output is rejected without modifying earlier evidence
+        shell: pwsh
+        run: |
+          $before = (Get-ChildItem .local/world -File -Recurse | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
+          dotnet run --no-build --project testsrc/WorldGen.OceanPrehistoryCampaign/WorldGen.OceanPrehistoryCampaign.csproj -c Release -- .local/world ${{ matrix.seed }} 2>&1 | Out-File .local/reuse-rejected.log
+          $code = $LASTEXITCODE
+          $after = (Get-ChildItem .local/world -File -Recurse | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
+          if ($code -eq 0 -or $before -ne $after) { throw 'Reused output was not rejected intact' }
+          '{"status":"PASS","scope":"existing-directory refusal and byte preservation"}' | Set-Content .local/reuse-check.json
+      - name: Preserve exact source and runtime
+        if: always()
+        shell: pwsh
+        run: |
+          git rev-parse HEAD | Set-Content .local/commit.txt
+          dotnet --info | Set-Content .local/runtime.txt
+          git archive --format=zip --output=.local/source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prehistory-${{ matrix.os }}-${{ matrix.seed }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+  compare:
+    needs: worlds
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install numpy==2.3.5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: prehistory-*-${{ github.sha }}
+          path: .local/downloads
+      - run: python tools/verify_prehistory_campaign.py .local/downloads .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prehistory-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          retention-days: 30
