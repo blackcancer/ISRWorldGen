@@ -1,0 +1,94 @@
+name: Indexed palaeo-spreading reconstruction
+on:
+  push:
+    branches: ['codex/ocean-evidence-20260922']
+    paths:
+      - 'src/WorldGen.Core/Geology/Evolution/SpreadingAtlas.cs'
+      - 'testsrc/WorldGen.SpreadingAtlas/**'
+      - 'tools/verify_spreading_atlas.py'
+      - '.github/workflows/spreading-atlas.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Original 62 checks and new atlas checks
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.OceanChronology/WorldGen.OceanChronology.csproj -c Release -- .local/chronology
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project testsrc/WorldGen.SpreadingAtlas/WorldGen.SpreadingAtlas.csproj -c Release -- .local/atlas-checks
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spreading-checks-${{ matrix.os }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+  world:
+    needs: qualify
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        seed: [-437287116, 20260906, 73]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Controlled full atlas, no automatic geology claim
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.SpreadingAtlas/WorldGen.SpreadingAtlas.csproj -c Release -- .local/experiment ${{ matrix.seed }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve exact source
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .local | Out-Null
+          git archive --format=zip --output=.local/source.zip HEAD
+          git rev-parse HEAD | Set-Content .local/commit.txt
+          dotnet --info | Set-Content .local/runtime.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spreading-${{ matrix.os }}-${{ matrix.seed }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+  compare:
+    needs: world
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: spreading-*-latest-*-${{ github.sha }}
+          path: .local/results
+      - run: python tools/verify_spreading_atlas.py .local/results .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spreading-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          retention-days: 30
