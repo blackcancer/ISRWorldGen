@@ -1,0 +1,85 @@
+name: Conservative rupture projection and chronology
+on:
+  push:
+    branches: ['codex/rift-area-*']
+    paths: ['src/WorldGen.Core/Geology/Evolution/RiftMaterialRaster.cs', 'testsrc/WorldGen.RiftRaster/**', 'tools/verify_rift_raster.py', '.github/workflows/rift-raster.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-dotnet@v4
+        with: {global-json-file: global.json}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Compile real Core and run retained suites
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory .local | Out-Null
+          foreach ($name in @('MaterialStrain','RiftNecking','RiftSpreadingIntegration','RiftRegression','RiftRaster')) {
+            dotnet build "testsrc/WorldGen.$name/WorldGen.$name.csproj" -c Release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($name -ne 'RiftRaster') {
+              dotnet run --no-build --project "testsrc/WorldGen.$name/WorldGen.$name.csproj" -c Release 1> ".local/$name.json" 2> ".local/$name.log"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+      - name: Run area tests and three complete controlled projections
+        shell: pwsh
+        run: |
+          dotnet run --no-build --project testsrc/WorldGen.RiftRaster/WorldGen.RiftRaster.csproj -c Release -- .local/worlds 1> .local/raster.json 2> .local/raster.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: python tools/verify_rift_raster.py export .local/worlds
+      - name: Verify refusal to overwrite existing evidence
+        shell: python
+        run: |
+          import pathlib,hashlib,subprocess,json
+          root=pathlib.Path('.local/worlds')
+          def inventory():return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob('*') if p.is_file()}
+          before=inventory()
+          p=subprocess.run(['dotnet','run','--no-build','--project','testsrc/WorldGen.RiftRaster/WorldGen.RiftRaster.csproj','-c','Release','--',str(root)],capture_output=True,text=True,timeout=120)
+          pathlib.Path('.local/reuse.log').write_text(p.stdout+p.stderr,encoding='utf-8')
+          assert p.returncode==2 and 'REFUSED_EXISTING_EVIDENCE' in p.stderr and inventory()==before
+          pathlib.Path('.local/refusal.json').write_text(json.dumps({'preserved':True,'exitCode':p.returncode}))
+      - name: Preserve source and runtime even on failure
+        if: always()
+        shell: pwsh
+        run: |
+          git archive --format=zip --output=.local/source.zip HEAD
+          dotnet --info | Set-Content .local/runtime.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rift-raster-${{ matrix.os }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+  compare:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rift-raster-*-${{ github.sha }}
+          path: .local/downloads
+      - run: python tools/verify_rift_raster.py compare .local/downloads .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rift-area-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          retention-days: 30
