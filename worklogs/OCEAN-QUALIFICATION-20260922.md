@@ -1,0 +1,11 @@
+# Qualification du candidat de prehistoire continue
+
+Base : 1c95640a86ba2441545c1507b46ff42292a13817. Le code provient du candidat cumulatif ISRWorldGen_Prehistoire_Continue_1c95640, conserve jusque-la localement et NON compile. Les signatures de TectonicPlate et TectonicLedger ont ete relues dans cette base. Aucun appel a l'API Vintage Story ni dependance nouvelle.
+
+Objectif de cette passe : compiler et executer les 62 cas C# existants avant d'ajouter une nouvelle hypothese geologique. Le moteur par defaut, les operateurs numeriques, la formule verticale, global.json, les sauvegardes et registry/state.json sont preserves. La PR de rheologie n'est pas ecrasee. Les dates de naissance fournies ou reconstruites restent des entrees declarees, non une prehistoire terrestre automatique.
+
+Publication : objets Git en attente, puis un commit atomique sur une nouvelle branche codex/ocean-chronology-20260922, base immuable connue. Aucun mouvement de main ni force-push. Avant creation de la branche, verifier les hashes des 11 fichiers source/test/comparateur par rapport au payload. Seul le workflow ajoute une capture de stdout/stderr. L'absence de branche apres interruption laisse des objets non references, pas une version partielle du projet. Une branche existante n'est pas ecrasee. Si un commit doit etre corrige, un nouveau commit conserve l'echec et son journal.
+
+CI : runners jetables Windows/Linux, checkout du SHA exact, SDK du global.json. Sortie neuve .local/ocean-checks ; refus d'un dossier deja present. Echec de compilation, d'un test ou d'une comparaison bloque le succes. Les artefacts sont conserves meme apres echec ; COMPLETE.json ne qualifie que les controles numeriques. Pas de relance sur des preuves existantes. Les champs analytiques sont etiquetes CONTROLLED_BASIN et ne sont pas des cartes de nouveau monde.
+
+Etat initial de cette publication : C# NOT_RUN, comparaison interplateforme NOT_RUN. Les 66 tests Python anterieurs ne sont pas comptes comme controles C#. Aucun nouveau modele geographique, verdict d'acceptation ni lancement d'erosion. Revue d'un second agent, protocole complet d'interruption en jeu et qualification native/MCP : NOT_RUN. Lire le compte rendu final pour les resultats reellement obtenus.
