@@ -8,6 +8,7 @@ on:
       - 'src/WorldGen.Core/Geology/Evolution/OceanBirthMap.cs'
       - 'testsrc/WorldGen.RiftNecking/**'
       - 'testsrc/WorldGen.RiftSpreadingIntegration/**'
+      - 'testsrc/WorldGen.RiftRegression/**'
       - 'tools/verify_rift_campaign.py'
       - '.github/workflows/rift-necking.yml'
       - 'global.json'
@@ -33,14 +34,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Build real Core and both independent test executables
+      - name: Build real Core and all three test executables
         shell: pwsh
         run: |
           dotnet build testsrc/WorldGen.RiftNecking/WorldGen.RiftNecking.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Rift compilation failed' }
           dotnet build testsrc/WorldGen.RiftSpreadingIntegration/WorldGen.RiftSpreadingIntegration.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Chronology integration compilation failed' }
-      - name: Run both suites and preserve the exact first failure
+          dotnet build testsrc/WorldGen.RiftRegression/WorldGen.RiftRegression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Legacy regression compilation failed' }
+      - name: Run all three suites and preserve the exact first failure
         shell: python
         run: |
           import json, os, subprocess
@@ -48,7 +51,7 @@ jobs:
           root=Path('.local/rift'); root.mkdir(parents=True,exist_ok=False)
           (root/'INCOMPLETE.json').write_text(json.dumps({'commit':os.environ['GITHUB_SHA']}))
           exits={}
-          for name,project in [('necking','WorldGen.RiftNecking'),('integration','WorldGen.RiftSpreadingIntegration')]:
+          for name,project in [('necking','WorldGen.RiftNecking'),('integration','WorldGen.RiftSpreadingIntegration'),('regression','WorldGen.RiftRegression')]:
               result=subprocess.run(['dotnet','run','--no-build','--project',f'testsrc/{project}/{project}.csproj','-c','Release'],capture_output=True,timeout=180)
               (root/(name+'.json')).write_bytes(result.stdout)
               (root/(name+'.log')).write_bytes(result.stderr)

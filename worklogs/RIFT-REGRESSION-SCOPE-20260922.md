@@ -1,0 +1,9 @@
+# Extension de la recette sans modification du modele
+
+Le correctif e7b40d870944f03305c4a9e9f58df8b9b756c200 a reussi les deux jobs C# et la comparaison Windows/Linux du run 35725727881. Les 18 controles du rift et les 14 familles d'integration passent ; 800 temoins de dates sont reconstruits, erreur maximale Linux 2.318145675417327e-13 Myr par rapport aux trajectoires directes. Le premier run 35724508934 reste FAILED et ses trois contre-exemples sont conserves.
+
+Cet increment ne modifie aucune classe Core. Il reprend 27 assertions pertinentes de WorldGen.OceanChronology/Program.cs et QualificationChecks.cs au commit 316ca3e477035d9ee179d6dde76d0c85a397375f : inversion, immutabilite, couverture, conflits, episodes eteints et changements de regime. Leurs corps et tolerances sont conserves ; seul le collecteur de resultats est adapte. Les tests thermiques, les evolutions de mondes et l'index spatial ne sont PAS importes car leurs dependances ne sont pas fusionnees dans main.
+
+Un 28e controle exporte 121 coupes de croûte et une grille des dates liee uniquement a la nouvelle matiere oceanique de la coupe extrudee. La grille fait 128² sur un cadre de 1 000 000² unites, sans pretention de monde genere. Les cellules sans porteur ont une etiquette -1 et doivent etre masquees comme ABSENCE, jamais colorees comme ocean d'age zero. L'affichage de ces coupes est une epaisseur materielle, jamais une altitude solide.
+
+La comparaison interplateforme s'etend aux tableaux exportes, avec les memes tolerances. Le nombre attendu est 18+14+28 controles par plateforme. Le workflow garde les trois executables, les sources et les journaux et refuse la reutilisation du dossier. Cette extension de recette doit encore etre executee a ce commit ; elle ne recalcule aucun monde ni ne valide de relief. Erosion, jeu/MCP et relecture de second agent NOT_RUN.

@@ -11,7 +11,7 @@ def compare(root, output):
         if not (d/'COMPLETE.json').is_file() or (d/'FAILED.json').exists() or (d/'INCOMPLETE.json').exists():
             raise ValueError('Incomplete or rejected campaign')
         source=json.loads((d/'source.json').read_text(encoding='utf-8-sig'))
-        if source['exits']!={'necking':0,'integration':0}:raise ValueError('Failed executable')
+        if source['exits']!={'necking':0,'integration':0,'regression':0}:raise ValueError('Failed executable')
         commits.append(source['commit'])
     if commits[0]!=commits[1]:raise ValueError('Different code revisions')
     def same(a,b,path):
@@ -31,10 +31,10 @@ def compare(root, output):
             if len(a)!=len(b):raise ValueError('Different array length '+path)
             for i,(x,y) in enumerate(zip(a,b)):same(x,y,path+'/'+str(i))
         elif a!=b:raise ValueError('Different identity/status '+path)
-    for filename,status,count in [('necking.json','PASS_CONTROLLED_MODEL_ONLY',18),('integration.json','PASS_RIFT_CHRONOLOGY_INTEGRATION',14)]:
+    for filename,status,count in [('necking.json','PASS_CONTROLLED_MODEL_ONLY',18),('integration.json','PASS_RIFT_CHRONOLOGY_INTEGRATION',14),('regression.json','PASS_LEGACY_SUBSET_AND_DIAGNOSTIC',28)]:
         data=[json.loads((d/filename).read_text(encoding='utf-8-sig')) for d in dirs]
         if any(d['status']!=status or len(d['checks'])!=count for d in data):raise ValueError('Missing required checks')
-        if filename=='integration.json' and any(d['failures']!=0 or any(c['status']!='PASS' for c in d['checks']) for d in data):raise ValueError('Rejected integration')
+        if filename!='necking.json' and any(d['failures']!=0 or any(c['status']!='PASS' for c in d['checks']) for d in data):raise ValueError('Rejected integration')
         same(*data,filename);records.append({'file':filename,'checksPerPlatform':count})
     report={'commit':commits[0],'status':'PASS_CONTROLLED_MODELS_ONLY','comparedNumericValues':numbers,
             'maximumAbsoluteDifference':maximum,'absoluteTolerance':1e-8,'suites':records,
