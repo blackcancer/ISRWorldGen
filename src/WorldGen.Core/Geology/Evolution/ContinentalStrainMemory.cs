@@ -3,31 +3,36 @@ using System.Collections.ObjectModel;
 namespace ISRWorldGen.Core.Geology.Evolution;
 
 /// <summary>
-/// A reduced, transported VISCOUS strain history, not elastic strain, plastic
-/// strain, damage, a crack label or a source of ocean. Q=C*kappa is carried by
+/// A transported scalar strain history with EXPLICIT semantics (default viscous,
+/// optional plastic excess). Not elastic strain, a crack label or a source of ocean. Q=C*kappa is carried by
 /// the same positive donor packets as continental volume. Lower-crust transfers
-/// carry Q too. Only explicitly computed viscous deformation produces Q.
+/// carry Q too. Only explicitly computed rates of the declared kind produce Q.
 /// Own parallel carrier is checked against the authoritative material solver;
 /// it never replaces that solver, rescales its mass, or repairs its heights.
 /// </summary>
+public enum ContinentalStrainKind { Viscous, PlasticExcess }
+
 public sealed class ContinentalStrainMemory
 {
     public const string AlgorithmId = "continental-carrier-viscous-strain-memory-v1";
     private readonly double[] carrier, moment;
     public int Side { get; }
+    public ContinentalStrainKind Kind { get; }
+    public string MemoryPolicy => Kind == ContinentalStrainKind.Viscous ? AlgorithmId : "continental-carrier-plastic-excess-memory-v1";
     public ReadOnlyCollection<double> Carrier { get; }
     public ReadOnlyCollection<double> Moment { get; }
     public double ProducedMoment { get; }
     public double InitialMoment { get; }
 
     public ContinentalStrainMemory(int side, IReadOnlyList<double> continental,
-        IReadOnlyList<double>? initialStrain = null)
+        IReadOnlyList<double>? initialStrain = null, ContinentalStrainKind kind = ContinentalStrainKind.Viscous)
     {
         ArgumentNullException.ThrowIfNull(continental);
         if (side < 2 || side > 512 || continental.Count != side * side ||
             (initialStrain is not null && initialStrain.Count != continental.Count))
             throw new ArgumentException("Invalid strain-memory geometry.");
-        Side = side; carrier = continental.ToArray(); moment = new double[carrier.Length];
+        if (!Enum.IsDefined(kind)) throw new ArgumentException("Unknown strain semantics.");
+        Kind = kind; Side = side; carrier = continental.ToArray(); moment = new double[carrier.Length];
         for (int i = 0; i < carrier.Length; i++)
         {
             double s = initialStrain?[i] ?? 0;
@@ -40,9 +45,9 @@ public sealed class ContinentalStrainMemory
         if (!double.IsFinite(InitialMoment)) throw new ArithmeticException("Initial strain inventory overflow.");
     }
 
-    private ContinentalStrainMemory(int side, double[] c, double[] q, double initial, double produced)
+    private ContinentalStrainMemory(int side, double[] c, double[] q, double initial, double produced, ContinentalStrainKind kind)
     {
-        Side = side; carrier = c; moment = q; InitialMoment = initial; ProducedMoment = produced;
+        Kind = kind; Side = side; carrier = c; moment = q; InitialMoment = initial; ProducedMoment = produced;
         Validate(); Carrier = Array.AsReadOnly(carrier); Moment = Array.AsReadOnly(moment);
         CrustTransport.RequireBalance(initial + produced, CrustTransport.Sum(q), "viscous memory inventory plus production");
     }
@@ -74,7 +79,7 @@ public sealed class ContinentalStrainMemory
             production[i] = carrier[i] * (rates[i] * dt);
             next[i] = moment[i] + production[i];
         }
-        return new(Side, (double[])carrier.Clone(), next, InitialMoment, ProducedMoment + CrustTransport.Sum(production));
+        return new(Side, (double[])carrier.Clone(), next, InitialMoment, ProducedMoment + CrustTransport.Sum(production), Kind);
     }
 
     /// <summary>Immutable transport. The reference call checks the established
@@ -101,7 +106,7 @@ public sealed class ContinentalStrainMemory
         }
         RequireSameCarrier(c, expected);
         CrustTransport.RequireBalance(CrustTransport.Sum(carrier), CrustTransport.Sum(c), "strain-memory carrier");
-        return new(n, c, q, InitialMoment, ProducedMoment);
+        return new(n, c, q, InitialMoment, ProducedMoment, Kind);
     }
 
     public ContinentalStrainMemory Relax(IReadOnlyList<double> authoritativeBefore,
