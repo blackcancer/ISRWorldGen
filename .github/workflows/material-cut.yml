@@ -80,5 +80,9 @@ jobs:
         if: always()
         with:
           name: material-cut-platforms-${{ github.sha }}
-          path: .local/*platforms.json
+          path: |
+            .local/legacy-platforms.json
+            .local/platforms.json
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 30
