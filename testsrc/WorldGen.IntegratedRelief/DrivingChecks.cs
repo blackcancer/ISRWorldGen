@@ -27,6 +27,24 @@ internal static class DrivingChecks
         var scale = new TectonicScalePlan(1000000,1000000);
         Check("whole-map scaling preserves the driving prior", () => { var a=PlateDrivingSchedule.SpatialPrior(73,scale,plates,96);var b=PlateDrivingSchedule.SpatialPrior(73,new(131072,131072),plates,96); Require(a.TurnsRadians.SequenceEqual(b.TurnsRadians)); });
         Check("zero maximum turn disables directional change", () => Require(PlateDrivingSchedule.SpatialPrior(73,scale,plates,96,0).At(96,plates).SequenceEqual(plates)));
+        Check("generated turn parameters lie on their declared fixed angular lattice", () => {
+            var p=PlateDrivingSchedule.SpatialPrior(-437287116,scale,plates,96);
+            foreach(double a in p.TurnsRadians) Near(a / Math.PI * 1099511627776d,Math.Round(a / Math.PI * 1099511627776d),.0002);
+        });
+        Check("the observed Windows Linux trigonometric roundoff freezes to one input", () => {
+            double Q(double a)=>Math.PI*(Math.Round(a/Math.PI*1099511627776d,MidpointRounding.ToEven)/1099511627776d);
+            Near(Q(-1.124533478838737),Q(-1.1245334788387369),0);
+        });
+        Check("generated input quantization is below two trillionths of a radian", () => {
+            double phase=((uint)73/4294967296d)*Math.Tau;
+            var p=PlateDrivingSchedule.SpatialPrior(73,scale,plates,96);
+            for(int i=0;i<plates.Length;i++) Near(p.TurnsRadians[i],1.5*Math.Sin(Math.Tau*(plates[i].X/1000000+.5*plates[i].Z/1000000)+phase),2e-12);
+        });
+        Check("authored turns are not silently quantized", () => Near(new PlateDrivingSchedule(96,[.123456789012345,.5]).TurnsRadians[0],.123456789012345,0));
+        Check("maximum admitted half turn stays inside the input domain", () => {
+            var p=PlateDrivingSchedule.SpatialPrior(0,scale,[new(0,250000,0,1,0),new(1,750000,0,0,1)],96,Math.PI);
+            Near(p.TurnsRadians[0],Math.PI,0); Near(p.TurnsRadians[1],-Math.PI,0);
+        });
         Check("unrequested schedule does not alter historical option JSON", () => Require(!JsonSerializer.Serialize(new StrainWeakeningOptions()).Contains("Driving")));
         Check("numeric PNG rejects NaN and out of range without clipping", () => { Throws(()=>NumericHeightPng.Encode([double.NaN],1)); Throws(()=>NumericHeightPng.Encode([-1d],1)); Throws(()=>NumericHeightPng.Encode([384d],1)); });
         Check("numeric PNG encodes both seabed and land", () => { var b=NumericHeightPng.Encode([0d,100d,168d,383d],2);Require(b[0]==137&&b[25]==0&&b[24]==16); });

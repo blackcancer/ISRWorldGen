@@ -11,7 +11,7 @@ namespace ISRWorldGen.Core.Geology.Evolution;
 /// </summary>
 public sealed class PlateDrivingSchedule
 {
-    public const string AlgorithmId = "continuous-basal-driving-turns-v1";
+    public const string AlgorithmId = "continuous-basal-driving-turns-v2-fixed-inputs";
     public double DurationMyr { get; }
     public ReadOnlyCollection<double> TurnsRadians { get; }
     public PlateDrivingSchedule(double durationMyr, IReadOnlyList<double> turnsRadians)
@@ -53,7 +53,16 @@ public sealed class PlateDrivingSchedule
         if (!double.IsFinite(maximumTurnRadians) || maximumTurnRadians < 0 || maximumTurnRadians > Math.PI)
             throw new ArgumentOutOfRangeException(nameof(maximumTurnRadians));
         double phase = ((uint)seed / 4294967296d) * Math.Tau;
-        return new(durationMyr, plates.Select(p => maximumTurnRadians * Math.Sin(
-            Math.Tau * (p.X / scale.ReferenceWidth + .5 * p.Z / scale.ReferenceLength) + phase)).ToArray());
+        // Freeze this generated input on a declared angular lattice BEFORE it
+        // drives the material history. Platform libm roundoff in Sin must not
+        // become distinct supposedly-identical input manifests. Authored turns
+        // in the constructor remain untouched. No output field is quantized.
+        const double halfTurnTicks = 1099511627776d; // 2^40 ticks per pi radians.
+        return new(durationMyr, plates.Select(p => {
+            double turn = maximumTurnRadians * Math.Sin(
+                Math.Tau * (p.X / scale.ReferenceWidth + .5 * p.Z / scale.ReferenceLength) + phase);
+            double ticks = Math.Round(turn / Math.PI * halfTurnTicks, MidpointRounding.ToEven);
+            return Math.PI * (ticks / halfTurnTicks);
+        }).ToArray());
     }
 }
