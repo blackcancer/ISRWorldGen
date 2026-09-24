@@ -1,0 +1,54 @@
+name: Pinned offline Core toolchain
+on:
+  push:
+    branches: ['codex/integrated-relief-20260924']
+    paths: ['.github/workflows/core-offline-toolchain.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  distribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Verify the official SDK archive pinned by global.json
+        shell: python
+        run: |
+          import hashlib, json, pathlib, urllib.request, urllib.parse
+          root = pathlib.Path('.toolchain-artifact')
+          root.mkdir(exist_ok=False)
+          version = json.loads(pathlib.Path('global.json').read_text())['sdk']['version']
+          channel = '.'.join(version.split('.')[:2])
+          metadata_url = f'https://builds.dotnet.microsoft.com/dotnet/release-metadata/{channel}/releases.json'
+          with urllib.request.urlopen(metadata_url, timeout=60) as r:
+              metadata_bytes = r.read()
+          metadata = json.loads(metadata_bytes)
+          sdks = [s for release in metadata['releases'] for s in release.get('sdks', [release.get('sdk', {})]) if s.get('version') == version]
+          files = [f for s in sdks for f in s['files'] if f['rid'] == 'linux-x64' and f['name'].endswith('.tar.gz')]
+          if not files:
+              raise RuntimeError('Pinned SDK is missing in official release metadata')
+          entry = files[0]
+          if any(f['hash'] != entry['hash'] or f['url'] != entry['url'] for f in files):
+              raise RuntimeError('Ambiguous official SDK identity')
+          u = urllib.parse.urlsplit(entry['url'])
+          if u.scheme != 'https' or u.hostname not in ('builds.dotnet.microsoft.com', 'download.visualstudio.microsoft.com'):
+              raise RuntimeError('Unexpected distribution origin')
+          archive = root / f'dotnet-sdk-{version}-linux-x64.tar.gz'
+          digest = hashlib.sha512()
+          with urllib.request.urlopen(entry['url'], timeout=120) as r, archive.open('xb') as f:
+              while block := r.read(1048576):
+                  f.write(block)
+                  digest.update(block)
+          if digest.hexdigest().lower() != entry['hash'].lower():
+              raise RuntimeError('Official archive checksum mismatch; do not install')
+          (root / 'official-releases.json').write_bytes(metadata_bytes)
+          (root / 'verified.json').write_text(json.dumps({'version': version, 'source': entry['url'], 'metadata': metadata_url, 'sha512': digest.hexdigest(), 'bytes': archive.stat().st_size, 'status': 'VERIFIED_OFFICIAL_DISTRIBUTION_NOT_A_MOD_TEST'}, indent=2))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinned-core-toolchain-${{ github.sha }}
+          path: .toolchain-artifact/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
