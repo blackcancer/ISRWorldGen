@@ -17,8 +17,10 @@ public sealed record StrainWeakeningOptions
     public double SupportLengthReference { get; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public SheetYieldOptions? Yield { get; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public LithostaticReliefOptions? Gravity { get; }
     public StrainWeakeningOptions(int mechanicalSide = 128, double updateInterval = 1,
-        double strainScale = .5, double residualRatio = .35, double supportLengthReference = 10000, SheetYieldOptions? yieldOptions = null)
+        double strainScale = .5, double residualRatio = .35, double supportLengthReference = 10000, SheetYieldOptions? yieldOptions = null, LithostaticReliefOptions? gravity = null)
     {
         if (mechanicalSide < 8 || mechanicalSide > 128 || (mechanicalSide & (mechanicalSide - 1)) != 0 ||
             !double.IsFinite(updateInterval) || updateInterval < .125 || updateInterval > 1 ||
@@ -27,7 +29,7 @@ public sealed record StrainWeakeningOptions
             !double.IsFinite(supportLengthReference) || supportLengthReference < 0 || supportLengthReference > 80000)
             throw new ArgumentException("Invalid bounded strain weakening parameters.");
         MechanicalSide = mechanicalSide; UpdateInterval = updateInterval; StrainScale = strainScale;
-        ResidualRatio = residualRatio; SupportLengthReference = supportLengthReference; Yield = yieldOptions;
+        ResidualRatio = residualRatio; SupportLengthReference = supportLengthReference; Yield = yieldOptions; Gravity = gravity;
     }
     public double Multiplier(double strain)
     {
@@ -186,6 +188,24 @@ public static class StrainWeakeningRheology
         }
         var east=new double[count];var south=new double[count];
         for(int z=0;z<m;z++)for(int x=0;x<m;x++){int i=z*m+x;east[i]=.5*(vx[i]+vx[z*m+(x+1)%m]);south[i]=.5*(vz[i]+vz[((z+1)%m)*m+x]);}
+        if (options.Gravity is { Mobility: > 0 } gravity)
+        {
+            double[] potential = new double[count];
+            // Average column potential from resolved material cells. Computing
+            // potential only from averaged thickness would lose sub-grid load
+            // variance (Jensen bias) before the mechanical solve.
+            for (int z=0;z<n;z++) for (int x=0;x<n;x++)
+            {
+                int i=z*n+x,k=(z/ratio)*m+x/ratio;
+                double ci=0,oi=0,ai=0;
+                for (int p=0;p<plates.Count;p++)
+                { ci+=state.Value(p,0,i);oi+=state.Value(p,1,i);ai+=state.Value(p,2,i); }
+                potential[k]+=LithostaticRelief.Column(ci,oi,oi>0?ai/oi:0,
+                    gravity.FinitePlateCooling).PotentialKm2/(ratio*ratio);
+            }
+            var body=LithostaticRelief.Forcing(potential,m,dx*ratio,dz*ratio,gravity.Mobility);
+            for(int i=0;i<count;i++) { east[i]+=body.East[i];south[i]+=body.South[i]; }
+        }
         ViscoplasticSheetSolution? plastic = null;
         if (options.Yield is { } y)
         {
