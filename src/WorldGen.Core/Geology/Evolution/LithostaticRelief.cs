@@ -129,11 +129,11 @@ public sealed record LithostaticReliefWorld(StrainWeakeningResult MechanicalHist
     /// The reference generator and saved worlds are not silently replaced.</summary>
     public static LithostaticReliefWorld Generate(int seed, TectonicScalePlan scale,
         TectonicEvolutionSettings settings, ContinentalAssemblage assemblage,
-        LithostaticReliefOptions options, int mechanicalSide = 128)
+        LithostaticReliefOptions options, int mechanicalSide = 128, PlateDrivingSchedule? driving = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         var mechanics = new StrainWeakeningOptions(mechanicalSide: mechanicalSide,
-            yieldOptions: new SheetYieldOptions(), gravity: options);
+            yieldOptions: new SheetYieldOptions(), gravity: options, driving: driving);
         var result = ViscoplasticWorld.Generate(seed, scale, settings, assemblage, mechanics);
         var first = Evaluate(result.History.Initial);
         var last = Evaluate(result.History.Final);

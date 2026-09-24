@@ -111,6 +111,9 @@ public sealed class MaterialBoundHistory
             deformationWidth: settings.DeformationWidth, lowerCrustMobility: settings.LowerCrustMobility,
             initialOceanAge: settings.InitialOceanAge, motionSign: settings.MotionSign));
         TectonicPlate[] plates = initialHistory.Plates.ToArray();
+        PlateDrivingSchedule? driving = weakening?.Options.Driving;
+        if (driving is not null && (driving.DurationMyr < settings.Duration || driving.TurnsRadians.Count != plates.Length))
+            throw new ArgumentException("Driving history does not cover this generation.");
         double[] c = (assemblage?.ContinentalKm ?? initialHistory.Initial.ContinentalKm).ToArray();
         double[] o = (assemblage?.OceanicKm ?? initialHistory.Initial.OceanicKm).ToArray();
         int[] initialOwners = initialHistory.Initial.PlateIds.ToArray();
@@ -133,11 +136,12 @@ public sealed class MaterialBoundHistory
         while (time < settings.Duration)
         {
             double dt = Math.Min(maxDt, settings.Duration - time);
-            MaterialMotion motion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
+            TectonicPlate[] currentPlates = driving?.At(time, plates) ?? plates;
+            MaterialMotion motion = state.EvaluateMotion(currentPlates, dx, dz, settings.DeformationWidth);
             var faces = motion.Faces();
             if (weakening is not null)
             {
-                weakening.Prepare(time, state, plates, dx, dz, settings.DeformationWidth);
+                weakening.Prepare(time, state, currentPlates, dx, dz, settings.DeformationWidth);
                 var frame = weakening.Frame!;
                 faces = (frame.East, frame.South, frame.Divergence);
                 dt = Math.Min(dt, Math.Min(weakening.NextSolveTime - time, StrainWeakeningRheology.StableStep(frame, n, dx, dz)));
@@ -147,7 +151,7 @@ public sealed class MaterialBoundHistory
             strain?.Advance(time, dt, motion.X, motion.Z);
             int[] lower = Enumerable.Repeat(-1, count).ToArray();
             double[] priority = new double[count]; int collisions = 0, subductions = 0;
-            BuildSinks(state, motion, plates, lower, priority, dx, dz, settings.DeformationWidth, ref collisions, ref subductions, ref unresolved, weakening?.Frame);
+            BuildSinks(state, motion, currentPlates, lower, priority, dx, dz, settings.DeformationWidth, ref collisions, ref subductions, ref unresolved, weakening?.Frame);
             for (int i = 0; i < count; i++)
             {
                 compression[i] += Math.Max(-faces.Divergence[i], 0) * dt;
@@ -188,7 +192,7 @@ public sealed class MaterialBoundHistory
             ledger.Add(new(time, CrustTransport.Sum(fields[0]) * area, CrustTransport.Sum(fields[1]) * area,
                 created * area, recycled * area, CrustTransport.Sum(fields[2]) * area, fields[0].Max(), collisions, subductions));
         }
-        MaterialMotion finalMotion = state.EvaluateMotion(plates, dx, dz, settings.DeformationWidth);
+        MaterialMotion finalMotion = state.EvaluateMotion(driving?.At(time, plates) ?? plates, dx, dz, settings.DeformationWidth);
         var final = new MaterialBoundSnapshot(n, time, fields[0], fields[1], fields[2], fields[3], compression, extension, shear, finalMotion.Owners.ToArray());
         return new MaterialBoundHistory(seed, scale, settings, initial, final, plates, ledger, firstOrigin, state.ContinentalInventories(), finalMotion.DominantFraction.ToArray(), unresolved, firstMaterial, state.ComputeChecksum(), assemblage?.Checksum, weakening?.Policy);
     }

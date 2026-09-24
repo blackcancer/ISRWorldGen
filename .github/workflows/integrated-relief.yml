@@ -1,0 +1,103 @@
+name: Integrated whole-world relief with evolving tectonic loads
+on:
+  push:
+    branches: ['codex/integrated-relief-20260924']
+    paths: ['src/WorldGen.Core/Geology/Evolution/**', 'testsrc/WorldGen.IntegratedRelief/**', 'tools/verify_integrated_relief.py', '.github/workflows/integrated-relief.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix: {os: [ubuntu-latest, windows-latest]}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-dotnet@v4
+        with: {global-json-file: global.json}
+      - name: Compile Core and execute all retained numerical suites
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory .local | Out-Null
+          foreach ($name in @('IntegratedRelief','LithostaticRelief','Viscoplastic','StrainWeakening','MaterialStrain','RiftNecking','RiftSpreadingIntegration','RiftRegression')) {
+            dotnet build "testsrc/WorldGen.$name/WorldGen.$name.csproj" -c Release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            dotnet run --no-build --project "testsrc/WorldGen.$name/WorldGen.$name.csproj" -c Release 1> ".local/$name.json" 2> ".local/$name.log"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integrated-checks-${{ matrix.os }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+  worlds:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        seed: [-437287116, 20260906, 73]
+        mode: [stationary, evolving]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-dotnet@v4
+        with: {global-json-file: global.json}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Generate actual 512-square terrain and PNG16 entirely in C sharp
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory .local | Out-Null
+          dotnet run --project testsrc/WorldGen.IntegratedRelief/WorldGen.IntegratedRelief.csproj -c Release -- generate .local/world ${{ matrix.seed }} 512 96 ${{ matrix.mode }} 2>&1 | Tee-Object .local/run.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: python tools/verify_integrated_relief.py check .local/world
+      - name: Refuse existing evidence and retain its exact bytes
+        shell: pwsh
+        run: |
+          $before = (Get-ChildItem .local/world -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
+          dotnet run --no-build --project testsrc/WorldGen.IntegratedRelief/WorldGen.IntegratedRelief.csproj -c Release -- generate .local/world ${{ matrix.seed }} 512 96 ${{ matrix.mode }} 2>&1 | Out-File .local/reuse.log
+          $code = $LASTEXITCODE
+          $after = (Get-ChildItem .local/world -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join ','
+          if ($code -eq 0 -or $before -ne $after -or !(Select-String -Path .local/reuse.log -SimpleMatch 'Never overwrite prior evidence.')) { throw 'Invalid refusal or modified evidence.' }
+          "{`"preserved`":true,`"nativeExitCode`":$code}" | Set-Content .local/reuse.json
+          exit 0
+      - name: Preserve exact source and runtime including failures
+        if: always()
+        shell: pwsh
+        run: |
+          git archive --format=zip --output=.local/source.zip HEAD
+          dotnet --info | Set-Content .local/runtime.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integrated-world-${{ matrix.os }}-${{ matrix.mode }}-${{ matrix.seed }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+  compare:
+    needs: worlds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: integrated-world-*-${{ github.sha }}
+          path: .local/downloads
+      - run: python tools/verify_integrated_relief.py compare .local/downloads .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: integrated-platforms-${{ github.sha }}
+          path: .local/platforms.json
+          retention-days: 30

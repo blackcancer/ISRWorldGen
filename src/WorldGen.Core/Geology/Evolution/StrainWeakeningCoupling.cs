@@ -19,8 +19,10 @@ public sealed record StrainWeakeningOptions
     public SheetYieldOptions? Yield { get; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public LithostaticReliefOptions? Gravity { get; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public PlateDrivingSchedule? Driving { get; }
     public StrainWeakeningOptions(int mechanicalSide = 128, double updateInterval = 1,
-        double strainScale = .5, double residualRatio = .35, double supportLengthReference = 10000, SheetYieldOptions? yieldOptions = null, LithostaticReliefOptions? gravity = null)
+        double strainScale = .5, double residualRatio = .35, double supportLengthReference = 10000, SheetYieldOptions? yieldOptions = null, LithostaticReliefOptions? gravity = null, PlateDrivingSchedule? driving = null)
     {
         if (mechanicalSide < 8 || mechanicalSide > 128 || (mechanicalSide & (mechanicalSide - 1)) != 0 ||
             !double.IsFinite(updateInterval) || updateInterval < .125 || updateInterval > 1 ||
@@ -29,7 +31,7 @@ public sealed record StrainWeakeningOptions
             !double.IsFinite(supportLengthReference) || supportLengthReference < 0 || supportLengthReference > 80000)
             throw new ArgumentException("Invalid bounded strain weakening parameters.");
         MechanicalSide = mechanicalSide; UpdateInterval = updateInterval; StrainScale = strainScale;
-        ResidualRatio = residualRatio; SupportLengthReference = supportLengthReference; Yield = yieldOptions; Gravity = gravity;
+        ResidualRatio = residualRatio; SupportLengthReference = supportLengthReference; Yield = yieldOptions; Gravity = gravity; Driving = driving;
     }
     public double Multiplier(double strain)
     {
