@@ -1,0 +1,84 @@
+name: Dated material cuts and conservative curved openings
+on:
+  push:
+    branches: ['codex/material-cut-*']
+    paths: ['src/WorldGen.Core/Geology/Evolution/**', 'testsrc/WorldGen.MaterialCut/**', 'tools/*material_cut*', '.github/workflows/material-cut.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-dotnet@v4
+        with: {global-json-file: global.json}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Compile and execute the retained C sharp suites
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory .local | Out-Null
+          foreach ($name in @('MaterialStrain','RiftNecking','RiftSpreadingIntegration','RiftRegression')) {
+            dotnet build "testsrc/WorldGen.$name/WorldGen.$name.csproj" -c Release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            dotnet run --no-build --project "testsrc/WorldGen.$name/WorldGen.$name.csproj" -c Release 1> ".local/$name.json" 2> ".local/$name.log"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Execute legacy and new material projections
+        shell: pwsh
+        run: |
+          dotnet run --project testsrc/WorldGen.RiftRaster/WorldGen.RiftRaster.csproj -c Release -- .local/worlds 1> .local/raster.json 2> .local/raster.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet run --project testsrc/WorldGen.MaterialCut/WorldGen.MaterialCut.csproj -c Release -- .local/topology 1> .local/topology.json 2> .local/topology.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve legacy bytes, export fields and exercise refusal
+        shell: bash
+        run: |
+          python tools/verify_material_cut.py legacy .local/worlds
+          python tools/verify_rift_raster.py export .local/worlds
+          python tools/verify_material_cut.py export .local/topology
+          python tools/verify_material_cut.py reuse .local/worlds testsrc/WorldGen.RiftRaster/WorldGen.RiftRaster.csproj .local/refusal.json
+          python tools/verify_material_cut.py reuse .local/topology testsrc/WorldGen.MaterialCut/WorldGen.MaterialCut.csproj .local/topology-refusal.json
+      - name: Retain source and runtime including failures
+        if: always()
+        shell: pwsh
+        run: |
+          git archive --format=zip --output=.local/source.zip HEAD
+          dotnet --info | Set-Content .local/runtime.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rift-raster-${{ matrix.os }}-${{ github.sha }}
+          path: .local/
+          include-hidden-files: true
+          retention-days: 30
+  compare:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rift-raster-*-${{ github.sha }}
+          path: .local/downloads
+      - name: Compare unchanged legacy and new topology results
+        run: |
+          python tools/verify_rift_raster.py compare .local/downloads .local/legacy-platforms.json
+          python tools/verify_material_cut.py compare .local/downloads .local/platforms.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: material-cut-platforms-${{ github.sha }}
+          path: .local/*platforms.json
+          retention-days: 30

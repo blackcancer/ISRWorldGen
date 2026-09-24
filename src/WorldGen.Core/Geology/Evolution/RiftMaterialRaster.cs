@@ -17,6 +17,12 @@ public sealed record RiftRasterPatch(string Id, string HistoryChecksum, string M
     int OriginOrEventId, int Flank, double ThicknessKm, double AreaReference2,
     double MeanAgeMyr, ReadOnlyCollection<RiftSourceVertex> SourceVertices);
 
+/// <summary>A resolved triangular footprint. Geometry and chronology must come
+/// from an upstream material history, not a mask or inferred fracture threshold.</summary>
+public sealed record ResolvedMaterialTriangle(string Id, string HistoryChecksum, string Material,
+    int OriginOrEventId, int Flank, double ThicknessKm,
+    RiftSourceVertex A, RiftSourceVertex B, RiftSourceVertex C);
+
 /// <summary>One source contribution in one cell. Multiple disjoint sources remain
 /// separate, including opposite flanks or different ages in a cut cell.</summary>
 public sealed record RiftCellPacket(int Cell, int Patch, double AreaFraction,
@@ -91,12 +97,7 @@ public sealed class RiftMaterialRaster
         double km = ordered[0].History.ReferenceKmPerUnit;
         if (ordered.Any(p => p.History.ObservationTimeMyr != time || p.History.ReferenceKmPerUnit != km))
             throw new ArgumentException("All material histories need the same observation time and units.");
-        var patches = new List<RiftRasterPatch>();
-        var pieces = new Dictionary<int, List<Piece>>();
-        var packets = new List<RiftCellPacket>();
-        double[] c = new double[side * side], o = new double[c.Length], q = new double[c.Length];
-        double[] cf = new double[c.Length], of = new double[c.Length];
-        long candidateCells = 0;
+        var sources = new List<ProjectionSource>();
         foreach (var placement in ordered)
         {
             var rift = placement.History;
@@ -129,6 +130,67 @@ public sealed class RiftMaterialRaster
                 placement.OriginX + placement.NormalX * normal - placement.NormalZ * along,
                 placement.OriginZ + placement.NormalZ * normal + placement.NormalX * along, 0);
         }
+        return Rasterize(sources, scale, side, periodic, time, km);
+
+        void Add(RiftPlacement placement, string material, int source, int flank, double thickness,
+            double meanAge, double expectedArea, Vertex[] polygon)
+        {
+            string id = FormattableString.Invariant($"{placement.Identity}/{material}/{source}/{flank}");
+            sources.Add(new(id, placement.History.Checksum, material, source, flank,
+                thickness, meanAge, expectedArea, polygon));
+        }
+    }
+
+    /// <summary>Conservative bridge for resolved 2D fragments and affine-age
+    /// triangles. This does not choose where a crack forms or fill unknown space.</summary>
+    public static RiftMaterialRaster ProjectTriangles(IReadOnlyList<ResolvedMaterialTriangle> triangles,
+        TectonicScalePlan scale, int side, double observationTimeMyr, double referenceKmPerUnit,
+        bool periodic = true)
+    {
+        ArgumentNullException.ThrowIfNull(triangles); ArgumentNullException.ThrowIfNull(scale);
+        if (side is < 8 or > 512 || (side & (side - 1)) != 0 || triangles.Count is < 1 or > 8192
+            || !double.IsFinite(observationTimeMyr) || observationTimeMyr < 0
+            || !double.IsFinite(referenceKmPerUnit) || referenceKmPerUnit <= 0)
+            throw new ArgumentException("Invalid resolved triangle geometry, metric or time.");
+        var ordered = triangles.OrderBy(t => t?.Id, StringComparer.Ordinal).ToArray();
+        var sources = new List<ProjectionSource>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var t in ordered)
+        {
+            if (t is null || string.IsNullOrWhiteSpace(t.Id) || t.Id.Length > 512 || !ids.Add(t.Id)
+                || string.IsNullOrWhiteSpace(t.HistoryChecksum) || t.HistoryChecksum.Length > 512
+                || t.Material is not ("continental" or "new-ocean") || t.OriginOrEventId < 0
+                || t.Flank < -1 || t.Flank > 1 || !double.IsFinite(t.ThicknessKm) || t.ThicknessKm <= 0
+                || t.A is null || t.B is null || t.C is null)
+                throw new ArgumentException("Invalid resolved material triangle identity or content.");
+            var v = new[] { t.A, t.B, t.C }.Select(x => new Vertex(x.X, x.Z, x.AgeMyr)).ToArray();
+            if (v.Any(x => !double.IsFinite(x.X) || !double.IsFinite(x.Z) || !double.IsFinite(x.Age)
+                || x.Age < 0 || x.Age > observationTimeMyr || (t.Material == "continental" && x.Age != 0)
+                || Math.Abs(x.X / scale.ReferenceWidth) > 1024 || Math.Abs(x.Z / scale.ReferenceLength) > 1024))
+                throw new ArgumentException("Invalid resolved coordinates or dated age.");
+            double area = Math.Abs(Cross(v[0], v[1], v[2])) / 2;
+            if (!double.IsFinite(area) || area <= 0) throw new ArgumentException("Degenerate resolved triangle.");
+            sources.Add(new(t.Id, t.HistoryChecksum, t.Material, t.OriginOrEventId, t.Flank,
+                t.ThicknessKm, (v[0].Age + v[1].Age + v[2].Age) / 3, area, v));
+        }
+        return Rasterize(sources, scale, side, periodic, observationTimeMyr, referenceKmPerUnit);
+    }
+
+    private sealed record ProjectionSource(string Id, string HistoryChecksum, string Material,
+        int Origin, int Flank, double Thickness, double MeanAge, double Area, Vertex[] Vertices);
+
+    private static RiftMaterialRaster Rasterize(IReadOnlyList<ProjectionSource> sources, TectonicScalePlan scale,
+        int side, bool periodic, double time, double km)
+    {
+        double width = scale.ReferenceWidth, length = scale.ReferenceLength;
+        double dx = width / side, dz = length / side;
+        var patches = new List<RiftRasterPatch>();
+        var pieces = new Dictionary<int, List<Piece>>();
+        var packets = new List<RiftCellPacket>();
+        double[] c = new double[side * side], o = new double[c.Length], q = new double[c.Length];
+        double[] cf = new double[c.Length], of = new double[c.Length];
+        long candidateCells = 0;
+        foreach (var source in sources) Add(source);
         // Stable packet order is independent of caller order. Sources are never
         // merged by cell or averaged into an invented single birth event.
         packets = packets.OrderBy(p => p.Cell).ThenBy(p => p.Patch).ToList();
@@ -144,16 +206,18 @@ public sealed class RiftMaterialRaster
                 throw new ArithmeticException("Unresolved material coverage; no clipping or renormalization.");
         return new(side, width, length, km, periodic, time, patches, packets, c, o, q, cf, of);
 
-        void Add(RiftPlacement placement, string material, int source, int flank, double thickness,
-            double meanAge, double expectedArea, Vertex[] polygon)
+        void Add(ProjectionSource source)
         {
+            string id = source.Id, material = source.Material;
+            int origin = source.Origin, flank = source.Flank;
+            double thickness = source.Thickness, meanAge = source.MeanAge, expectedArea = source.Area;
+            Vertex[] polygon = source.Vertices;
             if (!(expectedArea > 0) || !double.IsFinite(expectedArea) || polygon.Any(p =>
                 !double.IsFinite(p.X) || !double.IsFinite(p.Z) || !double.IsFinite(p.Age) || p.Age < 0))
                 throw new ArithmeticException("Invalid material polygon.");
             int patchId = patches.Count;
             if (patchId >= 8192) throw new ArgumentException("Exceeded patch budget.");
-            string id = FormattableString.Invariant($"{placement.Identity}/{material}/{source}/{flank}");
-            patches.Add(new(id, placement.History.Checksum, material, source, flank, thickness, expectedArea, meanAge,
+            patches.Add(new(id, source.HistoryChecksum, material, origin, flank, thickness, expectedArea, meanAge,
                 Array.AsReadOnly(polygon.Select(v => new RiftSourceVertex(v.X, v.Z, v.Age)).ToArray())));
             double minX = polygon.Min(v => v.X), maxX = polygon.Max(v => v.X);
             double minZ = polygon.Min(v => v.Z), maxZ = polygon.Max(v => v.Z);

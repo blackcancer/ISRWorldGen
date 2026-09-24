@@ -1,0 +1,32 @@
+{
+  "sourceCommit": "f348201209e446f176dbe02112f07247e50da547",
+  "fixtures": {
+    "axial": {
+      "continental-thickness.f64le": "647a08df4b92497c83c70b71094281a55449a93e4202790dd193b6c97faa55e0",
+      "oceanic-thickness.f64le": "cdd988d62c81af1e521f2adcfda7079a0ee3c84b20e069b3422e16903ccc5524",
+      "age-moment.f64le": "0d7050f3b8dd04d8c02b6ba34775eefd786af39da05cb1dd664d949d7e96f857",
+      "continental-fraction.f64le": "7c64f62286add1636a5d892a7eb4194e29a0cb44cca9aacaab94832e88b0c6b2",
+      "ocean-fraction.f64le": "80c86dfcd36849447f3779953549690c82144d7e5920b0976f0eab0b64bed827",
+      "packets.json": "80d32874831c4bf1208fffcbeb4d370b2bc3a782141ee5424ffac8fb31dad387",
+      "geometry.json": "46d337578c46d9f1fcae09fe34d274844fcef10b391b42785eb7cc5fc2aabb11"
+    },
+    "oblique": {
+      "continental-thickness.f64le": "f29a0a8f63fc0204b5365639f9d3a123bede2883f471806cdc395080d6a20247",
+      "oceanic-thickness.f64le": "b1281b360589a29b13e0970754b8a96ac9054cbb96e45a509154840223822baa",
+      "age-moment.f64le": "1b0fe5de54dad3aead979163253cab5688ee412a5439e03bbe464177b1a9943b",
+      "continental-fraction.f64le": "0437eee8e7e3367f692b27d6e42c5463231972ae517db0adab2cac1fbfe6a1ab",
+      "ocean-fraction.f64le": "1cf0178994fad877ddd3be2962f18009e1f5a949305a11aeea5e84212be5438e",
+      "packets.json": "1263bcb747f419b83b6197b8b684310f28a8a7dd8d1b4e498b28ef00a05b3fc4",
+      "geometry.json": "a0aa166d0041dc26ab28107228c8fa8f58c51c59a1f191555def4a0feb0c7436"
+    },
+    "periodic": {
+      "continental-thickness.f64le": "ba337bdfb7b0f7cee846c13031cb2fb3345607d564eedc4b4f5e3d098d1f8b0e",
+      "oceanic-thickness.f64le": "f7f5b7d65b4bf821f915cac0f270a459b71969cda315037679029382f3691c04",
+      "age-moment.f64le": "66d8bd63da42a85ab385760fac7a5bb61beed7592e2055a90e629caf4011a811",
+      "continental-fraction.f64le": "f488302d283790343a1d716f072a3c084e7cdf9ff830d167b99621b8202fb027",
+      "ocean-fraction.f64le": "fc90330f4fb8e64fad027c8143ef2fc5f8461d5b788a0f8718123b88a36a6201",
+      "packets.json": "1db1097d343d638c3cda34864c98dd2e30e622b61ac212e530ea614a4d8f29e8",
+      "geometry.json": "376ce88701d72cd615f704d94cb96668c64ad69f5baa665b59bb71a086f6a4f4"
+    }
+  }
+}
