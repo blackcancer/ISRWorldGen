@@ -49,6 +49,7 @@ jobs:
         with:
           name: pinned-core-toolchain-${{ github.sha }}
           path: .toolchain-artifact/
+          include-hidden-files: true
           compression-level: 0
           retention-days: 1
           if-no-files-found: error
