@@ -1,0 +1,100 @@
+name: Portable integrated relief generator
+on:
+  push:
+    branches: ['codex/integrated-relief-20260924']
+    paths: ['.github/workflows/integrated-tool.yml', 'tools/standalone-relief/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-dotnet@v4
+        with: {global-json-file: global.json}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Compile framework-dependent managed tool without a Linux apphost
+        run: dotnet publish testsrc/WorldGen.IntegratedRelief/WorldGen.IntegratedRelief.csproj -c Release -p:UseAppHost=false --self-contained false -o .local/publish
+      - name: Stage only the public runnable files and record their identity
+        shell: python
+        run: |
+          import hashlib, json, os, shutil
+          from pathlib import Path
+          root=Path('.local/tool'); root.mkdir(parents=True,exist_ok=False)
+          (root/'bin').mkdir()
+          names=['WorldGen.IntegratedRelief.dll','WorldGen.IntegratedRelief.deps.json','WorldGen.IntegratedRelief.runtimeconfig.json','ISRWorldGen.Core.dll']
+          for name in names:
+              source=Path('.local/publish')/name
+              if not source.is_file(): raise RuntimeError('Missing managed output: '+name)
+              shutil.copyfile(source,root/'bin'/name)
+          shutil.copyfile('tools/standalone-relief/LISEZ-MOI.md',root/'LISEZ-MOI.md')
+          files={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
+          manifest={'schema':'isr-relief-managed-tool-v1','sourceCommit':os.environ['GITHUB_SHA'],'runtime':'net10.0','selfContained':False,'nativeVintageStoryMod':False,'geographicAcceptance':'NOT_ACCEPTED','erosion':'NOT_RUN','sha256':files}
+          (root/'package.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: integrated-relief-tool-${{ github.sha }}
+          path: .local/tool/
+          if-no-files-found: error
+          retention-days: 30
+  run-identical-package:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix: {os: [ubuntu-latest, windows-latest]}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-dotnet@v4
+        with: {global-json-file: global.json}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/download-artifact@v4
+        with:
+          name: integrated-relief-tool-${{ github.sha }}
+          path: .local/tool
+      - name: Verify the package then actually generate without recompiling
+        shell: python
+        run: |
+          import hashlib, json, os, subprocess, sys
+          from pathlib import Path
+          root=Path('.local/tool'); proof=Path('.local/proof'); proof.mkdir(parents=True,exist_ok=False)
+          m=json.loads((root/'package.json').read_text(encoding='utf-8'))
+          if m['sourceCommit']!=os.environ['GITHUB_SHA']: raise RuntimeError('Unmatched source identity')
+          actual={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file() and p.name!='package.json'}
+          if actual!=m['sha256']: raise RuntimeError('Package files changed')
+          command=['dotnet',str(root/'bin/WorldGen.IntegratedRelief.dll')]
+          tests=subprocess.run(command+['--self-test'],capture_output=True,text=True)
+          (proof/'self-test.log').write_text(tests.stderr,encoding='utf-8')
+          (proof/'self-test.json').write_text(tests.stdout,encoding='utf-8')
+          if tests.returncode!=0: raise RuntimeError('Binary self-test failed')
+          t=json.loads(tests.stdout)
+          if t['status']!='PASS_DRIVING_AND_CORE_NOT_GEOGRAPHY' or t['passed']!=33: raise RuntimeError('Incomplete self-test')
+          world=proof/'world'
+          generation=command+['generate',str(world),'73','32','2','evolving','131072','262144']
+          result=subprocess.run(generation,capture_output=True,text=True)
+          (proof/'generation.log').write_text(result.stdout+'\n'+result.stderr,encoding='utf-8')
+          if result.returncode!=0: raise RuntimeError('Packaged generator failed')
+          check=subprocess.run([sys.executable,'tools/verify_integrated_relief.py','check',str(world)],capture_output=True,text=True)
+          (proof/'verification.log').write_text(check.stdout+'\n'+check.stderr,encoding='utf-8')
+          if check.returncode!=0: raise RuntimeError('Invalid packaged world')
+          def inventory(): return {p.relative_to(proof).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(world.rglob('*')) if p.is_file()}
+          before=inventory(); refused=subprocess.run(generation,capture_output=True,text=True)
+          if refused.returncode==0 or 'Never overwrite prior evidence.' not in refused.stderr or inventory()!=before: raise RuntimeError('Invalid overwrite refusal')
+          if list(proof.glob('world.partial-*')): raise RuntimeError('Unexpected partial output')
+          (proof/'receipt.json').write_text(json.dumps({'status':'PASS_SAME_MANAGED_PACKAGE','sourceCommit':m['sourceCommit'],'sha256':actual,'checks':33,'generatedGrid':32,'worldWidth':131072,'worldLength':262144,'preservedOnReuse':True,'nativeExitCode':refused.returncode,'nativeVintageStoryQualification':'NOT_RUN'},indent=2),encoding='utf-8')
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integrated-tool-proof-${{ matrix.os }}-${{ github.sha }}
+          path: .local/proof/
+          include-hidden-files: true
+          retention-days: 30
