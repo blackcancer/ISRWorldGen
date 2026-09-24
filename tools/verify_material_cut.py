@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Checks of executed material cuts. No terrain or automatic fracture is inferred."""
-import argparse, hashlib, json, math, subprocess
+import argparse, hashlib, json, math, subprocess, platform
 from pathlib import Path
 import verify_rift_raster as legacy
 FIXTURES=('straight','crooked-pause','periodic')
+
+# Original Windows artifact 10724266233, f3482012, checked against its SHA256.
+# Linux hashes remain in the original baseline. Only JSON newlines differ.
+WINDOWS_JSON = {'axial': {'packets.json': '42f6962ef76f32c2e29d9ee7f32681825efeef7361449618f3d207f2339743f8', 'geometry.json': 'b233f9ea877ab8cc494a5c42823379472492a53ddad5bff5f34db01df77240b8'}, 'oblique': {'packets.json': '94ca0972ccfccd1c876d4977bb888d2e8c0c2972e95dac5f8904f38da9eb6f16', 'geometry.json': 'c81911afc4e197e7f9f262817dae45bb786108c01af7b3c4f8105b0af6f46834'}, 'periodic': {'packets.json': 'fbd1b8a3426dd5db1f5464a5d550123c9f46184226b8a85c1cba079a6956c488', 'geometry.json': '86563c46ee0472c891c72ac4a5ad640a9cfd4249951f2bb1c7a31306633dfa19'}}
 
 def validate(root):
     complete=json.loads((root/'COMPLETE.json').read_text(encoding='utf-8-sig'))
@@ -12,10 +16,13 @@ def validate(root):
         raise ValueError('Incomplete topology checks')
     if (root/'INCOMPLETE.json').exists() or (root/'FAILED.json').exists():raise ValueError('Incomplete topology outputs')
 
-def verify_legacy(root):
+def verify_legacy(root, system=None):
+    system = platform.system() if system is None else system
+    if system not in ('Linux','Windows'): raise ValueError('Unqualified baseline platform')
     baseline=json.loads(Path(__file__).with_name('material_cut_legacy_baseline.json').read_text())
     for fixture,files in baseline['fixtures'].items():
         for name,digest in files.items():
+            if system=='Windows' and name.endswith('.json'): digest=WINDOWS_JSON[fixture][name]
             if hashlib.sha256((root/fixture/name).read_bytes()).hexdigest()!=digest:
                 raise ValueError('Legacy field or geometry changed: '+fixture+'/'+name)
 
@@ -30,7 +37,7 @@ def compare(root,out):
     for os in ('ubuntu-latest','windows-latest'):
         matches=list(root.glob('rift-raster-'+os+'-*'))
         if len(matches)!=1:raise ValueError('Missing platform')
-        d=matches[0];validate(d/'topology');verify_legacy(d/'worlds')
+        d=matches[0];validate(d/'topology');verify_legacy(d/'worlds', 'Windows' if os=='windows-latest' else 'Linux')
         if json.loads((d/'topology-refusal.json').read_text())['preserved'] is not True:raise ValueError('Unverified preservation')
         dirs.append(d/'topology')
     records=[]
